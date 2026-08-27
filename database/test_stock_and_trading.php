@@ -121,6 +121,34 @@ ok(inv_item_stock_ledger_id($cid, $expenseItem) === 0,
     'An item linked to an expense ledger resolves to NOTHING, not to the expense');
 ok(inv_item_stock_ledger_id($cid, $assetItem) === $stockLedger,
     'While one linked to a real stock ledger still posts where it always did');
+
+// THE JEWELLERY TWIN, which had the same fallback and NOT the same guard. Its
+// comment claimed it matched inv_item_stock_ledger_id(); it took whatever the
+// column held. A shop whose old-gold item pointed at an equity or expense
+// account had every gram it bought debited there — metal on the shelf, and not
+// a rupee of it in inventory on the balance sheet.
+require_once dirname(__DIR__) . '/app/jewellery_stock.php';
+$jwExpenseItem = ['id' => 0, 'item_type' => 'ornament', 'category' => null, 'ledger_id' => $purchaseLedger];
+$jwAssetItem = ['id' => 0, 'item_type' => 'ornament', 'category' => null, 'ledger_id' => $stockLedger];
+ok(jw_item_stock_ledger_id($cid, $jwExpenseItem) === 0,
+    'Jewellery holds the same line: an item linked to an expense resolves to NOTHING');
+ok(jw_item_stock_ledger_id($cid, $jwAssetItem) === $stockLedger,
+    '  ...and one linked to a stock ledger still resolves to it');
+
+// Both refuse the same way for the same reason, which is the point: the two
+// resolvers are twins and a rule that lives in only one of them is a rule the
+// other quietly breaks.
+$equityLedger = (int) db()->query("SELECT l.id FROM ledgers l
+    INNER JOIN ledger_groups g ON g.id = l.group_id
+    WHERE l.company_id = {$cid} AND g.master_key = 'equity' LIMIT 1")->fetchColumn();
+if ($equityLedger > 0) {
+    $equityItem = ['id' => 0, 'item_type' => 'ornament', 'category' => null, 'ledger_id' => $equityLedger];
+    ok(jw_item_stock_ledger_id($cid, $equityItem) === 0,
+        '  ...and an EQUITY ledger is refused too, which is how old gold reached Reserve & Surplus');
+} else {
+    ok(true, '  ...(no equity ledger on this fixture to try)');
+}
+
 inventory_mapping_save($cid, 'inventory_asset', $stockLedger, $userId);
 
 echo "\n3. What is already posted that way is reported, not corrected\n";

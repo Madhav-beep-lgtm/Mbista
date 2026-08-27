@@ -705,11 +705,26 @@ function jw_item_stock_ledger_id(int $companyId, array $item): int
     // inv_item_stock_ledger_id() uses. Now that a jewellery item IS an
     // inventory item, an item already wired up in the core Inventory module
     // should not need mapping a second time here.
-    if ((int) ($item['ledger_id'] ?? 0) > 0) {
-        return (int) $item['ledger_id'];
+    //
+    // WITH THE SAME NATURE CHECK, which this copy was missing. The core
+    // resolver refuses a legacy ledger that is not an asset; this one took
+    // whatever the column held. A shop whose old-gold item pointed at an
+    // equity or expense account had every gram it bought debited there --
+    // metal on the shelf, and not a rupee of it in inventory on the balance
+    // sheet. Seen in the wild: an old-gold advance debited to "Opening
+    // Balance Adjustments" under Reserve & Surplus.
+    //
+    // Returning 0 makes the caller refuse the posting and NAME the missing
+    // mapping, which is a gap somebody can see and fix. Posting to the wrong
+    // account is a gap nobody sees until the balance sheet is questioned.
+    $legacy = (int) ($item['ledger_id'] ?? 0);
+    if ($legacy <= 0) {
+        return 0;
     }
+    require_once __DIR__ . '/inventory_mapping.php';
+    $nature = inv_ledger_nature($companyId, $legacy);
 
-    return 0;
+    return ($nature === '' || $nature === 'asset') ? $legacy : 0;
 }
 
 // ---------------------------------------------------------------------------
