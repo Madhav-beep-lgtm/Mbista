@@ -539,6 +539,18 @@ document.addEventListener('DOMContentLoaded', () => {
     navParents.forEach((parent) => setNavOpen(parent, parent === chosen));
   };
 
+  // Groups nested inside another group -- Jewellery and Hospitality inside
+  // Client Accounting, and the five subject groups inside Jewellery. They
+  // accordion against their OWN siblings, not against the top level, so opening
+  // Workshop closes Trade and leaves Client Accounting exactly where it was.
+  const nestedNavParents = Array.from(document.querySelectorAll('[data-nav-parent]')).filter(
+    (parent) => parent.parentElement && parent.parentElement.closest('[data-nav-parent]')
+  );
+  const navSiblings = (parent) =>
+    nestedNavParents.filter(
+      (other) => other !== parent && other.parentElement === parent.parentElement
+    );
+
   const navRemembered = (parent) => {
     try {
       return localStorage.getItem(navStorageKey(parent)) === '1';
@@ -558,7 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
     openOnlyNav(initialNav);
 
     navParents.forEach((parent) => {
-      const toggle = parent.querySelector('[data-nav-toggle]');
+      const toggle = parent.querySelector(':scope > [data-nav-toggle]');
       if (!toggle) {
         return;
       }
@@ -577,6 +589,26 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
           openOnlyNav(parent);
         }
+      });
+    });
+
+    // A nested group opens and closes on its own, closing only its siblings.
+    // Without this its toggle was a dead link: the top-level handler skips
+    // nested parents deliberately, and nothing else was listening.
+    nestedNavParents.forEach((parent) => {
+      const toggle = parent.querySelector(':scope > [data-nav-toggle]');
+      if (!toggle) {
+        return;
+      }
+      toggle.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (document.body.classList.contains('sidebar-collapsed')) {
+          setSidebarCollapsed(false);
+        }
+        const open = !parent.classList.contains('is-open');
+        navSiblings(parent).forEach((sibling) => setNavOpen(sibling, false));
+        setNavOpen(parent, open);
       });
     });
   }

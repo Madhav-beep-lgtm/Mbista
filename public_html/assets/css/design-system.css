@@ -589,3 +589,54 @@ body.admin-layout:is(.theme-dark,.admin-dark) .admin-content :is(.notice.success
   body.admin-layout .admin-content table :is(th,td){padding:9px 10px}
 }
 .admin-profile-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:16px;align-items:start}.admin-profile-security{display:grid;gap:16px}.admin-profile-grid form{display:grid;gap:14px}.admin-self-photo{width:96px;height:96px;object-fit:cover;border:3px solid var(--ui-surface);border-radius:22px;box-shadow:0 0 0 1px var(--ui-border),var(--ui-shadow)}@media(max-width:900px){.admin-profile-grid{grid-template-columns:1fr}}
+
+/* ---------------------------------------------------------------------------
+   NESTED SIDEBAR GROUPS
+   Jewellery and Hospitality sit inside Client Accounting, and Jewellery's own
+   twenty-one links sit inside five subject groups. Three levels need to read as
+   three levels, or a reader cannot tell a group from a page.
+   --------------------------------------------------------------------------- */
+
+/* A nested group heading is quieter than a top-level one: smaller, lighter, and
+   without the gold marker, which stays the mark of the section you are IN. */
+body.admin-layout .admin-sidebar .mbw-nav-sub > a[data-nav-toggle] {
+  font-size: 13px !important;
+  opacity: .92;
+  min-height: 36px !important;
+  padding: 7px 10px !important;
+}
+body.admin-layout .admin-sidebar .mbw-nav-sub.is-open > a[data-nav-toggle] {
+  background: rgba(255, 255, 255, .12) !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+  opacity: 1;
+}
+/* Each level steps in a little less than the last. Indenting every level by the
+   same amount walks the third one off the edge of a narrow sidebar. */
+body.admin-layout .admin-sidebar .mbw-subnav .mbw-subnav {
+  margin-left: 12px !important;
+  padding-left: 8px !important;
+  border-left: 1px solid rgba(255, 255, 255, .16) !important;
+}
+body.admin-layout .admin-sidebar .mbw-subnav .mbw-subnav a {
+  min-height: 34px !important;
+  padding: 6px 10px !important;
+  font-size: 12.5px !important;
+}
+/* The caret turns to say the group is open, which is the only thing on a
+   collapsed group that says it has anything inside it. */
+body.admin-layout .admin-sidebar .mbw-nav-parent > a[data-nav-toggle] > .mbw-nav-caret {
+  margin-left: auto;
+  transition: transform .16s ease;
+}
+body.admin-layout .admin-sidebar .mbw-nav-parent.is-open > a[data-nav-toggle] > .mbw-nav-caret {
+  transform: rotate(180deg);
+}
+/* Collapsed to the icon rail there is no room for any of it, and a submenu that
+   cannot be seen must not take up height. */
+@media (min-width: 981px) {
+  body.admin-layout.sidebar-collapsed .admin-sidebar .mbw-nav-sub > a[data-nav-toggle] {
+    justify-content: center !important;
+    padding: 7px 0 !important;
+  }
+}

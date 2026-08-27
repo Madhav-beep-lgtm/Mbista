@@ -134,7 +134,7 @@ if ($headerHospitality) {
         ['reports', 'Reports', 'reports'],
         ['settings', 'Settings', 'sliders'],
     ];
-    $headerHospitalityMenu = '<div class="mbw-nav-parent' . ($headerHospitalityActive ? ' is-open' : '') . '" data-nav-parent="hospitality">'
+    $headerHospitalityMenu = '<div class="mbw-nav-parent mbw-nav-sub' . ($headerHospitalityActive ? ' is-open' : '') . '" data-nav-parent="hospitality">'
         . '<a href="#" data-nav-toggle aria-expanded="' . ($headerHospitalityActive ? 'true' : 'false') . '">'
         . icon('services') . 'Hospitality Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
     foreach ($hospLinks as [$hospView, $hospLabel, $hospIcon]) {
@@ -158,42 +158,57 @@ $headerJewelleryActive = in_array($headerScript, $headerJewelleryScripts, true);
 $headerJewelleryView = (string) ($_GET['view'] ?? '');
 $headerJewelleryMenu = '';
 if ($headerJewellery) {
-    // [script, view, label, icon] — view '' means the page's own default.
-    $jewLinks = [
-        ['jewellery.php', 'dashboard', 'Dashboard', 'dashboard'],
-        ['jewellery.php', 'rates', 'Daily Rates', 'pie'],
-        ['jewellery.php', 'items', 'Items', 'box'],
-        ['jewellery.php', 'opening', 'Opening Stock', 'journal'],
-        ['jewellery.php', 'stock', 'Stock &amp; Metal Position', 'layers'],
-        ['jewellery-trade.php', 'purchases', 'Purchases', 'box'],
-        ['jewellery-trade.php', 'sales', 'Sales', 'receipt-voucher'],
-        ['accounting-parties.php', 'directory', 'Party Master', 'users'],
-        ['jewellery-trade.php', 'bills', 'Bills &amp; Settlement', 'wallet'],
-        ['jewellery-workshop.php', 'orders', 'Orders', 'journal'],
-        // Assigning the work comes before issuing the metal, and reads that way
-        // in the menu: who is making what, then what was handed over for it.
-        ['jewellery-assign.php', '', 'Kaligad Assign', 'handshake'],
-        ['jewellery-receive.php', '', 'Kaligad Receive', 'box'],
-        ['jewellery-workshop.php', 'assignments', 'Metal Issued', 'scale'],
-        ['jewellery-workshop.php', 'delivery', 'Ready to Deliver', 'box'],
-        ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
-        ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
-        ['jewellery-reports.php', 'summary', 'Reports', 'reports'],
-        ['jewellery-aml.php', '', 'AML / goAML Reporting', 'aml'],
-        // Tagging sits next to the stock it labels, after the trade pages that
-        // create that stock and before the masters.
-        ['jewellery-tags.php', '', 'Print Tags', 'documents'],
-        ['jewellery.php', 'masters', 'Metals &amp; Units', 'scale'],
-        ['jewellery.php', 'settings', 'Settings', 'sliders'],
+    // TWENTY-ONE LINKS IN ONE COLUMN is a list nobody reads; it is scrolled
+    // past. They are gathered here into the five things a shop actually does,
+    // in the order the metal moves through it: buy and sell, hold stock, send
+    // it out to be made, read what happened, and set the shop up.
+    //
+    // [group label, group icon, [[script, view, label, icon], ...]]
+    // A group of one is not a group, so the dashboard stays a plain link above
+    // them all.
+    $jewDashboard = ['jewellery.php', 'dashboard', 'Dashboard', 'dashboard'];
+    $jewGroups = [
+        ['Trade', 'receipt-voucher', [
+            ['jewellery-trade.php', 'purchases', 'Purchases', 'box'],
+            ['jewellery-trade.php', 'sales', 'Sales', 'receipt-voucher'],
+            ['jewellery-trade.php', 'bills', 'Bills &amp; Settlement', 'wallet'],
+            ['jewellery-workshop.php', 'orders', 'Orders', 'journal'],
+        ]],
+        ['Stock', 'layers', [
+            ['jewellery.php', 'items', 'Items', 'box'],
+            ['jewellery.php', 'opening', 'Opening Stock', 'journal'],
+            ['jewellery.php', 'stock', 'Stock &amp; Metal Position', 'layers'],
+            // Tagging sits next to the stock it labels.
+            ['jewellery-tags.php', '', 'Print Tags', 'documents'],
+        ]],
+        ['Workshop', 'handshake', [
+            // Assigning the work comes before issuing the metal, and reads that
+            // way: who is making what, then what was handed over for it.
+            ['jewellery-assign.php', '', 'Kaligad Assign', 'handshake'],
+            ['jewellery-receive.php', '', 'Kaligad Receive', 'box'],
+            ['jewellery-workshop.php', 'assignments', 'Metal Issued', 'scale'],
+            ['jewellery-workshop.php', 'delivery', 'Ready to Deliver', 'box'],
+            ['jewellery-workshop.php', 'karigars', 'Kaligads', 'teams'],
+            ['jewellery-workshop.php', 'refinery', 'Refinery', 'layers'],
+        ]],
+        ['Reports', 'reports', [
+            ['jewellery-reports.php', 'summary', 'Reports', 'reports'],
+            ['jewellery-aml.php', '', 'AML / goAML Reporting', 'aml'],
+        ]],
+        ['Masters &amp; Setup', 'sliders', [
+            ['jewellery.php', 'rates', 'Daily Rates', 'pie'],
+            ['accounting-parties.php', 'directory', 'Party Master', 'users'],
+            ['jewellery.php', 'masters', 'Metals &amp; Units', 'scale'],
+            ['jewellery.php', 'settings', 'Settings', 'sliders'],
+        ]],
     ];
     // Each page's first tab is its default, so a bare URL still highlights.
     $jewDefaults = ['jewellery.php' => 'dashboard', 'jewellery-trade.php' => 'purchases',
         'jewellery-workshop.php' => 'orders', 'jewellery-reports.php' => 'summary',
         'accounting-parties.php' => 'directory'];
-    $headerJewelleryMenu = '<div class="mbw-nav-parent' . ($headerJewelleryActive ? ' is-open' : '') . '" data-nav-parent="jewellery">'
-        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '">'
-        . icon('coins') . 'Jewellery Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
-    foreach ($jewLinks as [$jewScript, $jewView, $jewLabel, $jewIcon]) {
+    // One link, and whether the page being looked at IS that link.
+    $jewLink = static function (array $entry) use ($headerScript, $headerJewelleryView, $jewDefaults): array {
+        [$jewScript, $jewView, $jewLabel, $jewIcon] = $entry;
         $jewQueryKey = $jewScript === 'accounting-parties.php' ? 'tab' : 'view';
         $jewCurrentValue = $jewQueryKey === 'tab'
             ? (string) ($_GET['tab'] ?? '')
@@ -210,10 +225,34 @@ if ($headerJewellery) {
                     && ($jewDefaults[$jewScript] ?? '') === $jewView))
         );
 
-        $headerJewelleryMenu .= '<a class="' . ($isActive ? 'is-active' : '')
+        return [$isActive, '<a class="' . ($isActive ? 'is-active' : '')
             . '" href="' . e(url(
                 'admin/' . $jewScript . '?' . $jewQueryKey . '=' . rawurlencode($jewView)
-            )) . '">' . icon($jewIcon) . $jewLabel . '</a>';
+            )) . '">' . icon($jewIcon) . $jewLabel . '</a>'];
+    };
+
+    $headerJewelleryMenu = '<div class="mbw-nav-parent mbw-nav-sub' . ($headerJewelleryActive ? ' is-open' : '') . '" data-nav-parent="jewellery">'
+        . '<a href="#" data-nav-toggle aria-expanded="' . ($headerJewelleryActive ? 'true' : 'false') . '">'
+        . icon('coins') . 'Jewellery Accounting<span class="mbw-nav-caret">' . icon('chevron') . '</span></a><div class="mbw-subnav">';
+
+    [, $jewDashboardHtml] = $jewLink($jewDashboard);
+    $headerJewelleryMenu .= $jewDashboardHtml;
+
+    foreach ($jewGroups as $groupIndex => [$groupLabel, $groupIcon, $groupEntries]) {
+        $groupHtml = '';
+        $groupHasActive = false;
+        foreach ($groupEntries as $entry) {
+            [$entryActive, $entryHtml] = $jewLink($entry);
+            $groupHasActive = $groupHasActive || $entryActive;
+            $groupHtml .= $entryHtml;
+        }
+        // The group holding the page you are on opens itself. Nothing else does,
+        // so the column stays the length of one group rather than all five.
+        $headerJewelleryMenu .= '<div class="mbw-nav-parent mbw-nav-sub' . ($groupHasActive ? ' is-open' : '')
+            . '" data-nav-parent="jewellery-' . $groupIndex . '">'
+            . '<a href="#" data-nav-toggle aria-expanded="' . ($groupHasActive ? 'true' : 'false') . '">'
+            . icon($groupIcon) . $groupLabel . '<span class="mbw-nav-caret">' . icon('chevron') . '</span></a>'
+            . '<div class="mbw-subnav">' . $groupHtml . '</div></div>';
     }
     $headerJewelleryMenu .= '</div></div>';
 }
@@ -371,8 +410,18 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </form>
             <?php endif; ?>
             <?php if ($headerIsClientBooks): ?>
-                <div class="mbw-nav-parent is-open" data-nav-parent="client-accounting">
-                    <a href="#" data-nav-toggle aria-expanded="true">
+                <?php
+                // Jewellery and Hospitality ARE client accounting -- they are the
+                // books of a client whose trade happens to be gold or food, and
+                // they only appear at all when a client's books are open. Sitting
+                // beside Client Accounting they read as separate systems, and the
+                // sidebar ran to three top-level groups where there is one
+                // subject. They are nested inside it instead.
+                $headerClientAccountingOpen = $headerJewelleryActive || $headerHospitalityActive
+                    || (bool) array_filter($headerAccountingChildren, static fn (array $c): bool => (bool) $c[3]);
+                ?>
+                <div class="mbw-nav-parent<?= $headerClientAccountingOpen ? ' is-open' : '' ?>" data-nav-parent="client-accounting">
+                    <a href="#" data-nav-toggle aria-expanded="<?= $headerClientAccountingOpen ? 'true' : 'false' ?>">
                         <?= icon('accounting') ?>Client Accounting
                         <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                     </a>
@@ -380,10 +429,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                         <?php foreach ($headerAccountingChildren as [$headerChildLabel, $headerChildUrl, $headerChildIcon, $headerChildActive]): ?>
                             <a class="<?= $headerChildActive ? 'is-active' : '' ?>" href="<?= e(url($headerChildUrl)) ?>"><?= icon($headerChildIcon) ?><?= e($headerChildLabel) ?></a>
                         <?php endforeach; ?>
+                        <?= $headerHospitality ? $headerHospitalityMenu : '' ?>
+                        <?= $headerJewellery ? $headerJewelleryMenu : '' ?>
                     </div>
                 </div>
-                <?= $headerHospitality ? $headerHospitalityMenu : '' ?>
-                <?= $headerJewellery ? $headerJewelleryMenu : '' ?>
             <?php endif; ?>
 
             <span class="admin-nav-group">Reports &amp; Controls</span>

@@ -1018,5 +1018,46 @@ ok(str_contains($selfTest, '$savedMethod = db()->query'),
 ok(str_contains($selfTest, 'REPLACE INTO settings (setting_key, setting_value) VALUES (:k, :v)')
     && str_contains($selfTest, '$savedMethod !== false'),
     '  ...and puts it back, so running the tests cannot change how a live shop posts');
+
+echo "\n20. A sidebar of twenty-one links, gathered into five\n";
+// Jewellery listed twenty-one pages in one column, beside Client Accounting
+// rather than inside it. A column that long is not read, it is scrolled past,
+// and the module reads as a separate system when it IS client accounting —
+// the books of a client whose trade happens to be gold.
+$header = (string) file_get_contents(dirname(__DIR__) . '/app/views/partials/admin_header.php');
+
+ok(str_contains($header, '$jewGroups = ['), 'The jewellery links are grouped, not listed flat');
+foreach (['Trade', 'Stock', 'Workshop', 'Reports', 'Masters &amp; Setup'] as $group) {
+    ok(str_contains($header, "['" . $group . "', "), "  ...into " . strip_tags(str_replace('&amp;', '&', $group)));
+}
+ok(!str_contains($header, '$jewLinks = ['), '  ...with the old flat list gone, not left beside them');
+ok(str_contains($header, '$jewDashboard ='),
+    'The dashboard stays a plain link — a group of one is not a group');
+
+// NESTED, and structurally so: inside the Client Accounting subnav, not merely
+// indented to look that way.
+ok(preg_match('/data-nav-parent="client-accounting".*?\$headerJewellery \? \$headerJewelleryMenu/s', $header) === 1,
+    'Jewellery Accounting is rendered INSIDE Client Accounting');
+ok(preg_match('/data-nav-parent="client-accounting".*?\$headerHospitality \? \$headerHospitalityMenu/s', $header) === 1,
+    '  ...and Hospitality with it, being the same kind of thing');
+ok(str_contains($header, 'mbw-nav-sub'), '  ...marked as a nested group so it can be styled as one');
+
+// The group holding the page opens itself, and only it.
+ok(str_contains($header, '$groupHasActive = $groupHasActive || $entryActive;'),
+    'A group knows whether the page being looked at is inside it');
+ok(str_contains($header, '$headerClientAccountingOpen = $headerJewelleryActive'),
+    'And Client Accounting opens when a jewellery page is open, or its child would be hidden');
+
+echo "\n21. The accordion reaches the nested groups\n";
+// The top-level handler skips nested parents deliberately, so without this a
+// nested group's toggle was a dead link.
+$mainJs = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/js/main.js');
+ok(str_contains($mainJs, 'nestedNavParents'), 'Nested groups are collected');
+ok(str_contains($mainJs, 'other.parentElement === parent.parentElement'),
+    '  ...and accordion against their OWN siblings, so opening Workshop leaves Client Accounting alone');
+ok(str_contains($mainJs, 'event.stopPropagation()'),
+    '  ...without the click also reaching the group they sit in');
+ok(substr_count($mainJs, ':scope > [data-nav-toggle]') >= 2,
+    'Each level binds its own toggle, not the first one it finds inside itself');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
