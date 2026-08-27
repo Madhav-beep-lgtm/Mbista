@@ -451,11 +451,43 @@ ok((int) ($oldGoldOnly['by_origin']['sale_exchange']['lines'] ?? 0) === 1,
 // The stock movement behind it agrees. Old gold coming in is typed 'purchase'
 // whichever door it came through, so Stock Summary's Purchased column and this
 // register cannot give two answers to the same question.
-$mistyped = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns
-    WHERE source_type IN ('jewellery_sale_exchange', 'jewellery_settlement')
-      AND direction = 'in' AND txn_type <> 'purchase'")->fetchColumn();
-ok($mistyped === 0, 'Every old-gold movement INTO stock is typed as a purchase'
-    . ($mistyped === 0 ? '' : " — {$mistyped} still are not"));
+//
+// Named against THIS test's own documents rather than swept for across the
+// database: a sweep for rows that should not exist passes just as happily when
+// no rows exist at all, and the sale-exchange half would have been vacuous on
+// any database whose fixtures had been cleaned up.
+$exchTxn = db()->query("SELECT txn_type, direction FROM jewellery_stock_txns
+    WHERE company_id = {$cidA} AND source_type = 'jewellery_sale_exchange' AND source_id = {$s2}")
+    ->fetch(PDO::FETCH_ASSOC);
+ok($exchTxn !== false, 'The old gold taken on the sale produced a stock movement');
+ok($exchTxn !== false && (string) $exchTxn['txn_type'] === 'purchase' && (string) $exchTxn['direction'] === 'in',
+    '  ...typed as a purchase coming in, got '
+        . ($exchTxn === false ? 'nothing' : $exchTxn['txn_type'] . '/' . $exchTxn['direction']));
+
+$advTxn = db()->query("SELECT txn_type, direction FROM jewellery_stock_txns
+    WHERE company_id = {$cidA} AND source_type = 'jewellery_settlement' AND source_id = {$adv1}")
+    ->fetch(PDO::FETCH_ASSOC);
+ok($advTxn !== false && (string) $advTxn['txn_type'] === 'purchase' && (string) $advTxn['direction'] === 'in',
+    'And so did the metal left in advance, got '
+        . ($advTxn === false ? 'nothing' : $advTxn['txn_type'] . '/' . $advTxn['direction']));
+
+// Both must reach the shared inventory ledger, which is what Stock Summary and
+// the generic stock reports actually read. A movement the jewellery ledger
+// calls a purchase and the core ledger calls an adjustment is the same fault
+// wearing a different hat.
+$unmirrored = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns t
+    LEFT JOIN inventory_transactions it ON it.jewellery_stock_txn_id = t.id
+    WHERE t.company_id = {$cidA} AND t.holder_type = 'stock' AND t.txn_type <> 'opening'
+      AND it.id IS NULL")->fetchColumn();
+ok($unmirrored === 0, 'Every own-stock movement reaches the shared inventory ledger'
+    . ($unmirrored === 0 ? '' : " — {$unmirrored} did not"));
+$disagreeing = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns t
+    INNER JOIN inventory_transactions it ON it.jewellery_stock_txn_id = t.id
+    WHERE t.company_id = {$cidA} AND t.direction = 'in'
+      AND t.source_type IN ('jewellery_sale_exchange', 'jewellery_settlement')
+      AND it.transaction_type <> 'purchase'")->fetchColumn();
+ok($disagreeing === 0, '  ...calling the old gold a purchase there too'
+    . ($disagreeing === 0 ? '' : " — {$disagreeing} disagree"));
 // Metal going the other way is deliberately NOT a sale: the shop handing gold
 // to a supplier has no bill, no customer and no VAT.
 $outAsSale = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns
