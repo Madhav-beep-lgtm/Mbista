@@ -82,6 +82,21 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
         return is_array(reset($colWidths)) ? [] : $colWidths;
     };
 
+    // PER-SHEET STYLING. A workbook of one report is one shape all through, and
+    // the options were shared across every sheet accordingly. A management pack
+    // is not: its profit-and-loss sheet, its item ranking and its payment mix
+    // each have their own columns, their own totals row and their own emphasis.
+    // A sheet named under options['sheets'] takes those over the shared ones;
+    // everything else keeps behaving exactly as it did.
+    $perSheet = (array) ($options['sheets'] ?? []);
+    $optionsFor = static function (string $name) use ($options, $perSheet): array {
+        unset($options['sheets']);
+
+        return isset($perSheet[$name]) && is_array($perSheet[$name])
+            ? $perSheet[$name] + $options
+            : $options;
+    };
+
     $usedNames = [];
     $sheetXmls = [];
     $sheetEntries = [];
@@ -106,7 +121,7 @@ function xlsx_build_sheets(array $sheets, array $colWidths = [], array $options 
         $sheetXmls['xl/worksheets/sheet' . $index . '.xml'] = xlsx_worksheet_xml(
             (array) $rows,
             $widthsFor((string) $rawName, $index - 1),
-            $options
+            $optionsFor((string) $rawName)
         );
         $sheetEntries[] = ['name' => $safeSheet, 'id' => $index];
     }

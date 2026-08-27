@@ -1096,6 +1096,33 @@ if ($view === 'sales-upload' && $salesReportExport !== '' && isset($_GET['report
     );
 }
 
+// The management pack: several readings of one period, in one workbook.
+if (($_GET['export'] ?? '') === 'pack') {
+    require_permission('hospitality', 'export');
+    require_once __DIR__ . '/../../app/hospitality_management_report.php';
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $packFrom = $clampDate(trim((string) ($_GET['from'] ?? $rangeFrom)));
+    $packTo = $clampDate(trim((string) ($_GET['to'] ?? $rangeTo)));
+    // Sections arrive as a repeated parameter from the tick boxes; none ticked
+    // means the whole pack rather than an empty file.
+    $packWanted = array_values(array_filter(array_map('strval', (array) ($_GET['section'] ?? []))));
+    $pack = hospitality_pack_build($companyId, $packFrom, $packTo, $packWanted);
+    $packBytes = hospitality_pack_xlsx($pack, [
+        'company_name' => (string) ($company['name'] ?? ''),
+        'from' => $packFrom,
+        'to' => $packTo,
+    ]);
+    log_activity('hospitality_report', $companyId, 'exported',
+        'Management pack exported (' . count($pack) . ' section(s), ' . $packFrom . ' to ' . $packTo . ').', $userId);
+    $packName = 'management-pack-' . $packFrom . '-to-' . $packTo . '.xlsx';
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $packName . '"');
+    header('Content-Length: ' . strlen($packBytes));
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    echo $packBytes;
+    exit;
+}
+
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     require_permission('hospitality', 'export');
     $reportKey = (string) ($_GET['report'] ?? 'item');
@@ -1785,6 +1812,60 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </div>
         </div>
         <p style="margin:0;color:var(--mbw-muted);font-size:12px">Generated <?= e(date('Y-m-d H:i')) ?> by <?= e((string) ($currentUser['name'] ?? '')) ?> · <?= e($company['name']) ?> · Estimated management report based on configured recipes and reference ingredient costs. No accounting or inventory entry has been posted.</p>
+    </section>
+
+    <?php require_once __DIR__ . '/../../app/hospitality_management_report.php'; ?>
+    <section class="mbw-card" data-collapsible>
+        <div class="mbw-card-head">
+            <h2><?= icon('reports') ?>Management pack</h2>
+            <div class="mbw-card-tools">
+                <a class="mbw-view-all" href="<?= e(url('admin/report-schedules.php?report_key=hospitality-pack')) ?>"><?= icon('calendar') ?>Schedule this pack</a>
+            </div>
+        </div>
+        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
+            Tick what the meeting needs. Everything ticked comes out as <strong>one workbook, one sheet per
+            section</strong> — a pack is read as a pack, and separate downloads are separate chances to be
+            looking at a different date range from the person beside you. Nothing ticked exports the lot.
+        </p>
+        <form method="get">
+            <input type="hidden" name="view" value="<?= e($view) ?>">
+            <input type="hidden" name="export" value="pack">
+            <input type="hidden" name="from" value="<?= e($rangeFrom) ?>">
+            <input type="hidden" name="to" value="<?= e($rangeTo) ?>">
+            <div class="hosp-pack-grid">
+                <?php foreach (hospitality_pack_sections() as $packKey => [$packLabel, $packWhat]): ?>
+                    <label class="hosp-pack-pick">
+                        <input type="checkbox" name="section[]" value="<?= e($packKey) ?>" checked>
+                        <span>
+                            <strong><?= e($packLabel) ?></strong>
+                            <small><?= e($packWhat) ?></small>
+                        </span>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+                <?php if ($canExport): ?>
+                    <button type="submit"><?= icon('analytics') ?>Export selected as one Excel workbook</button>
+                <?php else: ?>
+                    <span style="color:var(--mbw-muted);font-size:12.5px">Exporting needs the <strong>hospitality · export</strong> permission.</span>
+                <?php endif; ?>
+                <button type="button" class="button secondary" data-pack-all>Select all</button>
+                <button type="button" class="button secondary" data-pack-none>Select none</button>
+            </div>
+        </form>
+        <script>
+        (function () {
+            var form = document.currentScript.closest('section').querySelector('form');
+            if (!form) { return; }
+            function setAll(on) {
+                Array.prototype.forEach.call(form.querySelectorAll('input[name="section[]"]'), function (b) { b.checked = on; });
+            }
+            var all = form.querySelector('[data-pack-all]');
+            var none = form.querySelector('[data-pack-none]');
+            if (all) { all.addEventListener('click', function () { setAll(true); }); }
+            if (none) { none.addEventListener('click', function () { setAll(false); }); }
+        })();
+        </script>
     </section>
 
     <section class="mbw-kpi-grid" aria-label="Consolidated summary">

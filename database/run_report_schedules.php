@@ -48,6 +48,60 @@ foreach ($due as $schedule) {
 
     $status = '';
     try {
+        // The hospitality pack is not one of the Reports Centre's reports -- it
+        // is a workbook of several sections -- so it is built and sent on its
+        // own path and never reaches the single-report code below.
+        if ($reportKey === 'hospitality-pack') {
+            require_once __DIR__ . '/../app/hospitality_engine.php';
+            require_once __DIR__ . '/../app/hospitality_management_report.php';
+            $company = company_by_id($companyId);
+            $companyName = (string) ($company['name'] ?? 'Company');
+            $packFilters = json_decode((string) ($schedule['filters'] ?? '{}'), true) ?: [];
+            $packSections = (array) ($packFilters['sections'] ?? []);
+            $pack = hospitality_pack_build($companyId, $from, $to, $packSections);
+            $packBytes = hospitality_pack_xlsx($pack, [
+                'company_name' => $companyName, 'from' => $from, 'to' => $to,
+            ]);
+            $packTitles = [];
+            foreach ($pack as $packSection) {
+                $packTitles[] = '<li>' . e((string) $packSection['title']) . '</li>';
+            }
+            $packInner = '<p>The management pack for ' . e($companyName) . ', ' . e($from) . ' to ' . e($to)
+                . ', is attached as one workbook with a sheet for each section:</p><ul>'
+                . implode('', $packTitles) . '</ul>'
+                . '<p style="color:#64748b;font-size:12px;">Recipe costing is an estimate from configured recipes'
+                . ' and reference ingredient prices. It is not posted cost of goods sold — the posted figures are'
+                . ' on the Profit &amp; Loss sheet.</p>';
+            $packBody = function_exists('branded_email_html')
+                ? branded_email_html('Hospitality management pack', $packInner)
+                : $packInner;
+            $packResult = send_app_email((string) $schedule['recipient_email'],
+                'Management pack · ' . $companyName . ' · ' . date('d M Y', strtotime($from)) . ' - ' . date('d M Y', strtotime($to)),
+                $packBody,
+                [[
+                    'name' => 'management-pack-' . $from . '-to-' . $to . '.xlsx',
+                    'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'content' => $packBytes,
+                ]]);
+            if (!empty($packResult['ok']) && ($packResult['transport'] ?? '') === 'log') {
+                $status = 'Not sent: email is in log mode — configure SMTP in Settings > Notifications (written to storage/mail).';
+                $advance = true;
+            } elseif (!empty($packResult['ok'])) {
+                $status = 'Sent ' . date('Y-m-d H:i') . ' via ' . $packResult['transport'];
+                $advance = true;
+            } else {
+                $status = 'Failed: ' . ($packResult['error'] ?? 'unknown error');
+                $advance = false;
+            }
+            echo "#{$scheduleId} {$reportKey} -> {$schedule['recipient_email']}: {$status}
+";
+            db()->prepare('UPDATE report_schedules SET last_run_at = NOW(), last_run_status = :status'
+                    . ($advance ? ', next_run_on = :next_run' : '') . ' WHERE id = :id')
+                ->execute($advance
+                    ? ['status' => substr($status, 0, 255), 'next_run' => $nextRun, 'id' => $scheduleId]
+                    : ['status' => substr($status, 0, 255), 'id' => $scheduleId]);
+            continue;
+        }
         if (!isset($registry[$reportKey])) {
             throw new RuntimeException('Unknown report key: ' . $reportKey);
         }

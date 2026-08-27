@@ -7464,3 +7464,47 @@ body.admin-layout.sidebar-collapsed .admin-sidebar-toggle .ui-icon {
 @media (min-width: 901px) {
   body.admin-layout .admin-shell::before { content: none; }
 }
+
+/* The management pack picker: a grid of what the meeting might need, each with
+   a line saying what it answers. The description matters as much as the label
+   — "Menu items by GP ratio" and "Best and worst sellers" both sound like the
+   same report until you read what each one is for. */
+body.admin-layout .hosp-pack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+body.admin-layout .hosp-pack-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid var(--mbw-border);
+  border-radius: var(--mbw-radius);
+  background: var(--mbw-card);
+  cursor: pointer;
+}
+
+body.admin-layout .hosp-pack-pick:hover {
+  border-color: var(--mbw-primary);
+}
+
+body.admin-layout .hosp-pack-pick input[type="checkbox"] {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+
+body.admin-layout .hosp-pack-pick strong {
+  display: block;
+  font-size: 13px;
+  color: var(--mbw-heading);
+}
+
+body.admin-layout .hosp-pack-pick small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--mbw-muted);
+}

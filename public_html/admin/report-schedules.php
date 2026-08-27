@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/reports_engine.php';
 require_once __DIR__ . '/../../app/mailer.php';
+require_once __DIR__ . '/../../app/hospitality_engine.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -16,7 +17,18 @@ $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
 $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
+// The hospitality management pack schedules like any other report, but it is
+// not one of the Reports Centre's — it is a workbook of several sections. It
+// is offered here so a client can be sent it monthly without anybody
+// remembering to, which is the whole point of a management pack.
 $reportRegistry = rc_report_registry();
+if (function_exists('hospitality_enabled_for_company') && hospitality_enabled_for_company($companyId)) {
+    $reportRegistry = ['hospitality-pack' => [
+        'Hospitality management pack',
+        'Profit and loss, categories, best and worst sellers, payment mix, purchases — one workbook',
+        'reports',
+    ]] + $reportRegistry;
+}
 $reportKey = (string) ($_GET['report_key'] ?? $_GET['report'] ?? 'trial-balance');
 if (!isset($reportRegistry[$reportKey])) {
     $reportKey = array_key_first($reportRegistry) ?: 'trial-balance';
