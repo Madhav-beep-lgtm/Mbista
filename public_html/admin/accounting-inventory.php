@@ -2151,7 +2151,86 @@ $invTaskField = '<input type="hidden" name="task" value="' . e($invTask) . '">'
     . '<input type="hidden" name="view" value="' . e($invView) . '">';
 $lowOnly = (string) ($_GET['low'] ?? '') === '1';
 $isLowStock = static fn (array $item): bool => (float) $item['reorder_level'] > 0 && (float) $item['on_hand'] <= (float) $item['reorder_level'];
-$visibleItems = $lowOnly ? array_values(array_filter($items, $isLowStock)) : $items;
+
+// Finding one item among a hundred and sixty three meant reading every page.
+// Filtered in PHP rather than SQL because $items is already loaded and shared
+// with the movement forms and the BOM pickers on this page; querying again to
+// narrow a list already in memory would be a second trip for no gain.
+// SKU, name and category are picked from what the company actually has, not
+// typed. One box searching all three could not tell the reader WHICH field
+// matched, and offered no way to see what values exist -- and a category is a
+// short closed list somebody either knows or does not.
+$itemQuery = trim((string) ($_GET['q'] ?? ''));
+$itemSkuFilter = trim((string) ($_GET['sku'] ?? ''));
+$itemNameFilter = trim((string) ($_GET['item_name'] ?? ''));
+$itemCategoryFilter = trim((string) ($_GET['category'] ?? ''));
+$itemTypeFilter = (string) ($_GET['item_type'] ?? '');
+$itemStatusFilter = (string) ($_GET['item_status'] ?? '');
+$itemStockFilter = (string) ($_GET['stock'] ?? '');
+
+// The choices, from this company's own items, each listed once and in order.
+$itemSkuOptions = [];
+$itemNameOptions = [];
+$itemCategoryOptions = [];
+foreach ($items as $optionRow) {
+    $itemSkuOptions[(string) $optionRow['sku']] = true;
+    $itemNameOptions[(string) $optionRow['name']] = true;
+    if (trim((string) ($optionRow['category'] ?? '')) !== '') {
+        $itemCategoryOptions[trim((string) $optionRow['category'])] = true;
+    }
+}
+$itemSkuOptions = array_keys($itemSkuOptions);
+$itemNameOptions = array_keys($itemNameOptions);
+$itemCategoryOptions = array_keys($itemCategoryOptions);
+sort($itemSkuOptions, SORT_NATURAL | SORT_FLAG_CASE);
+sort($itemNameOptions, SORT_NATURAL | SORT_FLAG_CASE);
+sort($itemCategoryOptions, SORT_NATURAL | SORT_FLAG_CASE);
+
+$visibleItems = array_values(array_filter($items, static function (array $item) use (
+    $lowOnly, $isLowStock, $itemQuery, $itemSkuFilter, $itemNameFilter, $itemCategoryFilter,
+    $itemTypeFilter, $itemStatusFilter, $itemStockFilter
+): bool {
+    if ($lowOnly && !$isLowStock($item)) {
+        return false;
+    }
+    // Chosen from a list, so these match exactly. A dropdown that then matched
+    // loosely would return rows the reader did not pick.
+    if ($itemSkuFilter !== '' && (string) $item['sku'] !== $itemSkuFilter) {
+        return false;
+    }
+    if ($itemNameFilter !== '' && (string) $item['name'] !== $itemNameFilter) {
+        return false;
+    }
+    if ($itemCategoryFilter !== '' && trim((string) ($item['category'] ?? '')) !== $itemCategoryFilter) {
+        return false;
+    }
+    // The free-text box stays as well, for the half-remembered word that is not
+    // worth scrolling a list of a hundred to find.
+    if ($itemQuery !== '') {
+        $haystack = mb_strtolower((string) $item['sku'] . ' ' . (string) $item['name']
+            . ' ' . (string) ($item['category'] ?? ''));
+        if (!str_contains($haystack, mb_strtolower($itemQuery))) {
+            return false;
+        }
+    }
+    if ($itemTypeFilter !== '' && (string) $item['item_type'] !== $itemTypeFilter) {
+        return false;
+    }
+    if ($itemStatusFilter !== '' && (string) $item['status'] !== $itemStatusFilter) {
+        return false;
+    }
+    if ($itemStockFilter === 'in' && (float) $item['on_hand'] <= 0) {
+        return false;
+    }
+    if ($itemStockFilter === 'out' && (float) $item['on_hand'] > 0) {
+        return false;
+    }
+
+    return true;
+}));
+$itemFilterOn = $lowOnly || $itemQuery !== '' || $itemSkuFilter !== '' || $itemNameFilter !== ''
+    || $itemCategoryFilter !== '' || $itemTypeFilter !== '' || $itemStatusFilter !== ''
+    || $itemStockFilter !== '';
 // A page at a time, for two reasons rather than one. The obvious one is the
 // markup: a few thousand items is megabytes of table. The costly one is that
 // each row asks inv_item_valuation() what it is worth, and that reads the cost
@@ -2167,10 +2246,21 @@ $invPage = max(1, min($invPageCount, (int) ($_GET['page'] ?? 1)));
 $pagedItems = array_slice($visibleItems, ($invPage - 1) * $invPerPage, $invPerPage);
 // Whatever else is in the URL travels with the pager, so paging a low-stock
 // list does not quietly show everything again.
-$invPageUrl = static function (array $overrides) use ($lowOnly, $invPerPage): string {
+$invPageUrl = static function (array $overrides) use ($lowOnly, $invPerPage, $itemQuery,
+    $itemSkuFilter, $itemNameFilter, $itemCategoryFilter,
+    $itemTypeFilter, $itemStatusFilter, $itemStockFilter): string {
+    // Every filter travels with the pager. Page two of a search that quietly
+    // showed everything again would be worse than no pager at all.
     $query = array_filter([
         'low' => $lowOnly ? '1' : '',
         'per_page' => (string) $invPerPage,
+        'q' => $itemQuery,
+        'sku' => $itemSkuFilter,
+        'item_name' => $itemNameFilter,
+        'category' => $itemCategoryFilter,
+        'item_type' => $itemTypeFilter,
+        'item_status' => $itemStatusFilter,
+        'stock' => $itemStockFilter,
     ], static fn ($v): bool => (string) $v !== '');
 
     return url('admin/accounting-inventory.php?' . http_build_query(array_merge($query, $overrides)))
@@ -2199,6 +2289,57 @@ if (($_GET['opening_template'] ?? '') !== '') {
     $tplRows = opening_import_template_rows(false);
     if ((string) $_GET['opening_template'] === 'csv') { export_csv('opening-stock-template.csv', $tplRows); }
     export_xlsx('opening-stock-template.xlsx', $tplRows, 'Opening Stock');
+}
+
+// The stock summary, as a file. WHAT IS ON SCREEN GOES IN THE FILE: the same
+// filters, the same order, priced the same way. An export that quietly ignored
+// the search box would be a different report wearing the same name, and the
+// person who filtered to twelve items and got a hundred and sixty three would
+// have no way of telling which one was wrong.
+if (($_GET['export'] ?? '') !== '' && $invShows('item-stock-summary')) {
+    require_permission('inventory', 'export');
+    require_once __DIR__ . '/../../app/export_engine.php';
+    $exportFormat = in_array((string) $_GET['export'], ['csv', 'xlsx', 'print'], true)
+        ? (string) $_GET['export'] : 'csv';
+    // Priced in sweeps over the whole filtered set, the same way the table
+    // prices its page — not four statements an item.
+    $exportPriced = inv_item_valuations($companyId, $visibleItems);
+    $exportRows = [['SKU', 'Name', 'Type', 'Category', 'Method', 'Unit', 'On hand', 'Unit cost',
+        'Value at cost', 'Reorder level', 'Status']];
+    foreach ($visibleItems as $exportItem) {
+        $valuation = $exportPriced[(int) $exportItem['id']] ?? ['unit_cost' => 0.0, 'cost_value' => 0.0];
+        $exportRows[] = [
+            (string) $exportItem['sku'],
+            (string) $exportItem['name'],
+            str_replace('_', ' ', (string) $exportItem['item_type']),
+            (string) ($exportItem['category'] ?? ''),
+            str_replace('_', ' ', (string) ($exportItem['valuation_method'] ?? 'weighted_average')),
+            (string) $exportItem['unit'],
+            (float) $exportItem['on_hand'],
+            (float) $valuation['unit_cost'],
+            (float) $valuation['cost_value'],
+            (float) $exportItem['reorder_level'],
+            ucfirst((string) $exportItem['status']),
+        ];
+    }
+    // Footed before it goes out: a stock list without its total value is a list
+    // somebody adds up by hand and then disagrees with the person beside them.
+    $exportRows = export_totals_row($exportRows);
+    $exportFilters = array_filter([
+        'Search' => $itemQuery,
+        'SKU' => $itemSkuFilter,
+        'Name' => $itemNameFilter,
+        'Category' => $itemCategoryFilter,
+        'Type' => $itemTypeFilter !== '' ? str_replace('_', ' ', $itemTypeFilter) : '',
+        'Status' => $itemStatusFilter !== '' ? ucfirst($itemStatusFilter) : '',
+        'Stock' => $itemStockFilter === 'in' ? 'In stock only' : ($itemStockFilter === 'out' ? 'Nil stock only' : ''),
+        'Low stock' => $lowOnly ? 'At or below reorder level' : '',
+    ], static fn (string $v): bool => $v !== '');
+    export_dispatch($exportFormat, 'item-stock-summary-' . date('Y-m-d'), $exportRows,
+        'Item Stock Summary', [
+            'Company' => (string) ($company['name'] ?? ''),
+            'Items' => (string) count($visibleItems),
+        ] + ($exportFilters === [] ? ['Filter' => 'All items'] : $exportFilters));
 }
 
 include __DIR__ . '/../../app/views/partials/admin_header.php';
@@ -2631,8 +2772,11 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     <?php endif; ?>
 
     <?php if ($invShows('create-item')): ?>
-    <details class="feature-disclosure" id="create-item" open>
-        <summary><span><strong><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+    <dialog class="mbw-item-dialog" id="create-item" aria-label="Item">
+        <div class="mbw-item-dialog-head">
+            <h2><?= icon('services') ?><?= $editItem ? 'Edit item' : 'Create item' ?></h2>
+            <button type="button" class="button secondary" data-close-item-dialog>Close</button>
+        </div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="save_item">
@@ -2801,7 +2945,30 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <label class="workspace-span-2">Notes<textarea name="notes"><?= e($editItem['notes'] ?? '') ?></textarea></label>
             <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Save item</button><?php if ($editItem): ?> <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php')) ?>">Cancel edit</a><?php endif; ?></div>
         </form>
-    </details>
+    </dialog>
+    <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        var dialog = document.getElementById("create-item");
+        if (!dialog || typeof dialog.showModal !== "function") { return; }
+        function openItemDialog() { if (!dialog.open) { dialog.showModal(); } }
+        document.querySelectorAll("[data-open-item-dialog]").forEach(function (button) {
+            button.addEventListener("click", openItemDialog);
+        });
+        dialog.querySelectorAll("[data-close-item-dialog]").forEach(function (button) {
+            button.addEventListener("click", function () { dialog.close(); });
+        });
+        // Editing arrives as ?edit_id=... from the table, so the form has to
+        // be open already or Edit would appear to do nothing at all.
+        <?php if ($editItem): ?>openItemDialog();<?php endif; ?>
+        // Closing drops edit_id, so a refresh does not reopen a form the
+        // reader has finished with.
+        dialog.addEventListener("close", function () {
+            if (window.history && window.history.replaceState && window.location.search.indexOf("edit_id=") !== -1) {
+                window.history.replaceState({}, "", <?= json_encode(url('admin/accounting-inventory.php'), JSON_UNESCAPED_SLASHES) ?>);
+            }
+        });
+    });
+    </script>
     <?php endif; ?>
 
     <?php if ($editItem): ?>
@@ -3509,15 +3676,95 @@ $invMoveItemOptions = static function () use ($items): string {
         <h2>Item Stock Summary<?= $lowOnly ? ' — low stock only' : '' ?>
             <small style="font-weight:400;color:var(--mbw-muted,#64748b)">(<?= (int) $invTotalItems ?> item<?= $invTotalItems === 1 ? '' : 's' ?>)</small></h2>
         <div class="mbw-card-tools">
-            <?php if ($lowOnly): ?><a class="mbw-view-all" href="<?= e(url('admin/accounting-inventory.php#item-stock-summary')) ?>">Show all items</a><?php endif; ?>
+            <?php if ($itemFilterOn): ?><a class="mbw-view-all" href="<?= e(url('admin/accounting-inventory.php#item-stock-summary')) ?>">Clear filters</a><?php endif; ?>
+            <?php if (user_can_do('inventory', 'create')): ?>
+                <button type="button" class="button" data-open-item-dialog><?= icon('services') ?>New item</button>
+            <?php endif; ?>
+            <?php if (user_can_do('inventory', 'export')): ?>
+                <?php // The file carries whatever the filters left on screen. ?>
+                <a class="mbw-view-all" href="<?= e($invPageUrl(['export' => 'csv'])) ?>" aria-label="Export CSV" title="Export CSV — the filtered list"><?= icon('download') ?></a>
+                <a class="mbw-view-all" href="<?= e($invPageUrl(['export' => 'xlsx'])) ?>" aria-label="Export Excel" title="Export Excel — the filtered list"><?= icon('analytics') ?></a>
+                <a class="mbw-view-all" target="_blank" rel="noopener" href="<?= e($invPageUrl(['export' => 'print'])) ?>" aria-label="Export PDF" title="Print / PDF — the filtered list"><?= icon('documents') ?></a>
+            <?php endif; ?>
             <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=stock-valuation')) ?>">Valuation report &#8594;</a>
         </div>
     </div>
+    <?php // Finding one item among a hundred and sixty three used to mean reading
+          // every page. The filters narrow the list, the count above follows them,
+          // and the export takes whatever they left. ?>
+    <form method="get" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;padding:2px 0 14px">
+        <input type="hidden" name="view" value="<?= e($invView) ?>">
+        <?php if ($invPerPage !== 50): ?><input type="hidden" name="per_page" value="<?= (int) $invPerPage ?>"><?php endif; ?>
+        <label style="display:grid;gap:4px;flex:1 1 180px;margin:0">
+            <span style="font-size:12.5px">SKU</span>
+            <select name="sku" class="js-searchable">
+                <option value="">All SKUs</option>
+                <?php foreach ($itemSkuOptions as $skuOption): ?>
+                    <option value="<?= e($skuOption) ?>" <?= $itemSkuFilter === $skuOption ? 'selected' : '' ?>><?= e($skuOption) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label style="display:grid;gap:4px;flex:1 1 200px;margin:0">
+            <span style="font-size:12.5px">Name</span>
+            <select name="item_name" class="js-searchable">
+                <option value="">All names</option>
+                <?php foreach ($itemNameOptions as $nameOption): ?>
+                    <option value="<?= e($nameOption) ?>" <?= $itemNameFilter === $nameOption ? 'selected' : '' ?>><?= e($nameOption) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label style="display:grid;gap:4px;flex:1 1 170px;margin:0">
+            <span style="font-size:12.5px">Category</span>
+            <select name="category" class="js-searchable">
+                <option value="">All categories</option>
+                <?php foreach ($itemCategoryOptions as $categoryOption): ?>
+                    <option value="<?= e($categoryOption) ?>" <?= $itemCategoryFilter === $categoryOption ? 'selected' : '' ?>><?= e($categoryOption) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label style="display:grid;gap:4px;flex:1 1 150px;margin:0">
+            <span style="font-size:12.5px">Contains</span>
+            <input type="search" name="q" value="<?= e($itemQuery) ?>" placeholder="any word">
+        </label>
+        <label style="display:grid;gap:4px;flex:0 1 170px;margin:0">
+            <span style="font-size:12.5px">Type</span>
+            <select name="item_type">
+                <option value="">All types</option>
+                <?php foreach ($itemTypes as $typeOption): ?>
+                    <option value="<?= e($typeOption) ?>" <?= $itemTypeFilter === $typeOption ? 'selected' : '' ?>><?= e(ucwords(str_replace('_', ' ', $typeOption))) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+        <label style="display:grid;gap:4px;flex:0 1 140px;margin:0">
+            <span style="font-size:12.5px">Status</span>
+            <select name="item_status">
+                <option value="">All</option>
+                <option value="active" <?= $itemStatusFilter === 'active' ? 'selected' : '' ?>>Active</option>
+                <option value="inactive" <?= $itemStatusFilter === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+            </select>
+        </label>
+        <label style="display:grid;gap:4px;flex:0 1 160px;margin:0">
+            <span style="font-size:12.5px">Stock</span>
+            <select name="stock">
+                <option value="">Any quantity</option>
+                <option value="in" <?= $itemStockFilter === 'in' ? 'selected' : '' ?>>In stock</option>
+                <option value="out" <?= $itemStockFilter === 'out' ? 'selected' : '' ?>>Nil stock</option>
+            </select>
+        </label>
+        <label style="display:flex;gap:6px;align-items:center;margin:0 0 6px">
+            <input type="checkbox" name="low" value="1" <?= $lowOnly ? 'checked' : '' ?>>
+            <span style="font-size:12.5px">At or below reorder</span>
+        </label>
+        <button type="submit" class="button secondary">Filter</button>
+        <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php#item-stock-summary')) ?>">Clear</a>
+    </form>
     <div style="overflow-x:auto">
     <table>
         <thead><tr><th>SKU</th><th>Name</th><th>Type</th><th>Method</th><th>Unit</th><th class="is-numeric">On hand</th><th class="is-numeric">Unit cost</th><th class="is-numeric">Value at cost</th><th class="is-numeric">Reorder</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
-            <?php if ($visibleItems === []): ?><tr><td colspan="11"><?= $lowOnly ? 'No items are at or below their reorder level.' : 'No items yet.' ?></td></tr><?php endif; ?>
+            <?php if ($visibleItems === []): ?><tr><td colspan="11"><?= $itemFilterOn
+                ? 'No item matches these filters. Clear them to see the rest.'
+                : 'No items yet.' ?></td></tr><?php endif; ?>
             <?php // Priced for the whole page in three sweeps, not four statements
                   // a row — same arithmetic, see inv_item_valuations().
                   $pagedPriced = inv_item_valuations($companyId, $pagedItems); ?>

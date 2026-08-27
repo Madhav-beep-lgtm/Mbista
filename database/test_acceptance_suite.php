@@ -9,6 +9,12 @@ declare(strict_types=1);
  */
 
 require __DIR__ . '/../app/bootstrap.php';
+
+// These assertions are about the PERPETUAL postings, so the suite says so
+// rather than reading whatever the database happens to be set to -- and
+// hands the setting back untouched when it finishes.
+require_once __DIR__ . '/test_support_method.php';
+test_pin_inventory_method('perpetual');
 require_once __DIR__ . '/../app/fixed_asset_engine.php';
 require __DIR__ . '/../app/reports_engine.php';
 

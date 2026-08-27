@@ -7592,3 +7592,40 @@ body.admin-layout .hosp-pack-mark label {
     .hosp-pack-dialog-head { padding: 12px; }
     .hosp-pack-dialog-body { padding: 12px; }
 }
+
+/* The item form as a dialog. It used to be a disclosure panel that pushed the
+   whole page down when opened; the table it is opened FROM is what the reader
+   wants to still be looking at. */
+.mbw-item-dialog {
+    width: min(1080px, 94vw);
+    max-height: 90vh;
+    padding: 0;
+    border: 1px solid var(--mbw-border);
+    border-radius: 14px;
+    background: var(--mbw-card);
+    color: var(--mbw-text);
+    overflow: hidden;
+}
+.mbw-item-dialog::backdrop { background: rgba(10, 20, 35, .55); }
+.mbw-item-dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--mbw-border);
+    background: var(--mbw-soft, transparent);
+}
+.mbw-item-dialog-head h2 { margin: 0; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+.mbw-item-dialog > form {
+    /* The head stays put and the fields scroll under it, so Save is never
+       pushed off the bottom of a long form on a short screen. */
+    padding: 18px 20px 22px;
+    max-height: calc(90vh - 62px);
+    overflow: auto;
+}
+@media (max-width: 640px) {
+    .mbw-item-dialog { width: 96vw; }
+    .mbw-item-dialog-head { padding: 12px; }
+    .mbw-item-dialog > form { padding: 14px 12px 18px; }
+}

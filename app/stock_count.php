@@ -385,11 +385,24 @@ function sc_post_one(int $companyId, ?int $fiscalYearId, array $count, array $it
     // Throws MAP_MISSING when the ledgers are not set; the caller rolls the
     // whole item back rather than moving stock whose cost lands nowhere.
     $voucherId = inv_post_movement_voucher($companyId, $fiscalYearId, $txnId, $type, $item, $direction, $value, $countDate, $userId);
-    if ($voucherId <= 0) {
+    // NO VOUCHER IS THE RIGHT ANSWER UNDER THE PERIODIC SYSTEM. There, a stock
+    // count moves quantity and nothing else: the ledger carries no running stock
+    // figure to correct, and the difference is caught at the year end when what
+    // is on the shelf is counted and valued. Treating that as a failure refused
+    // the count altogether and left the shelf figure wrong -- which is the one
+    // thing a stock count exists to put right.
+    //
+    // Under perpetual it still is a failure: there the ledger DOES carry stock,
+    // so a movement that reached no account has left the books and the shelf
+    // disagreeing with nothing said.
+    require_once __DIR__ . '/inventory_valuation.php';
+    if ($voucherId <= 0 && inv_accounting_method() !== 'periodic') {
         throw new RuntimeException('no accounting entry could be raised for this difference');
     }
-    db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
-        ->execute(['vid' => $voucherId, 'id' => $txnId, 'cid' => $companyId]);
+    if ($voucherId > 0) {
+        db()->prepare('UPDATE inventory_transactions SET voucher_id = :vid WHERE id = :id AND company_id = :cid')
+            ->execute(['vid' => $voucherId, 'id' => $txnId, 'cid' => $companyId]);
+    }
 
     // Written-down stock leaving must carry its share of the allowance out with
     // it, exactly as it does on a sale (IAS 2.34).

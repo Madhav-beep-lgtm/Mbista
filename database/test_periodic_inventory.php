@@ -150,10 +150,25 @@ with_method('perpetual', static function (): void {
         'And a sale still posts its own cost of sales');
 });
 
+// A TEST MUST NOT DESTROY A LIVE SETTING. This deleted the row outright to
+// prove the default, and it ran against the real database -- so a shop that
+// had switched itself to periodic was silently put back to perpetual the next
+// time anybody ran the suite. Nothing errored; the books simply started
+// posting the other way again. The row is now taken away, the default read,
+// and the row put back exactly as it was found.
+$savedMethod = db()->query("SELECT setting_value FROM settings WHERE setting_key = 'inventory_accounting'")
+    ->fetchColumn();
 db()->exec("DELETE FROM settings WHERE setting_key = 'inventory_accounting'");
 setting('inventory_accounting', '', true);
 ok(inv_accounting_method() === 'perpetual',
     'With no setting saved at all, the books stay on the method they were already keeping');
+if ($savedMethod !== false) {
+    db()->prepare('REPLACE INTO settings (setting_key, setting_value) VALUES (:k, :v)')
+        ->execute(['k' => 'inventory_accounting', 'v' => (string) $savedMethod]);
+    setting('inventory_accounting', '', true);
+}
+ok($savedMethod === false || inv_accounting_method() === (string) $savedMethod,
+    '  ...and whatever this database was set to is put back, not quietly reset');
 
 echo "\n5. The purposes a movement needs mapped follow the method\n";
 with_method('periodic', static function (): void {
@@ -925,5 +940,83 @@ ok(str_contains($invPage, 'inv_resolve_mapping($companyId, $methodPurpose)'),
 $converter = (string) file_get_contents(dirname(__DIR__) . '/deploy/convert-to-periodic.php');
 ok(str_contains($converter, 'Inventory'),
     'The converter points at the screen that actually carries the switch');
+
+echo "\n16. Finding an item among a hundred and sixty three\n";
+// The stock summary had one filter — low stock — and no export. A shop with a
+// few hundred items had to read every page to find one, and could not take the
+// list anywhere.
+$invPage = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php');
+foreach (['q' => 'a search box', 'item_type' => 'a type filter',
+    'item_status' => 'a status filter', 'stock' => 'an in-stock filter'] as $param => $what) {
+    ok(str_contains($invPage, 'name="' . $param . '"'), 'The stock summary offers ' . $what);
+}
+ok(str_contains($invPage, '$itemFilterOn'),
+    '  ...and says so when a filter is on, rather than showing a short list with no explanation');
+
+// THE FILTERS MUST TRAVEL WITH THE PAGER. Page two of a search that quietly
+// showed everything again is worse than no pager at all.
+ok(str_contains($invPage, "'q' => \$itemQuery,")
+    && str_contains($invPage, "'item_type' => \$itemTypeFilter,"),
+    'The pager carries the filters, so page two is still the search');
+
+// AND WITH THE EXPORT. A file that ignored the search box would be a different
+// report wearing the same name.
+ok(str_contains($invPage, "export_dispatch(\$exportFormat"), 'The list can be exported');
+ok(str_contains($invPage, 'inv_item_valuations($companyId, $visibleItems)'),
+    '  ...of the FILTERED items, priced the same way the table prices them');
+ok(str_contains($invPage, 'export_totals_row($exportRows)'),
+    '  ...and footed, so nobody adds a stock value up by hand');
+ok(str_contains($invPage, "require_permission('inventory', 'export')"),
+    '  ...behind the export right');
+
+echo "\n17. The item form opens over the page, not underneath it\n";
+// It was a disclosure panel: opening it pushed the table the reader was looking
+// at down the page, and editing an item scrolled them away from the row they
+// had just clicked.
+ok(str_contains($invPage, '<dialog class="mbw-item-dialog" id="create-item"'),
+    'Create item is a dialog');
+ok(str_contains($invPage, 'data-open-item-dialog'), '  ...opened by a New item button');
+ok(str_contains($invPage, '<?php if ($editItem): ?>openItemDialog();'),
+    '  ...and opened automatically when the table asks to edit a row, or Edit would do nothing');
+ok(!str_contains($invPage, '<details class="feature-disclosure" id="create-item"'),
+    '  ...with the old panel gone rather than left behind beside it');
+$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/portal.css');
+ok(str_contains($portalCss, '.mbw-item-dialog'), 'And it is styled');
+ok(str_contains($portalCss, '.mbw-item-dialog > form'),
+    '  ...with the fields scrolling under a fixed head, so Save is never pushed off a short screen');
+
+echo "\n18. SKU, name and category are picked, not typed\n";
+// One box searching all three could not say WHICH field matched, and offered no
+// way to see what values exist. A category especially is a short closed list
+// somebody either knows or does not.
+$invPage = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php');
+foreach (['sku' => 'SKU', 'item_name' => 'Name', 'category' => 'Category'] as $field => $label) {
+    ok(preg_match('/<select name="' . $field . '" class="js-searchable">/', $invPage) === 1,
+        $label . ' is a searchable dropdown, filled from what the company actually has');
+}
+ok(str_contains($invPage, '$itemSkuOptions = array_keys($itemSkuOptions);'),
+    '  ...listed once each and in order, not once per item');
+ok(str_contains($invPage, "(string) \$item['sku'] !== \$itemSkuFilter"),
+    'A picked value matches EXACTLY — a dropdown that then matched loosely would return rows nobody chose');
+ok(str_contains($invPage, 'name="q"'),
+    'And the free-text box stays, for the half-remembered word');
+
+// Everything the reader narrowed by has to survive paging and exporting.
+foreach (["'sku' => \$itemSkuFilter", "'item_name' => \$itemNameFilter", "'category' => \$itemCategoryFilter"] as $carried) {
+    ok(str_contains($invPage, $carried), '  ...carried by the pager: ' . trim(explode('=>', $carried)[0], "' "));
+}
+ok(str_contains($invPage, "'Category' => \$itemCategoryFilter,"),
+    'And named in the exported file, so a filtered list says what it was filtered by');
+
+echo "\n19. Switching the system does not lose it again\n";
+// A test deleted this row outright to prove the default, on the real database.
+// A shop that had switched to periodic was put back to perpetual the next time
+// anybody ran the suite — silently, with nothing erroring.
+$selfTest = (string) file_get_contents(__FILE__);
+ok(str_contains($selfTest, '$savedMethod = db()->query'),
+    'This suite reads the saved method before it takes it away');
+ok(str_contains($selfTest, 'REPLACE INTO settings (setting_key, setting_value) VALUES (:k, :v)')
+    && str_contains($selfTest, '$savedMethod !== false'),
+    '  ...and puts it back, so running the tests cannot change how a live shop posts');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

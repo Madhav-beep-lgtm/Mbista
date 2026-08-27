@@ -17,6 +17,12 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { exit('CLI only.'); }
 $root = dirname(__DIR__);
 require $root . '/app/bootstrap.php';
+
+// Jewellery posts its own vouchers, and these assertions are about the
+// PERPETUAL ones -- stock debited on a purchase, cost of sales on a sale.
+// Said out loud rather than read off whatever the database is set to.
+require_once __DIR__ . '/test_support_method.php';
+test_pin_inventory_method('perpetual');
 require_once $root . '/app/accounting_module_repair.php';
 require_once $root . '/app/jewellery_reports.php';
 require_once $root . '/app/jewellery_assign.php';
