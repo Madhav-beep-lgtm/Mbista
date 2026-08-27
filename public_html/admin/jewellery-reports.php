@@ -126,10 +126,11 @@ if (isset($_GET['export']) && $canExport) {
         );
     }
     if ($view === 'purchases') {
-        $data = [['Date', 'Purchase no', 'Party', 'Source', 'Item', 'Purity', 'Pieces', 'Gross wt', 'Fine wt',
-            'Rate', 'Metal', 'Making', 'Stone / diamond', 'VAT', 'Landed cost']];
+        $data = [['Date', 'Document', 'Party', 'Source', 'How it came in', 'Item', 'Purity', 'Pieces',
+            'Gross wt', 'Fine wt', 'Rate', 'Metal', 'Making', 'Stone / diamond', 'VAT', 'Landed cost']];
         foreach (jw_report_purchase_detail($companyId, $from, $to)['rows'] as $r) {
-            $data[] = [$r['purchase_date'], $r['purchase_no'], $r['party_label'], $r['source'], $r['item_code'],
+            $data[] = [$r['purchase_date'], $r['purchase_no'], $r['party_label'], $r['source'],
+                $r['origin_label'], $r['item_code'],
                 $r['purity_code'], $r['qty_pieces'], $r['gross_weight'], $r['fine_weight'], $r['rate'],
                 $r['metal_amount'], $r['making_amount'], $r['stone_side'], $r['vat_amount'], $r['stock_amount']];
         }
@@ -759,19 +760,61 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
 
 <?php elseif ($view === 'purchases'): ?>
     <?php $report = jw_report_purchase_detail($companyId, $from, $to); ?>
+    <?php
+    // Old gold reaches the shop by three doors and all three are purchases. The
+    // rows are marked rather than merged: an old-gold leg carries no supplier
+    // invoice and no input VAT, so a single blended total would misstate the
+    // VAT-bearing figure.
+    $originLabels = [
+        'invoice' => 'Purchase bills',
+        'sale_exchange' => 'Old gold on a sale',
+        'settlement' => 'Old gold in settlement or advance',
+    ];
+    ?>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Purchase Detailed (<?= count($report['rows']) ?> lines)</h2></div>
+        <?php if (count($report['by_origin']) > 1): ?>
+            <div style="overflow-x:auto;margin-bottom:12px"><table>
+                <thead><tr><th>Metal taken in</th><th class="is-numeric">Lines</th><th class="is-numeric">Fine wt</th><th class="is-numeric">Value</th><th class="is-numeric">VAT</th></tr></thead>
+                <tbody>
+                    <?php foreach ($originLabels as $originKey => $originLabel): ?>
+                        <?php if (!isset($report['by_origin'][$originKey])) { continue; } ?>
+                        <?php $set = $report['by_origin'][$originKey]; ?>
+                        <tr>
+                            <td><?= e($originLabel) ?></td>
+                            <td class="is-numeric"><?= (int) $set['lines'] ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $set['fine_weight'], 4) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $set['stock_amount']) ?></td>
+                            <td class="is-numeric"><?= $fmt((float) $set['vat_amount']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+                <tfoot><tr>
+                    <th>All metal taken in</th>
+                    <th class="is-numeric"><?= (int) $report['totals']['lines'] ?></th>
+                    <th class="is-numeric"><?= $fmt((float) $report['totals']['fine_weight'], 4) ?></th>
+                    <th class="is-numeric"><?= $fmt((float) $report['totals']['stock_amount']) ?></th>
+                    <th class="is-numeric"><?= $fmt((float) $report['totals']['vat_amount']) ?></th>
+                </tr></tfoot>
+            </table></div>
+            <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12px">
+                Old gold bought over the counter carries no supplier invoice and no input VAT, which is why it is
+                shown beside the purchase bills rather than added into them.
+            </p>
+        <?php endif; ?>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>Date</th><th>Purchase</th><th>Party</th><th>Source</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">Landed cost</th></tr></thead>
+            <thead><tr><th>Date</th><th>Document</th><th>Party</th><th>How it came in</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">Landed cost</th></tr></thead>
             <tbody>
                 <?php [$purchasePageRows, $purchaseRptPage, $purchaseRptCount] = $reportSlice($report['rows']); ?>
-                <?php if ($purchasePageRows === []): ?><tr><td colspan="14">No posted purchases in this period.</td></tr><?php endif; ?>
+                <?php if ($purchasePageRows === []): ?><tr><td colspan="14">No metal taken in over this period.</td></tr><?php endif; ?>
                 <?php foreach ($purchasePageRows as $r): ?>
                     <tr>
                         <td><?= e(app_date((string) $r['purchase_date'])) ?></td>
                         <td><?= e($r['purchase_no']) ?></td>
                         <td><?= e($r['party_label']) ?></td>
-                        <td><?= (string) $r['source'] === 'customer_old_gold' ? '<span class="mbw-pill tone-amber">Old gold</span>' : 'Supplier' ?></td>
+                        <td><?= (string) $r['origin'] === 'invoice' && (string) $r['source'] !== 'customer_old_gold'
+                            ? 'Purchase bill'
+                            : '<span class="mbw-pill tone-amber">' . e((string) $r['origin_label']) . '</span>' ?></td>
                         <td><?= e($r['item_code']) ?></td>
                         <td><?= e($r['purity_code']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['gross_weight'], 4) ?></td>

@@ -370,8 +370,97 @@ ok(near($salesReport['totals']['revenue'], 800000.0 + 20000.0 + 320000.0), 'Sale
 ok(near($salesReport['totals']['vat_amount'], 2600.0), 'VAT is reported separately from revenue');
 ok($salesReport['totals']['gross_profit'] < $salesReport['totals']['revenue'], 'Gross profit is revenue less COGS');
 
+// An old-gold ADVANCE: the customer leaves metal with the shop before any bill
+// exists. The shop owns the gold from that moment, so it is a purchase then --
+// not later, when a sale eventually absorbs it. This is the door that was
+// missing from the register entirely.
+$advBefore = jw_item_balance($cidA, $oldGold)['fine_weight'];
+$adv1 = jewellery_save_settlement($cidA, $fyA, [
+    'settlement_date' => '2026-08-20', 'party_id' => $customer, 'direction' => 'received',
+    'mode' => 'metal', 'amount' => 90000, 'is_advance' => 1,
+    'item_id' => $oldGold, 'purity_id' => $p22, 'unit_id' => $tola,
+    'gross_weight' => 1.0, 'fine_weight' => 0.916,
+], [], $userA);
+$advPost = jewellery_post_settlement($cidA, $adv1, $userA);
+ok($advPost['ok'], 'An old-gold advance posts' . ($advPost['ok'] ? '' : ' — ' . $advPost['error']));
+ok(near(jw_item_balance($cidA, $oldGold)['fine_weight'], $advBefore + 0.916),
+    '  ...and the metal is on the shelf straight away');
+
 $purchaseReport = jw_report_purchase_detail($cidA, '2026-07-16', '2027-07-15');
-ok(count($purchaseReport['rows']) === 6, 'Purchase detail lists all six purchase lines, got ' . count($purchaseReport['rows']));
+// SEVEN, not six. Six purchase lines, plus the old gold this shop took in
+// against sale 2 — which is a purchase of metal however it is worded on the
+// bill. It used to be absent from this report entirely, so a jewellery shop
+// buying most of its gold across the counter saw almost none of its buying.
+ok(count($purchaseReport['rows']) === 8,
+    'Purchase detail lists all three doors metal came in by, got ' . count($purchaseReport['rows']));
+$byOrigin = $purchaseReport['by_origin'];
+ok((int) ($byOrigin['invoice']['lines'] ?? 0) === 6, '  ...six through a purchase bill');
+ok((int) ($byOrigin['sale_exchange']['lines'] ?? 0) === 1, '  ...one handed over against a sale');
+ok((int) ($byOrigin['settlement']['lines'] ?? 0) === 1, '  ...and one left as an advance');
+ok(near((float) ($byOrigin['settlement']['fine_weight'] ?? 0), 0.916),
+    '  ...at the 0.916 fine the customer handed over');
+ok(near((float) ($byOrigin['sale_exchange']['stock_amount'] ?? 0), 320000.0),
+    '  ...at the 320,000 it was allowed against the bill');
+
+// The old-gold leg must NOT drag input VAT in with it. A customer selling a
+// chain issues no tax invoice, and a blended total would overstate the input
+// tax the shop can reclaim.
+ok(near((float) ($byOrigin['sale_exchange']['vat_amount'] ?? 0), 0.0),
+    '  ...carrying no input VAT, because a customer is not a registered vendor');
+ok(near((float) $purchaseReport['totals']['vat_amount'], (float) $byOrigin['invoice']['vat_amount']),
+    '  ...so the report total VAT is still only what the purchase bills carried');
+ok(near((float) $purchaseReport['totals']['stock_amount'],
+        (float) $byOrigin['invoice']['stock_amount'] + 320000.0 + 90000.0),
+    'And the value total is the bills plus both lots of old gold');
+
+// Counted ONCE, when the metal arrived. Applying it to a later bill moves money
+// between that customer's advance and receivable ledgers and touches no weight,
+// so it must not appear a second time.
+$settlementLines = 0;
+foreach ($purchaseReport['rows'] as $purchaseRow) {
+    if ((string) $purchaseRow['origin'] === 'settlement') {
+        $settlementLines++;
+    }
+}
+ok($settlementLines === 1, 'Metal taken in settlement is counted once, when it arrived, not again when it is used');
+
+// is_advance is only set when the settlement is against an ORDER -- see
+// jewellery_save_settlement(), where an advance without something to be an
+// advance ON is just a settlement. The register says which it was, because the
+// two mean different things to the customer even though both are gold bought.
+$flagged = (int) db()->query("SELECT COUNT(*) FROM jewellery_settlements
+    WHERE company_id = {$cidA} AND is_advance = 1")->fetchColumn();
+$labels = [];
+foreach ($purchaseReport['rows'] as $purchaseRow) {
+    if ((string) $purchaseRow['origin'] === 'settlement') {
+        $labels[] = (string) $purchaseRow['origin_label'];
+    }
+}
+ok($labels === [$flagged > 0 ? 'Old gold advance' : 'Old gold in settlement'],
+    '  ...and is labelled ' . implode(', ', $labels) . ', which is what it was');
+
+// Filtering by source still separates the two, since old gold is bought FROM
+// a customer and never from a supplier.
+$supplierOnly = jw_report_purchase_detail($cidA, '2026-07-16', '2027-07-15', ['source' => 'supplier']);
+ok(!array_key_exists('sale_exchange', $supplierOnly['by_origin']),
+    'A supplier-only filter excludes the old gold');
+$oldGoldOnly = jw_report_purchase_detail($cidA, '2026-07-16', '2027-07-15', ['source' => 'customer_old_gold']);
+ok((int) ($oldGoldOnly['by_origin']['sale_exchange']['lines'] ?? 0) === 1,
+    '  ...and an old-gold filter keeps it');
+
+// The stock movement behind it agrees. Old gold coming in is typed 'purchase'
+// whichever door it came through, so Stock Summary's Purchased column and this
+// register cannot give two answers to the same question.
+$mistyped = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns
+    WHERE source_type IN ('jewellery_sale_exchange', 'jewellery_settlement')
+      AND direction = 'in' AND txn_type <> 'purchase'")->fetchColumn();
+ok($mistyped === 0, 'Every old-gold movement INTO stock is typed as a purchase'
+    . ($mistyped === 0 ? '' : " — {$mistyped} still are not"));
+// Metal going the other way is deliberately NOT a sale: the shop handing gold
+// to a supplier has no bill, no customer and no VAT.
+$outAsSale = (int) db()->query("SELECT COUNT(*) FROM jewellery_stock_txns
+    WHERE source_type = 'jewellery_settlement' AND direction = 'out' AND txn_type = 'sale'")->fetchColumn();
+ok($outAsSale === 0, '  ...while metal paid OUT is not booked as a sale');
 
 $vat = jw_report_vat_register($cidA, '2026-07-16', '2027-07-15');
 ok(near($vat['output']['vat'], 2600.0), 'The VAT register shows 2,600 output VAT');

@@ -3859,5 +3859,32 @@ function accounting_module_repair_database(): array
             MODIFY COLUMN `export_format` ENUM('xlsx', 'csv', 'pdf') NOT NULL DEFAULT 'xlsx'");
     });
 
+    $run('Old gold taken in is a purchase, not an adjustment (migration 131)', static function (): void {
+        // The same event -- the shop buying metal from a customer -- was typed
+        // 'purchase' when it came through a bill or a sale exchange and
+        // 'adjustment' when it came through a settlement or an advance. So it
+        // appeared in the Purchased column through two doors and vanished
+        // through the third. Only metal coming IN is retyped; metal paid out to
+        // settle a payable is not a sale and is left alone.
+        if (!accounting_repair_table_exists('jewellery_stock_txns')) {
+            return;
+        }
+        db()->exec("UPDATE `jewellery_stock_txns`
+               SET `txn_type` = 'purchase'
+             WHERE `source_type` = 'jewellery_settlement'
+               AND `direction` = 'in'
+               AND `txn_type` = 'adjustment'");
+        if (accounting_repair_table_exists('inventory_transactions')
+            && accounting_repair_column_exists('inventory_transactions', 'jewellery_stock_txn_id')) {
+            db()->exec("UPDATE `inventory_transactions` `it`
+                  INNER JOIN `jewellery_stock_txns` `t` ON `t`.`id` = `it`.`jewellery_stock_txn_id`
+                   SET `it`.`transaction_type` = 'purchase'
+                 WHERE `t`.`source_type` = 'jewellery_settlement'
+                   AND `t`.`direction` = 'in'
+                   AND `t`.`txn_type` = 'purchase'
+                   AND `it`.`transaction_type` = 'adjustment'");
+        }
+    });
+
     return $errors;
 }

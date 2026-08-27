@@ -388,69 +388,276 @@ function jw_report_sales_grouped(int $companyId, string $from, string $to, strin
 // Purchases
 // ---------------------------------------------------------------------------
 
-/** Line-level purchase detail — the "Purchase Detailed" report. */
+/**
+ * Purchase detail: every gram of metal the shop took IN over the period.
+ *
+ * Old gold arrives by three different doors and only one of them used to be
+ * counted here:
+ *
+ *   invoice        a purchase document — from a supplier, or raised against a
+ *                  customer walking in to sell metal (source customer_old_gold).
+ *   sale_exchange  metal handed over against a bill. The customer pays part of
+ *                  the price in gold; the shop acquires that gold.
+ *   settlement     metal taken in settlement of a bill, or left as an ADVANCE
+ *                  before any bill exists. Same event either way: gold in.
+ *
+ * The last two are purchases of old gold in every sense that matters — the
+ * shop ends up holding metal it did not hold before, at an agreed rate, and
+ * that metal goes on to be sold or refined. Leaving them out understated the
+ * period's buying by however much old gold came over the counter, which in a
+ * jewellery shop is most of it.
+ *
+ * They are marked rather than merged. An old-gold leg carries no supplier
+ * invoice, no making charge and NO INPUT VAT — a customer selling a chain is
+ * not a registered vendor — so a total that mixed the two would misstate the
+ * VAT-bearing purchase figure. Every row says which door it came through, and
+ * the totals are footed by origin as well as overall.
+ *
+ * No double count: an advance moves metal once, when it is taken. Applying it
+ * to a later bill moves MONEY between that customer's advance and receivable
+ * ledgers, and touches no weight at all.
+ */
 function jw_report_purchase_detail(int $companyId, string $from, string $to, array $filters = []): array
 {
-    $sql = "SELECT pu.purchase_no, pu.purchase_date, pu.party_id, pu.source, pu.status,
-                COALESCE(ap.name, 'Walk-in') AS party_label,
-                l.id AS line_id, l.qty_pieces, l.gross_weight, l.fine_weight, l.rate,
-                l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount,
-                l.vat_base, l.vat_rate, l.vat_amount,
-                l.allocated_adjust, l.line_total, l.stock_amount,
-                i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
-                m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
-            FROM jewellery_purchase_lines l
-            INNER JOIN jewellery_purchases pu ON pu.id = l.purchase_id
-            INNER JOIN inventory_items i ON i.id = l.item_id
-            INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
-            INNER JOIN jewellery_metals m ON m.id = jp.metal_id
-            INNER JOIN jewellery_purities p ON p.id = l.purity_id
-            INNER JOIN jewellery_units u ON u.id = l.unit_id
-            LEFT JOIN accounting_parties ap ON ap.id = pu.party_id
-            WHERE pu.company_id = :cid AND pu.purchase_date BETWEEN :from AND :to
-              AND pu.status = :status";
-    $params = ['cid' => $companyId, 'from' => $from, 'to' => $to, 'status' => (string) ($filters['status'] ?? 'posted')];
+    $status = (string) ($filters['status'] ?? 'posted');
+    $partyId = (int) ($filters['party_id'] ?? 0);
+    $metalId = (int) ($filters['metal_id'] ?? 0);
+    $source = (string) ($filters['source'] ?? '');
+    $origin = (string) ($filters['origin'] ?? '');
 
-    if (!empty($filters['party_id'])) {
-        $sql .= ' AND pu.party_id = :pid';
-        $params['pid'] = (int) $filters['party_id'];
-    }
-    if (($filters['source'] ?? '') !== '') {
-        $sql .= ' AND pu.source = :src';
-        $params['src'] = (string) $filters['source'];
-    }
-    if (!empty($filters['metal_id'])) {
-        $sql .= ' AND jp.metal_id = :mid';
-        $params['mid'] = (int) $filters['metal_id'];
-    }
-    $sql .= ' ORDER BY pu.purchase_date ASC, pu.id ASC, l.id ASC';
+    $rows = [];
 
-    $stmt = db()->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // --- 1. purchase documents ---------------------------------------------
+    if ($origin === '' || $origin === 'invoice') {
+        $sql = "SELECT pu.purchase_no, pu.purchase_date, pu.party_id, pu.source, pu.status,
+                    COALESCE(ap.name, 'Walk-in') AS party_label,
+                    l.id AS line_id, l.qty_pieces, l.gross_weight, l.fine_weight, l.rate,
+                    l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount,
+                    l.vat_base, l.vat_rate, l.vat_amount,
+                    l.allocated_adjust, l.line_total, l.stock_amount,
+                    i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
+                    m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
+                FROM jewellery_purchase_lines l
+                INNER JOIN jewellery_purchases pu ON pu.id = l.purchase_id
+                INNER JOIN inventory_items i ON i.id = l.item_id
+                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
+                INNER JOIN jewellery_purities p ON p.id = l.purity_id
+                INNER JOIN jewellery_units u ON u.id = l.unit_id
+                LEFT JOIN accounting_parties ap ON ap.id = pu.party_id
+                WHERE pu.company_id = :cid AND pu.purchase_date BETWEEN :from AND :to
+                  AND pu.status = :status";
+        $params = ['cid' => $companyId, 'from' => $from, 'to' => $to, 'status' => $status];
+        if ($partyId > 0) {
+            $sql .= ' AND pu.party_id = :pid';
+            $params['pid'] = $partyId;
+        }
+        if ($source !== '') {
+            $sql .= ' AND pu.source = :src';
+            $params['src'] = $source;
+        }
+        if ($metalId > 0) {
+            $sql .= ' AND jp.metal_id = :mid';
+            $params['mid'] = $metalId;
+        }
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row['origin'] = 'invoice';
+            $row['origin_label'] = (string) $row['source'] === 'customer_old_gold'
+                ? 'Old gold bill' : 'Purchase bill';
+            $rows[] = $row;
+        }
+    }
 
-    $totals = ['fine_weight' => 0.0, 'metal_amount' => 0.0, 'making_amount' => 0.0, 'stone_amount' => 0.0,
-        'diamond_amount' => 0.0, 'other_diamond_amount' => 0.0, 'stone_side' => 0.0,
-        'vat_amount' => 0.0, 'line_total' => 0.0, 'stock_amount' => 0.0];
+    // Old gold is bought FROM a customer, so a filter for supplier purchases
+    // excludes it and a filter for old gold is exactly what it is.
+    $wantsOldGold = $source === '' || $source === 'customer_old_gold';
+
+    // --- 2. old gold taken against a bill -----------------------------------
+    if ($wantsOldGold && ($origin === '' || $origin === 'sale_exchange')) {
+        $sql = "SELECT s.sale_no AS purchase_no, s.sale_date AS purchase_date, s.party_id, s.status,
+                    COALESCE(ap.name, 'Walk-in') AS party_label,
+                    e.id AS line_id, e.qty_pieces, e.gross_weight, e.fine_weight, e.rate, e.amount,
+                    i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
+                    m.name AS metal_name, p.code AS purity_code, u.code AS unit_code
+                FROM jewellery_sale_exchanges e
+                INNER JOIN jewellery_sales s ON s.id = e.sale_id
+                INNER JOIN inventory_items i ON i.id = e.item_id
+                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
+                INNER JOIN jewellery_purities p ON p.id = e.purity_id
+                INNER JOIN jewellery_units u ON u.id = e.unit_id
+                LEFT JOIN accounting_parties ap ON ap.id = s.party_id
+                WHERE e.company_id = :cid AND s.sale_date BETWEEN :from AND :to
+                  AND s.status = :status";
+        $params = ['cid' => $companyId, 'from' => $from, 'to' => $to, 'status' => $status];
+        if ($partyId > 0) {
+            $sql .= ' AND s.party_id = :pid';
+            $params['pid'] = $partyId;
+        }
+        if ($metalId > 0) {
+            $sql .= ' AND jp.metal_id = :mid';
+            $params['mid'] = $metalId;
+        }
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = jw_purchase_old_gold_row($row, 'sale_exchange', 'Old gold on a sale');
+        }
+    }
+
+    // --- 3. old gold taken in settlement, or left as an advance -------------
+    if ($wantsOldGold && ($origin === '' || $origin === 'settlement')) {
+        // A settlement records its metal in ONE of two shapes: a tender
+        // breakdown when the counter split the payment, or the settlement's own
+        // columns when it did not. Reading both without a guard would count a
+        // split payment twice, so each side excludes the other.
+        $common = "st.settlement_no AS purchase_no, st.settlement_date AS purchase_date, st.party_id, st.status,
+                    st.is_advance, COALESCE(ap.name, 'Walk-in') AS party_label,
+                    i.sku AS item_code, i.name AS item_name, i.category, jp.jewellery_type AS item_type,
+                    m.name AS metal_name, p.code AS purity_code, u.code AS unit_code";
+        $where = "st.company_id = :cid AND st.settlement_date BETWEEN :from AND :to
+                  AND st.status = :status AND st.direction = 'received'";
+        $params = ['cid' => $companyId, 'from' => $from, 'to' => $to, 'status' => $status];
+        if ($partyId > 0) {
+            $where .= ' AND st.party_id = :pid';
+            $params['pid'] = $partyId;
+        }
+        $metalWhere = $metalId > 0 ? ' AND jp.metal_id = :mid' : '';
+        if ($metalId > 0) {
+            $params['mid'] = $metalId;
+        }
+
+        $tenderSql = "SELECT {$common}, t.id AS line_id, 0 AS qty_pieces,
+                    t.gross_weight, t.fine_weight, t.amount,
+                    CASE WHEN t.fine_weight > 0 THEN t.amount / t.fine_weight ELSE 0 END AS rate
+                FROM jewellery_settlement_tenders t
+                INNER JOIN jewellery_settlements st ON st.id = t.settlement_id
+                INNER JOIN inventory_items i ON i.id = t.item_id
+                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
+                INNER JOIN jewellery_purities p ON p.id = t.purity_id
+                INNER JOIN jewellery_units u ON u.id = t.unit_id
+                LEFT JOIN accounting_parties ap ON ap.id = st.party_id
+                WHERE {$where} AND t.mode = 'metal'{$metalWhere}";
+        $stmt = db()->prepare($tenderSql);
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = jw_purchase_old_gold_row($row, 'settlement',
+                (int) $row['is_advance'] === 1 ? 'Old gold advance' : 'Old gold in settlement');
+        }
+
+        $plainSql = "SELECT {$common}, st.id AS line_id, 0 AS qty_pieces,
+                    st.gross_weight, st.fine_weight, st.amount,
+                    CASE WHEN st.fine_weight > 0 THEN st.amount / st.fine_weight ELSE 0 END AS rate
+                FROM jewellery_settlements st
+                INNER JOIN inventory_items i ON i.id = st.item_id
+                INNER JOIN jewellery_item_profiles jp ON jp.inventory_item_id = i.id
+                INNER JOIN jewellery_metals m ON m.id = jp.metal_id
+                INNER JOIN jewellery_purities p ON p.id = st.purity_id
+                INNER JOIN jewellery_units u ON u.id = st.unit_id
+                LEFT JOIN accounting_parties ap ON ap.id = st.party_id
+                WHERE {$where} AND st.mode = 'metal'{$metalWhere}
+                  AND NOT EXISTS (SELECT 1 FROM jewellery_settlement_tenders t2
+                        WHERE t2.settlement_id = st.id AND t2.mode = 'metal')";
+        $stmt = db()->prepare($plainSql);
+        $stmt->execute($params);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = jw_purchase_old_gold_row($row, 'settlement',
+                (int) $row['is_advance'] === 1 ? 'Old gold advance' : 'Old gold in settlement');
+        }
+    }
+
+    // One register, in date order, whichever door each line came through.
+    usort($rows, static function (array $a, array $b): int {
+        return [(string) $a['purchase_date'], (string) $a['purchase_no']]
+            <=> [(string) $b['purchase_date'], (string) $b['purchase_no']];
+    });
+
+    $blank = ['fine_weight' => 0.0, 'gross_weight' => 0.0, 'metal_amount' => 0.0, 'making_amount' => 0.0,
+        'stone_amount' => 0.0, 'diamond_amount' => 0.0, 'other_diamond_amount' => 0.0, 'stone_side' => 0.0,
+        'vat_amount' => 0.0, 'line_total' => 0.0, 'stock_amount' => 0.0, 'lines' => 0];
+    $totals = $blank;
+    $byOrigin = [];
     foreach ($rows as $index => $row) {
         $stoneSide = (float) $row['stone_amount'] + (float) $row['diamond_amount'] + (float) $row['other_diamond_amount'];
         $rows[$index]['stone_side'] = jw_round_money($stoneSide);
-        $totals['fine_weight'] += (float) $row['fine_weight'];
-        $totals['metal_amount'] += (float) $row['metal_amount'];
-        $totals['making_amount'] += (float) $row['making_amount'];
-        $totals['stone_amount'] += (float) $row['stone_amount'];
-        $totals['diamond_amount'] += (float) $row['diamond_amount'];
-        $totals['other_diamond_amount'] += (float) $row['other_diamond_amount'];
+        $key = (string) $row['origin'];
+        $byOrigin[$key] = $byOrigin[$key] ?? $blank;
+        foreach (['fine_weight', 'gross_weight', 'metal_amount', 'making_amount', 'stone_amount',
+            'diamond_amount', 'other_diamond_amount', 'vat_amount', 'line_total', 'stock_amount'] as $field) {
+            $totals[$field] += (float) $row[$field];
+            $byOrigin[$key][$field] += (float) $row[$field];
+        }
         $totals['stone_side'] += $stoneSide;
-        $totals['vat_amount'] += (float) $row['vat_amount'];
-        $totals['line_total'] += (float) $row['line_total'];
-        $totals['stock_amount'] += (float) $row['stock_amount'];
+        $byOrigin[$key]['stone_side'] += $stoneSide;
+        $totals['lines']++;
+        $byOrigin[$key]['lines']++;
     }
-    foreach ($totals as $key => $value) {
-        $totals[$key] = $key === 'fine_weight' ? jw_round_weight($value) : jw_round_money($value);
+    $round = static function (array $set): array {
+        foreach ($set as $field => $value) {
+            if ($field === 'lines') {
+                continue;
+            }
+            $set[$field] = in_array($field, ['fine_weight', 'gross_weight'], true)
+                ? jw_round_weight((float) $value) : jw_round_money((float) $value);
+        }
+
+        return $set;
+    };
+    $totals = $round($totals);
+    foreach ($byOrigin as $key => $set) {
+        $byOrigin[$key] = $round($set);
     }
 
-    return ['rows' => $rows, 'totals' => $totals];
+    return ['rows' => $rows, 'totals' => $totals, 'by_origin' => $byOrigin];
+}
+
+/**
+ * One old-gold acquisition in the shape a purchase line has.
+ *
+ * Everything a purchase invoice carries and old gold does not is explicitly
+ * nought rather than absent — most of all the VAT, which must stay out of the
+ * input-tax total. A customer selling a chain issues no tax invoice.
+ */
+function jw_purchase_old_gold_row(array $row, string $origin, string $label): array
+{
+    $amount = jw_round_money((float) $row['amount']);
+
+    return [
+        'purchase_no' => (string) $row['purchase_no'],
+        'purchase_date' => (string) $row['purchase_date'],
+        'party_id' => $row['party_id'] ?? null,
+        'party_label' => (string) $row['party_label'],
+        'source' => 'customer_old_gold',
+        'status' => (string) $row['status'],
+        'origin' => $origin,
+        'origin_label' => $label,
+        'line_id' => $row['line_id'] ?? null,
+        'qty_pieces' => (float) ($row['qty_pieces'] ?? 0),
+        'gross_weight' => (float) $row['gross_weight'],
+        'fine_weight' => (float) $row['fine_weight'],
+        'rate' => (float) ($row['rate'] ?? 0),
+        'metal_amount' => $amount,
+        'making_amount' => 0.0,
+        'stone_amount' => 0.0,
+        'diamond_amount' => 0.0,
+        'other_diamond_amount' => 0.0,
+        'vat_base' => 0.0,
+        'vat_rate' => 0.0,
+        'vat_amount' => 0.0,
+        'allocated_adjust' => 0.0,
+        'line_total' => $amount,
+        'stock_amount' => $amount,
+        'item_code' => (string) $row['item_code'],
+        'item_name' => (string) $row['item_name'],
+        'category' => $row['category'] ?? null,
+        'item_type' => $row['item_type'] ?? null,
+        'metal_name' => (string) $row['metal_name'],
+        'purity_code' => (string) $row['purity_code'],
+        'unit_code' => (string) $row['unit_code'],
+    ];
 }
 
 // ---------------------------------------------------------------------------

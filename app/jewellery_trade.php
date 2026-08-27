@@ -3555,7 +3555,18 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
                 }
                 $tenderTxnId = jw_record_stock_txn($companyId, [
                     'item_id' => (int) $tenderRow['item_id'],
-                    'txn_type' => 'adjustment',
+                    // Metal coming IN is a purchase of old gold, and is typed as
+                    // one so the stock ledger, Stock Summary and the purchase
+                    // register all call it the same thing. It used to be an
+                    // 'adjustment', which is what you record when you do not know
+                    // what happened -- and here we do.
+                    //
+                    // Metal going OUT is NOT the mirror image. The shop handing
+                    // gold over to settle a payable has not sold anything: there
+                    // is no bill, no customer and no VAT. Typing it 'sale' would
+                    // put it in the sales register, so it stays an adjustment
+                    // until there is a movement type that actually describes it.
+                    'txn_type' => $direction === 'paid' ? 'adjustment' : 'purchase',
                     'direction' => $direction === 'paid' ? 'out' : 'in',
                     'txn_date' => (string) $settlement['settlement_date'],
                     'ref_no' => (string) $settlement['settlement_no'],
@@ -3581,7 +3592,9 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
         } elseif ($mode === 'metal') {
             $stockTxnId = jw_record_stock_txn($companyId, [
                 'item_id' => (int) $settlement['item_id'],
-                'txn_type' => 'adjustment',
+                // See the tender path above: gold in is a purchase, gold out is
+                // not a sale.
+                'txn_type' => $direction === 'paid' ? 'adjustment' : 'purchase',
                 'direction' => $direction === 'paid' ? 'out' : 'in',
                 'txn_date' => (string) $settlement['settlement_date'],
                 'ref_no' => (string) $settlement['settlement_no'],
