@@ -1122,9 +1122,28 @@ function jewellery_purchase_line_rows(int $companyId, int $purchaseId): array
 
 function jewellery_purchases_list(int $companyId, array $filters = []): array
 {
-    $sql = 'SELECT p.*, ap.name AS party_name FROM jewellery_purchases p
+    // The lines come with the header, summarised. A purchase register that
+    // shows only a total tells the reader nothing they came to find out: what
+    // was bought, how much it weighed and at what purity. Gathered in the same
+    // query rather than one lookup per row, because a hundred purchases would
+    // otherwise be a hundred extra queries to say the same thing.
+    $sql = "SELECT p.*, ap.name AS party_name,
+            COUNT(l.id) AS line_count,
+            COALESCE(SUM(l.qty_pieces), 0) AS qty_pieces,
+            COALESCE(SUM(l.gross_weight), 0) AS gross_weight,
+            COALESCE(SUM(l.fine_weight), 0) AS fine_weight,
+            GROUP_CONCAT(DISTINCT COALESCE(i.sku, '?') SEPARATOR ', ') AS item_codes,
+            GROUP_CONCAT(DISTINCT COALESCE(i.name, '') SEPARATOR ', ') AS item_names,
+            GROUP_CONCAT(DISTINCT COALESCE(pur.code, '') SEPARATOR ', ') AS purity_codes,
+            GROUP_CONCAT(DISTINCT COALESCE(m.name, '') SEPARATOR ', ') AS metal_names
+        FROM jewellery_purchases p
         LEFT JOIN accounting_parties ap ON ap.id = p.party_id
-        WHERE p.company_id = :cid';
+        LEFT JOIN jewellery_purchase_lines l ON l.purchase_id = p.id
+        LEFT JOIN inventory_items i ON i.id = l.item_id
+        LEFT JOIN jewellery_item_profiles jp ON jp.inventory_item_id = l.item_id
+        LEFT JOIN jewellery_metals m ON m.id = jp.metal_id
+        LEFT JOIN jewellery_purities pur ON pur.id = l.purity_id
+        WHERE p.company_id = :cid";
     $params = ['cid' => $companyId];
     if (($filters['from'] ?? '') !== '' && ($filters['to'] ?? '') !== '') {
         $sql .= ' AND p.purchase_date BETWEEN :from AND :to';
@@ -1150,6 +1169,9 @@ function jewellery_purchases_list(int $companyId, array $filters = []): array
             $params[$key] = $needle;
         }
     }
+    // Grouped by the primary key, so every p.* column is functionally dependent
+    // on it and ONLY_FULL_GROUP_BY has nothing to object to.
+    $sql .= ' GROUP BY p.id';
     $sql .= ' ORDER BY p.purchase_date DESC, p.id DESC LIMIT ' . max(1, min(1000, (int) ($filters['limit'] ?? 200)));
 
     $stmt = db()->prepare($sql);

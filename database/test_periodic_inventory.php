@@ -859,5 +859,51 @@ foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE com
     'fiscal_years' => 'company_id = :c', 'companies' => 'id = :c'] as $table => $where) {
     db()->prepare("DELETE FROM `{$table}` WHERE {$where}")->execute(['c' => $tbCo]);
 }
+
+echo "\n14. A purchase register that says what was bought\n";
+// The register listed a number, a date, a party and three money columns — one
+// of them headed "Metal", which held the metal VALUE and not the metal. A
+// jewellery purchase register could be read end to end without learning what
+// was bought, what it weighed, or at what purity.
+require_once dirname(__DIR__) . '/app/jewellery_trade.php';
+$plCompany = (int) db()->query("SELECT company_id FROM jewellery_purchase_lines
+    GROUP BY company_id ORDER BY COUNT(*) DESC LIMIT 1")->fetchColumn();
+if ($plCompany > 0) {
+    $listed = jewellery_purchases_list($plCompany);
+    ok($listed !== [], 'The purchase register lists its purchases (' . count($listed) . ')');
+    $first = (array) ($listed[0] ?? []);
+    foreach (['item_codes' => 'the item bought', 'purity_codes' => 'its purity',
+        'metal_names' => 'its metal', 'gross_weight' => 'the gross weight',
+        'fine_weight' => 'the fine weight', 'line_count' => 'how many lines'] as $key => $what) {
+        ok(array_key_exists($key, $first), '  ...carrying ' . $what);
+    }
+    ok((float) ($first['fine_weight'] ?? 0) > 0 || (float) ($first['gross_weight'] ?? 0) > 0,
+        '  ...with a real weight on it, not a nought');
+
+    // Gathered in ONE query. A hundred purchases must not become a hundred
+    // lookups to say what each contains.
+    $before = 0;
+    $stmt = db()->query('SHOW SESSION STATUS LIKE "Questions"');
+    $before = (int) ($stmt->fetch(PDO::FETCH_ASSOC)['Value'] ?? 0);
+    jewellery_purchases_list($plCompany);
+    $after = (int) (db()->query('SHOW SESSION STATUS LIKE "Questions"')->fetch(PDO::FETCH_ASSOC)['Value'] ?? 0);
+    ok($after - $before <= 4, 'And it costs ONE query however many purchases there are, got '
+        . ($after - $before - 2) . ' beyond the measuring');
+} else {
+    echo "  ....  no purchase lines on this database to read.\n";
+    ok(true, 'Skipped: no purchase lines');
+}
+
+// And the journal, which purchases never had. Sales could show which accounts a
+// bill touched; purchases could only be previewed as a document.
+$tradePage = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/jewellery-trade.php');
+ok(str_contains($tradePage, 'journal_purchase'), 'A purchase can now be asked for its journal entry');
+ok(str_contains($tradePage, 'jw-purchase-journal-dialog'), '  ...which opens where the list is');
+ok(str_contains($tradePage, "jewellery_preview_posting(\$companyId, 'purchase'"),
+    '  ...and a DRAFT shows the entry it would post, through the same dry run the post screen uses');
+ok(str_contains($tradePage, '>Gross wt<') && str_contains($tradePage, '>Fine wt<'),
+    'The register heads its weight columns for what they are');
+ok(str_contains($tradePage, '>Metal value<'),
+    '  ...and "Metal" now says Metal value, because that is what the figure is');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

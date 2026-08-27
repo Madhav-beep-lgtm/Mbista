@@ -540,6 +540,34 @@ if ($view === 'purchases') {
 // The journal action accepts a sale id only.  Resolving its voucher through
 // the company and source keeps the debit/credit view strictly tenant-scoped.
 $journalSaleId = $view === 'sales' ? (int) ($_GET['journal_sale'] ?? 0) : 0;
+// A purchase could be previewed as a DOCUMENT but never as a journal entry, so
+// the one question an accountant asks of a posted bill -- which accounts did
+// this touch -- had no answer on the screen that lists them. Sales have had
+// this since they were built; purchases were simply never given it.
+$journalPurchaseId = $view === 'purchases' ? (int) ($_GET['journal_purchase'] ?? 0) : 0;
+$purchaseJournal = null;
+$purchaseJournalEntries = [];
+$purchaseJournalPreview = null;
+$journalPurchase = $journalPurchaseId > 0 ? jewellery_purchase($companyId, $journalPurchaseId) : null;
+if ($journalPurchase) {
+    $pjStmt = db()->prepare("SELECT id, voucher_no, voucher_date, narration, total_amount
+        FROM vouchers WHERE company_id = :cid AND source_type = 'jewellery_purchase'
+          AND source_id = :sid AND status = 'posted' ORDER BY id DESC LIMIT 1");
+    $pjStmt->execute(['cid' => $companyId, 'sid' => $journalPurchaseId]);
+    $purchaseJournal = $pjStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($purchaseJournal) {
+        $pjEntries = db()->prepare('SELECT ve.entry_type, ve.amount, ve.memo, l.code, l.name
+            FROM voucher_entries ve INNER JOIN ledgers l ON l.id = ve.ledger_id
+            WHERE ve.voucher_id = :vid ORDER BY ve.id ASC');
+        $pjEntries->execute(['vid' => (int) $purchaseJournal['id']]);
+        $purchaseJournalEntries = $pjEntries->fetchAll(PDO::FETCH_ASSOC);
+    }
+    if (!$purchaseJournal && (string) $journalPurchase['status'] === 'draft') {
+        // The same dry-run engine the Confirm & Post screen uses, so this is a
+        // real draft journal and not an estimate of one.
+        $purchaseJournalPreview = jewellery_preview_posting($companyId, 'purchase', $journalPurchaseId);
+    }
+}
 $saleJournal = null;
 $saleJournalEntries = [];
 $saleJournalPreview = null;
@@ -1095,10 +1123,65 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             ],
         ]); ?>
 
+        <?php if ($journalPurchaseId > 0): ?>
+        <dialog id="jw-purchase-journal-dialog" aria-label="Purchase journal entry" style="width:min(760px,calc(100vw - 32px));border:0;border-radius:14px;padding:22px;box-shadow:0 18px 48px rgba(0,0,0,.28)">
+            <div style="display:flex;justify-content:space-between;gap:16px;align-items:start">
+                <div>
+                    <h2 style="margin:0">Journal entry</h2>
+                    <p style="margin:4px 0 16px;color:var(--mbw-muted,#64748b)"><?= $purchaseJournal
+                        ? 'Posted voucher ' . e((string) $purchaseJournal['voucher_no']) . ' · ' . e(app_date((string) $purchaseJournal['voucher_date']))
+                        : 'Draft posting preview — nothing has been entered in the books yet.' ?></p>
+                </div>
+                <button type="button" class="button secondary" data-jw-close-purchase-journal>Close</button>
+            </div>
+            <?php if ($purchaseJournal): ?>
+                <div style="overflow-x:auto"><table><thead><tr><th>Ledger</th><th>Memo</th><th class="is-numeric">Debit (<?= e($sym) ?>)</th><th class="is-numeric">Credit (<?= e($sym) ?>)</th></tr></thead><tbody>
+                <?php $pjDebit = 0.0; $pjCredit = 0.0; foreach ($purchaseJournalEntries as $entry): ?>
+                    <?php $isDebit = (string) $entry['entry_type'] === 'debit'; $amount = (float) $entry['amount']; $pjDebit += $isDebit ? $amount : 0; $pjCredit += $isDebit ? 0 : $amount; ?>
+                    <tr><td><?= e(trim((string) $entry['code'] . ' — ' . (string) $entry['name'])) ?></td><td><?= e((string) ($entry['memo'] ?? '')) ?></td><td class="is-numeric"><?= $isDebit ? e($fmt($amount)) : '—' ?></td><td class="is-numeric"><?= !$isDebit ? e($fmt($amount)) : '—' ?></td></tr>
+                <?php endforeach; ?>
+                </tbody><tfoot><tr><th colspan="2">Totals</th><th class="is-numeric"><?= e($fmt($pjDebit)) ?></th><th class="is-numeric"><?= e($fmt($pjCredit)) ?></th></tr><tr><td colspan="4" style="text-align:right"><strong><?= abs($pjDebit - $pjCredit) < 0.005 ? 'Balanced' : 'Difference: ' . e($sym) . e($fmt(abs($pjDebit - $pjCredit))) ?></strong></td></tr></tfoot></table></div>
+            <?php elseif ($purchaseJournalPreview && !empty($purchaseJournalPreview['ok'])): ?>
+                <div style="overflow-x:auto"><table><thead><tr><th>Ledger</th><th>Memo</th><th class="is-numeric">Debit (<?= e($sym) ?>)</th><th class="is-numeric">Credit (<?= e($sym) ?>)</th></tr></thead><tbody>
+                <?php foreach ((array) $purchaseJournalPreview['legs'] as $leg): ?>
+                    <tr><td><?= e(((string) ($leg['ledger_code'] ?? '') !== '' ? (string) $leg['ledger_code'] . ' — ' : '') . (string) ($leg['ledger_name'] ?? '')) ?></td><td><?= e((string) ($leg['memo'] ?? '')) ?></td><td class="is-numeric"><?= (string) ($leg['entry_type'] ?? '') === 'debit' ? e($fmt((float) $leg['amount'])) : '—' ?></td><td class="is-numeric"><?= (string) ($leg['entry_type'] ?? '') === 'credit' ? e($fmt((float) $leg['amount'])) : '—' ?></td></tr>
+                <?php endforeach; ?>
+                </tbody><tfoot><tr><th colspan="2">Totals</th><th class="is-numeric"><?= e($fmt((float) $purchaseJournalPreview['debit_total'])) ?></th><th class="is-numeric"><?= e($fmt((float) $purchaseJournalPreview['credit_total'])) ?></th></tr><tr><td colspan="4" style="text-align:right"><strong><?= abs((float) $purchaseJournalPreview['debit_total'] - (float) $purchaseJournalPreview['credit_total']) < 0.005 ? 'Balanced — ready to post' : 'Difference: ' . e($sym) . e($fmt(abs((float) $purchaseJournalPreview['debit_total'] - (float) $purchaseJournalPreview['credit_total']))) ?></strong></td></tr></tfoot></table></div>
+                <?php if ($canPost && abs((float) $purchaseJournalPreview['debit_total'] - (float) $purchaseJournalPreview['credit_total']) < 0.005): ?>
+                    <form method="post" style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="post_purchase"><input type="hidden" name="back_view" value="purchases"><input type="hidden" name="doc_id" value="<?= (int) $journalPurchaseId ?>"><button type="submit" class="button" data-confirm="Post this draft purchase using the journal entry shown above?">Confirm &amp; Post</button></form>
+                <?php endif; ?>
+            <?php elseif ($purchaseJournalPreview): ?>
+                <div class="notice"><strong>This draft cannot be posted:</strong> <?= e((string) ($purchaseJournalPreview['error'] ?? 'Unable to prepare a journal entry.')) ?></div>
+            <?php else: ?>
+                <div class="notice">This purchase has no journal entry. A draft has not reached the books yet; a posted one whose voucher is missing needs looking at.</div>
+            <?php endif; ?>
+        </dialog>
+        <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            var pj = document.getElementById("jw-purchase-journal-dialog");
+            if (!pj || !window.HTMLDialogElement) { return; }
+            pj.showModal();
+            pj.querySelectorAll("[data-jw-close-purchase-journal]").forEach(function (button) {
+                button.addEventListener("click", function () { pj.close(); });
+            });
+            // Closing drops the journal_purchase parameter, so a refresh or a
+            // shared link does not reopen a dialog nobody asked for.
+            pj.addEventListener("close", function () {
+                if (window.history && window.history.replaceState) {
+                    window.history.replaceState({}, "", <?= json_encode(url('admin/jewellery-trade.php?view=purchases'), JSON_UNESCAPED_SLASHES) ?>);
+                }
+            });
+        });
+        </script>
+        <?php endif; ?>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>No.</th><th>Date</th><th>Party</th><th>Source</th><th class="is-numeric">Metal</th><th class="is-numeric">VAT</th><th class="is-numeric">Total</th><th>Settlement</th><th>Status</th><th></th></tr></thead>
+            <?php // "Metal" used to head a column of money, which is why a register
+                  // of gold purchases could be read end to end without learning what
+                  // was bought or what it weighed. The figure is the metal VALUE;
+                  // the item, its purity and its weight now have columns of their own. ?>
+            <thead><tr><th>No.</th><th>Date</th><th>Party</th><th>Source</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross wt</th><th class="is-numeric">Fine wt</th><th class="is-numeric">Metal value</th><th class="is-numeric">VAT</th><th class="is-numeric">Total</th><th>Settlement</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php if ($docPageRows === []): ?><tr><td colspan="10">No purchases yet.</td></tr><?php endif; ?>
+                <?php if ($docPageRows === []): ?><tr><td colspan="14">No purchases yet.</td></tr><?php endif; ?>
                 <?php foreach ($docPageRows as $row): ?>
                     <?php $isDraft = (string) $row['status'] === 'draft'; ?>
                     <tr>
@@ -1106,6 +1189,23 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         <td><?= e(app_date((string) $row['purchase_date'])) ?></td>
                         <td><?= e((string) ($row['party_name'] ?? 'Walk-in')) ?></td>
                         <td><?= (string) $row['source'] === 'customer_old_gold' ? '<span class="mbw-pill tone-amber">Old gold</span>' : 'Supplier' ?></td>
+                        <td>
+                            <?= e((string) ($row['item_codes'] ?? '') !== '' ? $row['item_codes'] : '—') ?>
+                            <?php if ((int) ($row['line_count'] ?? 0) > 1): ?>
+                                <small style="color:var(--mbw-muted)">(<?= (int) $row['line_count'] ?> lines)</small>
+                            <?php endif; ?>
+                            <?php if ((string) ($row['item_names'] ?? '') !== ''): ?>
+                                <br><small style="color:var(--mbw-muted)"><?= e(mb_strimwidth((string) $row['item_names'], 0, 42, '…')) ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?= e((string) ($row['purity_codes'] ?? '') !== '' ? $row['purity_codes'] : '—') ?>
+                            <?php if ((string) ($row['metal_names'] ?? '') !== ''): ?>
+                                <br><small style="color:var(--mbw-muted)"><?= e((string) $row['metal_names']) ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['gross_weight'] ?? 0), 4) ?></td>
+                        <td class="is-numeric"><?= $fmt((float) ($row['fine_weight'] ?? 0), 4) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['metal_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['vat_amount']) ?></td>
                         <td class="is-numeric"><strong><?= e($sym) ?><?= $fmt((float) $row['total_amount']) ?></strong></td>
@@ -1116,6 +1216,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=purchases&edit=' . (int) $row['id'])) ?>">Edit</a>
                             <?php endif; ?>
                             <a class="button soft" style="min-height:30px;padding:3px 10px" target="_blank" rel="noopener" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'])) ?>">Preview</a>
+                            <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-trade.php?view=purchases&journal_purchase=' . (int) $row['id'])) ?>">Journal</a>
                             <?php if ($canExport): ?>
                                 <a class="button soft" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/jewellery-print.php?doc=purchase&id=' . (int) $row['id'] . '&format=xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
                             <?php endif; ?>
