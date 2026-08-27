@@ -707,6 +707,212 @@ function inv_post_item_opening_voucher(int $companyId, array $item, ?int $userId
     return ['voucher_id' => $voucherId, 'note' => ''];
 }
 
+
+/**
+ * The one journal the periodic system needs: closing stock.
+ *
+ * Through the year the ledger's stock account sits perfectly still. Purchases
+ * go to Purchases, sales post no cost at all, and the stock account still holds
+ * the figure it was brought forward with — last year's close, this year's open.
+ * That is why a periodic trial balance shows opening stock and no closing
+ * stock: the closing figure has not been written anywhere yet.
+ *
+ * This writes it. Stock is counted (here, valued off the stock subledger at the
+ * period end) and the account is moved from the opening figure to the closing
+ * one. The other side goes to Change in Inventory, which lands in the trading
+ * account and completes the arithmetic:
+ *
+ *     Change in Inventory   = Closing - Opening
+ *     Cost of sales         = Purchases - Change in Inventory
+ *                           = Purchases - Closing + Opening
+ *                           = Opening + Purchases - Closing
+ *
+ * So the derivation the profit and loss performs and the entry the balance
+ * sheet needs are the same fact, entered once.
+ *
+ * Idempotent and keyed to the fiscal year, like the opening voucher it mirrors:
+ * running it again after more stock movements replaces the entry rather than
+ * adding a second one. Runs only under the periodic system — under perpetual
+ * the stock account already equals the closing figure and this journal would be
+ * a nought, which is worth refusing rather than posting.
+ *
+ * @return array{voucher_id:int, note:string, opening:float, closing:float, change:float}
+ */
+function inv_post_closing_stock_voucher(int $companyId, int $fiscalYearId, ?int $userId = null): array
+{
+    $none = ['voucher_id' => 0, 'note' => '', 'opening' => 0.0, 'closing' => 0.0, 'change' => 0.0];
+    if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
+        return $none;
+    }
+    if (inv_accounting_method() !== 'periodic') {
+        return array_replace($none, ['note' => 'These books are kept on the perpetual system, where the stock account is'
+            . ' already at its closing figure. A closing-stock journal would post a nought.']);
+    }
+
+    $year = function_exists('fiscal_year_by_id') ? fiscal_year_by_id($fiscalYearId) : null;
+    if (!$year || (int) ($year['company_id'] ?? 0) !== $companyId) {
+        return array_replace($none, ['note' => 'That fiscal year does not belong to this company.']);
+    }
+    $periodEnd = (string) ($year['end_date'] ?? '');
+    $periodStart = (string) ($year['start_date'] ?? '');
+    if ($periodEnd === '') {
+        return array_replace($none, ['note' => 'That fiscal year has no end date.']);
+    }
+
+    // What the stock is actually worth on the last day, from the subledger that
+    // has been tracking quantity and cost all along.
+    require_once __DIR__ . '/stock_report_engine.php';
+    try {
+        $summary = sr_stock_summary($companyId, [
+            'from' => $periodStart, 'to' => $periodEnd,
+            'dormant' => true, 'zero_movement' => true, 'zero_closing' => true,
+        ]);
+    } catch (Throwable $exception) {
+        return array_replace($none, ['note' => 'Stock could not be valued for this period: ' . $exception->getMessage()]);
+    }
+    $closing = inv_round_money((float) ($summary['totals']['closing_amount'] ?? 0));
+
+    $stockRow = inv_resolve_mapping($companyId, 'inventory_asset');
+    $changeRow = inv_resolve_mapping($companyId, 'inventory_change');
+    if (!$stockRow || !$changeRow) {
+        $missing = !$stockRow ? 'Inventory Asset' : 'Change in Inventory (closing stock)';
+        return array_replace($none, ['closing' => $closing, 'note' => 'No closing-stock journal was posted: map '
+            . $missing . ' first, under Inventory → Ledger Mapping.']);
+    }
+    $stockLedgerId = (int) $stockRow['id'];
+    $changeLedgerId = (int) $changeRow['id'];
+
+    // What the stock account is carrying, ignoring any closing-stock journal
+    // already posted for this year -- otherwise the second run would measure
+    // the difference against its own previous answer and post nothing.
+    $carriedStmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
+        FROM voucher_entries ve
+        INNER JOIN vouchers v ON v.id = ve.voucher_id
+        WHERE v.company_id = :cid AND ve.ledger_id = :lid
+          AND v.voucher_date <= :end AND v.status = 'posted'
+          AND NOT (v.source_type = 'inventory_closing' AND v.source_id = :fy)");
+    $carriedStmt->execute(['cid' => $companyId, 'lid' => $stockLedgerId, 'end' => $periodEnd, 'fy' => $fiscalYearId]);
+    $opening = inv_round_money((float) $carriedStmt->fetchColumn());
+    $change = inv_round_money($closing - $opening);
+
+    $existingStmt = db()->prepare("SELECT * FROM vouchers
+        WHERE source_type = 'inventory_closing' AND source_id = :fy AND company_id = :cid LIMIT 1");
+    $existingStmt->execute(['fy' => $fiscalYearId, 'cid' => $companyId]);
+    $existing = $existingStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+    if ($existing) {
+        $blocker = voucher_mutation_blocker($existing, ['inventory_closing']);
+        if ($blocker !== null) {
+            return ['voucher_id' => (int) $existing['id'], 'opening' => $opening, 'closing' => $closing,
+                'change' => $change, 'note' => 'Closing-stock journal NOT updated: ' . $blocker];
+        }
+        db()->prepare('DELETE FROM vouchers WHERE id = :id AND company_id = :cid')
+            ->execute(['id' => (int) $existing['id'], 'cid' => $companyId]);
+    }
+
+    // Opening and closing genuinely equal is a real answer, not a missing one:
+    // a shop that bought exactly what it sold needs no entry.
+    if (abs($change) < 0.005) {
+        return ['voucher_id' => 0, 'opening' => $opening, 'closing' => $closing, 'change' => 0.0,
+            'note' => 'Closing stock equals opening stock, so there is nothing to adjust.'];
+    }
+
+    $amount = abs($change);
+    $stockIsDebit = $change > 0;   // stock grew: Dr Stock in Hand, Cr Change in Inventory
+    $voucherId = (int) create_voucher_with_entries([
+        'company_id' => $companyId,
+        'fiscal_year_id' => $fiscalYearId,
+        'voucher_no' => 'INV-CLOSE-' . $fiscalYearId,
+        'voucher_type' => 'journal',
+        'voucher_date' => $periodEnd,
+        'source_type' => 'inventory_closing',
+        'source_id' => $fiscalYearId,
+        'total_amount' => $amount,
+        'narration' => 'Closing stock ' . number_format($closing, 2) . ' against opening '
+            . number_format($opening, 2) . ' — ' . (string) ($year['label'] ?? $periodEnd),
+        'status' => 'posted',
+        'posted_by' => $userId,
+    ], [
+        ['ledger_id' => $stockIsDebit ? $stockLedgerId : $changeLedgerId, 'entry_type' => 'debit',
+            'amount' => $amount, 'memo' => $stockIsDebit ? 'Closing stock' : 'Stock consumed'],
+        ['ledger_id' => $stockIsDebit ? $changeLedgerId : $stockLedgerId, 'entry_type' => 'credit',
+            'amount' => $amount, 'memo' => $stockIsDebit ? 'Closing stock' : 'Stock consumed'],
+    ]);
+
+    return ['voucher_id' => $voucherId, 'opening' => $opening, 'closing' => $closing,
+        'change' => $change, 'note' => ''];
+}
+
+/**
+ * The trading account read off the LEDGER, which is where it lives under the
+ * periodic system.
+ *
+ * rc_trading_figures() answers the same question from the stock subledger, and
+ * is what the perpetual books use because their ledger holds no purchases
+ * figure to read. Here the ledger holds all of it, and reading the statement
+ * off the accounts rather than off the stock records is the point of keeping
+ * the books this way: the profit and loss and the trial balance cannot
+ * disagree, because they are the same numbers.
+ *
+ * @return array{available:bool, opening:float, purchases:float, returns:float,
+ *               closing:float, cogs:float}
+ */
+function inv_periodic_trading_figures(int $companyId, string $from, string $to): array
+{
+    $none = ['available' => false, 'opening' => 0.0, 'purchases' => 0.0, 'returns' => 0.0,
+        'closing' => 0.0, 'cogs' => 0.0];
+    if (inv_accounting_method() !== 'periodic' || !table_exists('voucher_entries')) {
+        return $none;
+    }
+
+    /** Net movement on a mapped purpose over a window, debits positive. */
+    $movement = static function (string $purpose, ?string $since, string $until) use ($companyId): float {
+        $row = inv_resolve_mapping($companyId, $purpose);
+        if (!$row) {
+            return 0.0;
+        }
+        $sql = "SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
+            FROM voucher_entries ve
+            INNER JOIN vouchers v ON v.id = ve.voucher_id
+            WHERE v.company_id = :cid AND ve.ledger_id = :lid AND v.status = 'posted'
+              AND v.voucher_date <= :until";
+        $params = ['cid' => $companyId, 'lid' => (int) $row['id'], 'until' => $until];
+        if ($since !== null) {
+            $sql .= ' AND v.voucher_date >= :since';
+            $params['since'] = $since;
+        }
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
+
+        return inv_round_money((float) $stmt->fetchColumn());
+    };
+
+    $purchases = $movement('purchases', $from, $to);
+    $returns = -$movement('purchase_returns', $from, $to);   // a credit balance, shown positive
+    $closing = $movement('inventory_asset', null, $to);
+
+    // Opening is derived from the change, NOT read off the day before the
+    // period starts. An opening-balance voucher in this app is dated at the
+    // fiscal year's first day, not its eve, so "the balance the day before"
+    // finds nothing at all and reports every opening stock as nought.
+    //
+    // The closing journal already states the relationship:
+    //     Change in Inventory = Closing - Opening
+    // so Opening = Closing - Change, using only movements inside the window and
+    // caring nothing for which day the opening entry happens to carry.
+    $change = -$movement('inventory_change', $from, $to);    // credit balance, shown positive
+    $opening = inv_round_money($closing - $change);
+
+    // Opening + Purchases - Returns - Closing, which reduces to the same thing:
+    // Purchases - Returns - Change.
+    $cogs = inv_round_money($purchases - $returns - $change);
+    $touched = abs($opening) > 0.004 || abs($purchases) > 0.004
+        || abs($returns) > 0.004 || abs($closing) > 0.004 || abs($change) > 0.004;
+
+    return ['available' => $touched, 'opening' => $opening, 'purchases' => $purchases,
+        'returns' => $returns, 'closing' => $closing, 'cogs' => $cogs];
+}
+
 /**
  * Validate that every purpose in $purposes resolves to a ledger for the item.
  * Returns the list of MISSING purposes (empty = ready to post). Posting engines

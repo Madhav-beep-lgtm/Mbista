@@ -28,6 +28,7 @@ $root = dirname(__DIR__);
 require $root . '/app/bootstrap.php';
 require_once $root . '/app/inventory_valuation.php';
 require_once $root . '/app/inventory_mapping.php';
+require_once $root . '/app/reports_engine.php';
 
 $pass = 0; $fail = 0;
 function ok(bool $c, string $l): void { global $pass, $fail; if ($c) { $pass++; echo "  PASS  $l\n"; } else { $fail++; echo "  FAIL  $l\n"; } }
@@ -166,5 +167,252 @@ with_method('perpetual', static function (): void {
         'A perpetual purchase still needs Inventory mapped');
 });
 
+
+echo "\n6. The closing-stock journal, on real books\n";
+// A company is built from nothing, put on the periodic system, and walked
+// through a period: opening stock, purchases, a sale. Then the one journal is
+// passed and all three statements are read back. This is the arithmetic the
+// whole system exists for, so it is checked against figures worked out by hand
+// rather than against whatever the code happens to produce.
+$suffix = 'PDIC' . substr((string) time(), -5);
+db()->prepare('INSERT INTO companies (name, code, is_active) VALUES (:n, :c, 1)')
+    ->execute(['n' => 'Periodic Test Co ' . $suffix, 'c' => $suffix]);
+$pcId = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_default, status)
+    VALUES (:c, '2026-27', '2026-04-01', '2027-03-31', 1, 'open')")->execute(['c' => $pcId]);
+$pcFy = (int) db()->lastInsertId();
+
+/** A group and a ledger under it, in one go. */
+$mkLedger = static function (int $companyId, string $name, string $masterKey, string $type) use (&$mkGroups): int {
+    static $groups = [];
+    $key = $companyId . '|' . $masterKey;
+    if (!isset($groups[$key])) {
+        db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key) VALUES (:c, :code, :n, :m)')
+            ->execute(['c' => $companyId, 'code' => coa_next_group_code($companyId, $masterKey),
+                'n' => ucwords(str_replace('_', ' ', $masterKey)), 'm' => $masterKey]);
+        $groups[$key] = (int) db()->lastInsertId();
+    }
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
+        VALUES (:c, :g, :code, :n, :t, 'active')")
+        ->execute(['c' => $companyId, 'g' => $groups[$key],
+            'code' => coa_next_ledger_code($companyId, $groups[$key]), 'n' => $name, 't' => $type]);
+
+    return (int) db()->lastInsertId();
+};
+
+$pcStock     = $mkLedger($pcId, 'Stock in hand', 'current_asset', 'asset');
+$pcPurchases = $mkLedger($pcId, 'Purchases', 'purchases', 'expense');
+$pcReturns   = $mkLedger($pcId, 'Purchase returns', 'purchases', 'revenue');
+$pcChange    = $mkLedger($pcId, 'Change in inventory', 'purchases', 'revenue');
+$pcCreditor  = $mkLedger($pcId, 'Sundry creditors', 'current_liability', 'liability');
+$pcEquity    = $mkLedger($pcId, 'Opening balance equity', 'equity', 'equity');
+$pcCogs      = $mkLedger($pcId, 'Cost of goods sold', 'direct_expense', 'expense');
+
+foreach (['inventory_asset' => $pcStock, 'purchases' => $pcPurchases, 'purchase_returns' => $pcReturns,
+    'inventory_change' => $pcChange, 'purchase_clearing' => $pcCreditor, 'opening_equity' => $pcEquity,
+    'cogs' => $pcCogs] as $purpose => $ledgerId) {
+    db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, purpose, ledger_id)
+        VALUES (:c, 'global', :p, :l)")->execute(['c' => $pcId, 'p' => $purpose, 'l' => $ledgerId]);
+}
+inv_mapping_forget();
+
+/** Post one journal, the way the posting engine would. */
+$journal = static function (int $companyId, int $fyId, string $date, string $no, int $dr, int $cr, float $amount): void {
+    create_voucher_with_entries([
+        'company_id' => $companyId, 'fiscal_year_id' => $fyId, 'voucher_no' => $no,
+        'voucher_type' => 'journal', 'voucher_date' => $date, 'total_amount' => $amount,
+        'narration' => $no, 'status' => 'posted',
+    ], [
+        ['ledger_id' => $dr, 'entry_type' => 'debit', 'amount' => $amount],
+        ['ledger_id' => $cr, 'entry_type' => 'credit', 'amount' => $amount],
+    ]);
+};
+
+with_method('periodic', static function () use ($pcId, $pcFy, $pcStock, $pcPurchases, $pcReturns,
+    $pcChange, $pcCreditor, $pcEquity, $pcCogs, $journal): void {
+    // Opening stock 200,000 brought forward, before the year starts.
+    $journal($pcId, $pcFy, '2026-04-01', 'OPEN-1', $pcStock, $pcEquity, 200000.0);
+    // Bought 900,000 during the year, sent 50,000 of it back.
+    $journal($pcId, $pcFy, '2026-06-10', 'PUR-1', $pcPurchases, $pcCreditor, 500000.0);
+    $journal($pcId, $pcFy, '2026-11-02', 'PUR-2', $pcPurchases, $pcCreditor, 400000.0);
+    $journal($pcId, $pcFy, '2026-12-01', 'PRET-1', $pcCreditor, $pcReturns, 50000.0);
+
+    $before = inv_periodic_trading_figures($pcId, '2026-04-01', '2027-03-31');
+    ok(abs($before['opening'] - 200000.0) < 0.01, 'Opening stock is the 200,000 brought forward');
+    ok(abs($before['purchases'] - 900000.0) < 0.01, 'Purchases total 900,000');
+    ok(abs($before['returns'] - 50000.0) < 0.01, 'And 50,000 went back');
+
+    // THE TRIAL BALANCE TEST. Before the journal, the stock account still holds
+    // the OPENING figure and cost of sales holds nothing at all.
+    $ledgerBalance = static function (int $companyId, int $ledgerId, string $until): float {
+        $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
+            FROM voucher_entries ve INNER JOIN vouchers v ON v.id = ve.voucher_id
+            WHERE v.company_id = :c AND ve.ledger_id = :l AND v.status='posted' AND v.voucher_date <= :u");
+        $stmt->execute(['c' => $companyId, 'l' => $ledgerId, 'u' => $until]);
+
+        return round((float) $stmt->fetchColumn(), 2);
+    };
+    ok(abs($ledgerBalance($pcId, $pcStock, '2027-03-31') - 200000.0) < 0.01,
+        'The trial balance carries OPENING stock, untouched by a year of trading');
+    ok(abs($ledgerBalance($pcId, $pcCogs, '2027-03-31')) < 0.01,
+        '  ...and carries NO cost of sales, because nothing posts to it');
+    ok(abs($ledgerBalance($pcId, $pcChange, '2027-03-31')) < 0.01,
+        '  ...and no closing stock either, until the journal is passed');
+});
+
+echo "\n7. Passing the journal completes the arithmetic\n";
+// Closing stock is counted at 540,000. Worked out by hand:
+//   change   = 540,000 - 200,000            = 340,000 Dr to stock
+//   cogs     = 200,000 + 900,000 - 50,000 - 540,000 = 510,000
+$countedClosing = 540000.0;
+with_method('periodic', static function () use ($pcId, $pcFy, $pcStock, $pcChange, $pcCogs, $countedClosing, $journal): void {
+    // Stand in for the stock count: the subledger has no items on this fixture,
+    // so the closing figure is entered the way a count would produce it.
+    $journal($pcId, $pcFy, '2027-03-31', 'CLOSE-1', $pcStock, $pcChange, $countedClosing - 200000.0);
+
+    $after = inv_periodic_trading_figures($pcId, '2026-04-01', '2027-03-31');
+    ok(abs($after['closing'] - 540000.0) < 0.01, 'Closing stock is now 540,000');
+    ok(abs($after['cogs'] - 510000.0) < 0.01,
+        'COST OF SALES = 200,000 + 900,000 - 50,000 - 540,000 = 510,000, got '
+            . number_format($after['cogs'], 2));
+
+    $ledgerBalance = static function (int $companyId, int $ledgerId): float {
+        $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE -ve.amount END),0)
+            FROM voucher_entries ve INNER JOIN vouchers v ON v.id = ve.voucher_id
+            WHERE v.company_id = :c AND ve.ledger_id = :l AND v.status='posted'");
+        $stmt->execute(['c' => $companyId, 'l' => $ledgerId]);
+
+        return round((float) $stmt->fetchColumn(), 2);
+    };
+    ok(abs($ledgerBalance($pcId, $pcStock) - 540000.0) < 0.01,
+        'The BALANCE SHEET now shows closing inventory of 540,000');
+    ok(abs($ledgerBalance($pcId, $pcCogs)) < 0.01,
+        'And cost of sales is STILL not a ledger — it is derived, exactly as it should be');
+
+    // The identity that makes the two halves agree.
+    $change = $ledgerBalance($pcId, $pcChange);
+    ok(abs((-$change) - ($after['closing'] - $after['opening'])) < 0.01,
+        'Change in Inventory equals Closing less Opening, which is why the two sides tie');
+});
+
+// Tidy up: this fixture exists only for the arithmetic above. Ledgers are
+// referenced by their groups, so the children go before the parents rather than
+// relying on a cascade that is not there.
+foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE company_id = :c)',
+    'vouchers' => 'company_id = :c',
+    'inventory_ledger_mappings' => 'company_id = :c',
+    'ledgers' => 'company_id = :c',
+    'ledger_groups' => 'company_id = :c',
+    'fiscal_years' => 'company_id = :c',
+    'companies' => 'id = :c'] as $table => $where) {
+    db()->prepare("DELETE FROM `{$table}` WHERE {$where}")->execute(['c' => $pcId]);
+}
+inv_mapping_forget();
+
+echo "\n8. The profit and loss, drawn from those same accounts\n";
+// The statement a client actually reads. Built on the fixture above so the
+// figures are known: sales 1,200,000 against a cost of sales of 510,000 must
+// give a gross profit of 690,000, and the working shown underneath it must be
+// the working that produces it -- not a second opinion from the stock records.
+$suffix2 = 'PDPL' . substr((string) time(), -5);
+db()->prepare('INSERT INTO companies (name, code, is_active) VALUES (:n, :c, 1)')
+    ->execute(['n' => 'Periodic PL Co ' . $suffix2, 'c' => $suffix2]);
+$plId = (int) db()->lastInsertId();
+db()->prepare("INSERT INTO fiscal_years (company_id, label, start_date, end_date, is_default, status)
+    VALUES (:c, '2026-27', '2026-04-01', '2027-03-31', 1, 'open')")->execute(['c' => $plId]);
+$plFy = (int) db()->lastInsertId();
+
+$plGroups = [];
+$mkLedger2 = static function (int $companyId, string $name, string $masterKey, string $type) use (&$plGroups): int {
+    $key = $companyId . '|' . $masterKey;
+    if (!isset($plGroups[$key])) {
+        db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key) VALUES (:c, :code, :n, :m)')
+            ->execute(['c' => $companyId, 'code' => coa_next_group_code($companyId, $masterKey),
+                'n' => ucwords(str_replace('_', ' ', $masterKey)), 'm' => $masterKey]);
+        $plGroups[$key] = (int) db()->lastInsertId();
+    }
+    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
+        VALUES (:c, :g, :code, :n, :t, 'active')")
+        ->execute(['c' => $companyId, 'g' => $plGroups[$key],
+            'code' => coa_next_ledger_code($companyId, $plGroups[$key]), 'n' => $name, 't' => $type]);
+
+    return (int) db()->lastInsertId();
+};
+
+$plStock     = $mkLedger2($plId, 'Stock in hand', 'current_asset', 'asset');
+$plPurchases = $mkLedger2($plId, 'Purchases', 'purchases', 'expense');
+$plReturns   = $mkLedger2($plId, 'Purchase returns', 'purchases', 'revenue');
+$plChange    = $mkLedger2($plId, 'Change in inventory', 'purchases', 'revenue');
+$plCreditor  = $mkLedger2($plId, 'Sundry creditors', 'current_liability', 'liability');
+$plEquity    = $mkLedger2($plId, 'Opening balance equity', 'equity', 'equity');
+$plSales     = $mkLedger2($plId, 'Sales', 'direct_income', 'revenue');
+$plDebtor    = $mkLedger2($plId, 'Sundry debtors', 'current_asset', 'asset');
+$plRent      = $mkLedger2($plId, 'Rent', 'indirect_expense', 'expense');
+
+foreach (['inventory_asset' => $plStock, 'purchases' => $plPurchases, 'purchase_returns' => $plReturns,
+    'inventory_change' => $plChange, 'purchase_clearing' => $plCreditor,
+    'opening_equity' => $plEquity] as $purpose => $ledgerId) {
+    db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, purpose, ledger_id)
+        VALUES (:c, 'global', :p, :l)")->execute(['c' => $plId, 'p' => $purpose, 'l' => $ledgerId]);
+}
+inv_mapping_forget();
+
+$post = static function (int $companyId, int $fyId, string $date, string $no, int $dr, int $cr, float $amount): void {
+    create_voucher_with_entries([
+        'company_id' => $companyId, 'fiscal_year_id' => $fyId, 'voucher_no' => $no,
+        'voucher_type' => 'journal', 'voucher_date' => $date, 'total_amount' => $amount,
+        'narration' => $no, 'status' => 'posted',
+    ], [
+        ['ledger_id' => $dr, 'entry_type' => 'debit', 'amount' => $amount],
+        ['ledger_id' => $cr, 'entry_type' => 'credit', 'amount' => $amount],
+    ]);
+};
+
+with_method('periodic', static function () use ($plId, $plFy, $plStock, $plPurchases, $plReturns,
+    $plChange, $plCreditor, $plEquity, $plSales, $plDebtor, $plRent, $post): void {
+    $post($plId, $plFy, '2026-04-01', 'PL-OPEN', $plStock, $plEquity, 200000.0);
+    $post($plId, $plFy, '2026-06-10', 'PL-PUR1', $plPurchases, $plCreditor, 500000.0);
+    $post($plId, $plFy, '2026-11-02', 'PL-PUR2', $plPurchases, $plCreditor, 400000.0);
+    $post($plId, $plFy, '2026-12-01', 'PL-PRET', $plCreditor, $plReturns, 50000.0);
+    $post($plId, $plFy, '2026-12-20', 'PL-SALE', $plDebtor, $plSales, 1200000.0);
+    $post($plId, $plFy, '2027-02-01', 'PL-RENT', $plRent, $plCreditor, 120000.0);
+    // Closing stock counted at 540,000: the year-end journal.
+    $post($plId, $plFy, '2027-03-31', 'PL-CLOSE', $plStock, $plChange, 340000.0);
+
+    $figures = rc_pl_figures($plId, '2026-04-01', '2027-03-31');
+    ok(abs($figures['net_sales'] - 1200000.0) < 0.01, 'Sales are 1,200,000');
+    ok(abs($figures['cogs'] - 510000.0) < 0.01,
+        'COST OF SALES comes out at 510,000 from the Purchases head alone, got '
+            . number_format($figures['cogs'], 2));
+    ok(abs($figures['gross_profit'] - 690000.0) < 0.01,
+        'GROSS PROFIT is 1,200,000 - 510,000 = 690,000, got ' . number_format($figures['gross_profit'], 2));
+
+    // The two traps this head would otherwise fall into.
+    ok(abs($figures['gross_sales'] - 1200000.0) < 0.01,
+        'Purchase returns and Change in inventory are NOT counted as sales, though both are credits');
+    ok(abs($figures['operating_expenses'] - 120000.0) < 0.01,
+        'And Purchases is NOT counted as an operating expense — only the rent is, got '
+            . number_format($figures['operating_expenses'], 2));
+    ok(abs($figures['pat'] - 570000.0) < 0.01,
+        'So profit after tax is 690,000 - 120,000 = 570,000, got ' . number_format($figures['pat'], 2));
+
+    // And the working shown under the statement ties to it.
+    $trade = rc_trading_figures($plId, '2026-04-01', '2027-03-31');
+    ok($trade['from_ledger'] === true, 'The trading account is read from the LEDGER, not the stock records');
+    ok(abs($trade['opening'] - 200000.0) < 0.01, '  Opening stock 200,000');
+    ok(abs($trade['purchases'] - 900000.0) < 0.01, '  Purchases 900,000');
+    ok(abs($trade['returns'] - 50000.0) < 0.01, '  Less returns 50,000');
+    ok(abs($trade['closing'] - 540000.0) < 0.01, '  Less closing stock 540,000');
+    ok(abs($trade['consumed'] - $figures['cogs']) < 0.01,
+        '  ...and the working equals the cost of sales exactly, because they are one calculation');
+});
+
+foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE company_id = :c)',
+    'vouchers' => 'company_id = :c', 'inventory_ledger_mappings' => 'company_id = :c',
+    'ledgers' => 'company_id = :c', 'ledger_groups' => 'company_id = :c',
+    'fiscal_years' => 'company_id = :c', 'companies' => 'id = :c'] as $table => $where) {
+    db()->prepare("DELETE FROM `{$table}` WHERE {$where}")->execute(['c' => $plId]);
+}
+inv_mapping_forget();
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

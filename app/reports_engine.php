@@ -178,7 +178,7 @@ function rc_pl_figures(int $scopeCompanyId, string $from, string $to): array
         'gross_sales' => 0.0, 'sales_returns' => 0.0, 'other_income' => 0.0,
         'cogs' => 0.0, 'operating_expenses' => 0.0, 'finance_cost' => 0.0,
         'income_tax' => 0.0, 'employee_cost' => 0.0, 'depreciation' => 0.0,
-        'revenue_lines' => [],
+        'revenue_lines' => [], 'purchase_lines' => [],
     ];
     foreach ($balances as $b) {
         $nature = rc_ledger_nature($b);
@@ -186,6 +186,29 @@ function rc_pl_figures(int $scopeCompanyId, string $from, string $to): array
         $txDr = (float) $b['tx_dr'];
         $txCr = (float) $b['tx_cr'];
         $name = (string) $b['name'];
+
+        // THE PURCHASES HEAD NETS TO COST OF SALES, on its own, exactly:
+        //
+        //     Purchases            debit
+        //     less Purchase returns        credit
+        //     less Change in inventory     credit   (= Closing - Opening)
+        //   = Purchases - Returns - Closing + Opening
+        //   = COST OF GOODS SOLD
+        //
+        // which is why it is taken here, before anything else looks at it.
+        // Left to the branches below, the debit side would be filed as an
+        // operating expense and the credit side -- Purchase returns and Change
+        // in inventory both being credits -- would be counted as SALES. The
+        // profit would come out wrong twice over and look plausible both times.
+        if ($master === 'purchases') {
+            $movement = $txDr - $txCr;
+            $f['cogs'] += $movement;
+            if (abs($movement) > 0.004) {
+                $f['purchase_lines'][] = ['name' => $name, 'amount' => $movement];
+            }
+            continue;
+        }
+
         if ($nature === 'revenue') {
             if ($master === 'indirect_income') {
                 $f['other_income'] += $txCr - $txDr;
@@ -251,7 +274,29 @@ function rc_pl_figures(int $scopeCompanyId, string $from, string $to): array
 function rc_trading_figures(int $scopeCompanyId, string $from, string $to): array
 {
     $none = ['available' => false, 'opening' => 0.0, 'purchases' => 0.0, 'other_in' => 0.0,
-        'damage' => 0.0, 'closing' => 0.0, 'consumed' => 0.0];
+        'damage' => 0.0, 'closing' => 0.0, 'returns' => 0.0, 'consumed' => 0.0, 'from_ledger' => false];
+
+    // Under the periodic system these figures are LEDGER balances, not a
+    // reading of the stock records. That is the whole point of keeping the
+    // books that way: the trading account and the trial balance are the same
+    // numbers, so they cannot disagree.
+    require_once __DIR__ . '/inventory_valuation.php';
+    if (inv_accounting_method() === 'periodic') {
+        $ledger = inv_periodic_trading_figures($scopeCompanyId, $from, $to);
+
+        return [
+            'available' => (bool) $ledger['available'],
+            'opening' => $ledger['opening'],
+            'purchases' => $ledger['purchases'],
+            'other_in' => 0.0,
+            'damage' => 0.0,
+            'returns' => $ledger['returns'],
+            'closing' => $ledger['closing'],
+            'consumed' => $ledger['cogs'],
+            'from_ledger' => true,
+        ];
+    }
+
     if (!table_exists('inventory_items')) {
         return $none;
     }
@@ -282,6 +327,8 @@ function rc_trading_figures(int $scopeCompanyId, string $from, string $to): arra
         'purchases' => $purchases,
         'other_in' => $otherIn,
         'damage' => $damage,
+        'returns' => 0.0,
+        'from_ledger' => false,
         'closing' => $closing,
         // What left the shelf, at cost. Damage is taken out because it is
         // written off to its own account and is not a cost of anything sold.
@@ -733,14 +780,23 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                     if (abs($trade['damage']) > 0.004 || abs($tradePrev['damage']) > 0.004) {
                         $rows[] = $line('Less: Damage, loss and write-off', $trade['damage'], $tradePrev['damage'], '', true, true);
                     }
+                    if (abs($trade['returns']) > 0.004 || abs($tradePrev['returns']) > 0.004) {
+                        $rows[] = $line('Less: Purchase returns', $trade['returns'], $tradePrev['returns'], '', true, true);
+                    }
                     $rows[] = $line('Less: Closing Stock', $trade['closing'], $tradePrev['closing'], '', true, true);
                     $rows[] = $line('Cost of stock consumed', $trade['consumed'], $tradePrev['consumed'], 'bold', false);
 
                     // Stock moves for reasons that are not sales, and the COGS
                     // ledger only ever hears about the sales. Saying which is
                     // which beats presenting either one as the other.
-                    $drift = $cur['cogs'] - $trade['consumed'];
-                    $driftPrev = $prev['cogs'] - $tradePrev['consumed'];
+                    //
+                    // Under the periodic system there is nothing to reconcile:
+                    // the working and the cost of sales are the same ledger
+                    // balances read twice, so a difference line would always be
+                    // nought and would only invite somebody to look for a
+                    // meaning in it.
+                    $drift = $trade['from_ledger'] ? 0.0 : $cur['cogs'] - $trade['consumed'];
+                    $driftPrev = $trade['from_ledger'] ? 0.0 : $prev['cogs'] - $tradePrev['consumed'];
                     if (abs($drift) > 0.004 || abs($driftPrev) > 0.004) {
                         // Either way round it is worth seeing. Positive is
                         // direct cost that never was stock — freight inward,
