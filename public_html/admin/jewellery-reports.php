@@ -618,14 +618,18 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
     $bifTotals = $bif['totals'];
     // The money columns, in the order the total is built up. Kept in one list
     // so the heading, the rows and the foot cannot drift apart.
+    // The terms that MAKE UP the total, in the order it is built. Wastage is
+    // not one of them -- the metal is priced on a weight that already includes
+    // it -- so it is drawn beside metal as a memo and never added.
     $bifMoney = [
-        ['metal_amount', 'Metal'],
-        ['wastage_amount', 'Wastage'],
-        ['making_amount', 'Making'],
-        ['stone_side', 'Stone / diamond'],
-        ['allocated_adjust', 'Charges − Disc.'],
-        ['tax_amount', 'SPT'],
-        ['vat_amount', 'VAT'],
+        ['metal_amount', 'Metal', true],
+        ['wastage_amount', 'of which wastage', false],
+        ['making_amount', 'Making', true],
+        ['stone_side', 'Stone / diamond', true],
+        ['allocated_adjust', 'Charges − Disc.', true],
+        ['net_before_tax', 'Net before SPT / VAT', true],
+        ['tax_amount', 'SPT', true],
+        ['vat_amount', 'VAT', true],
     ];
     ?>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
@@ -634,11 +638,16 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
         </div>
         <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
             What the bill total is made of, and it adds across:
-            <strong>Metal + Wastage + Making + Stone/diamond + (Other charges − Discount) + SPT + VAT = TOTAL</strong>.
-            Weight and purity sit beside it as context — they are what the metal was measured in, not parts of the money.
+            <strong>Metal + Making + Stone/diamond + (Other charges − Discount) = Net before SPT / VAT</strong>,
+            then <strong>+ SPT + VAT = TOTAL</strong>.
+            <strong>Net before SPT / VAT is the figure that reaches the profit and loss</strong> — SPT and VAT are
+            collected for the government and never earned, which is also why gross profit is measured against the net
+            rather than the total.
+            Wastage is <em>not</em> a separate term: the metal is priced on a weight that already includes it, so the
+            column shows how much of the metal amount it is, never an addition.
+            Weight and purity sit beside the money as context — they are what the metal was measured in.
             Other charges and discount are entered per bill, so an item or category row carries the share that bill
-            allocated to it. Gross profit is measured against the revenue side only: SPT and VAT are collected for
-            the government, never earned.
+            allocated to it.
         </p>
         <div style="overflow-x:auto"><table>
             <thead>
@@ -650,8 +659,8 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                     <th class="is-numeric">Pieces</th>
                     <th class="is-numeric">Gross wt</th>
                     <th class="is-numeric">Fine wt</th>
-                    <?php foreach ($bifMoney as [$key, $label]): ?>
-                        <th class="is-numeric"><?= e($label) ?></th>
+                    <?php foreach ($bifMoney as [$key, $label, $adds]): ?>
+                        <th class="is-numeric<?= $adds ? '' : ' jw-memo-col' ?>"><?= e($label) ?></th>
                     <?php endforeach; ?>
                     <th class="is-numeric">TOTAL</th>
                     <th class="is-numeric">COGS</th>
@@ -676,8 +685,8 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                         <td class="is-numeric"><?= $fmt((float) $g['pieces'], 3) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $g['gross_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $g['fine_weight'], 4) ?></td>
-                        <?php foreach ($bifMoney as [$key, $label]): ?>
-                            <td class="is-numeric"><?= $fmt((float) $g[$key]) ?></td>
+                        <?php foreach ($bifMoney as [$key, $label, $adds]): ?>
+                            <td class="is-numeric<?= $adds ? '' : ' jw-memo-col' ?>"><?= $fmt((float) $g[$key]) ?></td>
                         <?php endforeach; ?>
                         <td class="is-numeric"><strong><?= $fmt((float) $g['line_total']) ?></strong></td>
                         <td class="is-numeric"><?= $fmt((float) $g['cogs_amount']) ?></td>
@@ -694,8 +703,8 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                     <th class="is-numeric"><?= $fmt((float) $bifTotals['pieces'], 3) ?></th>
                     <th class="is-numeric"><?= $fmt((float) $bifTotals['gross_weight'], 4) ?></th>
                     <th class="is-numeric"><?= $fmt((float) $bifTotals['fine_weight'], 4) ?></th>
-                    <?php foreach ($bifMoney as [$key, $label]): ?>
-                        <th class="is-numeric"><?= $fmt((float) $bifTotals[$key]) ?></th>
+                    <?php foreach ($bifMoney as [$key, $label, $adds]): ?>
+                        <th class="is-numeric<?= $adds ? '' : ' jw-memo-col' ?>"><?= $fmt((float) $bifTotals[$key]) ?></th>
                     <?php endforeach; ?>
                     <th class="is-numeric"><?= $fmt((float) $bifTotals['line_total']) ?></th>
                     <th class="is-numeric"><?= $fmt((float) $bifTotals['cogs_amount']) ?></th>

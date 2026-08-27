@@ -575,7 +575,9 @@ if ($view === 'sales' && isset($_GET['export'])) {
     require_permission('jewellery', 'export');
     require_once __DIR__ . '/../../app/export_engine.php';
     $format = jw_enum($_GET['export'] ?? null, ['csv', 'xlsx', 'print', 'pdf'], 'csv');
-    $data = [['Sale no.', 'Order ref.', 'Date', 'Customer', 'Billed as', 'Total', 'Received', 'Advance applied', 'Exchange', 'Pending', 'COGS', 'Status']];
+    $data = [['Sale no.', 'Order ref.', 'Date', 'Customer', 'Billed as',
+        'Net before SPT / VAT', 'SPT', 'VAT', 'Total',
+        'Received', 'Advance applied', 'Exchange', 'Pending', 'COGS', 'Status']];
     foreach ($docs as $row) {
         $data[] = [
             $row['sale_no'], $row['order_no'] ?? '', $row['sale_date'],
@@ -584,6 +586,10 @@ if ($view === 'sales' && isset($_GET['export'])) {
             // showed only one of them cannot be reconciled against the bills.
             trim((string) ($row['party_name'] ?? '')) ?: 'Walk-in',
             jw_document_party_name($row),
+            // Net by subtraction: wastage is priced inside the metal amount,
+            // so re-adding the components would count it twice.
+            round((float) $row['total_amount'] - (float) ($row['tax_amount'] ?? 0) - (float) ($row['vat_amount'] ?? 0), 2),
+            $row['tax_amount'] ?? 0, $row['vat_amount'] ?? 0,
             $row['total_amount'], $row['received_amount'], $row['advance_amount'] ?? 0,
             $row['exchange_amount'], $row['balance_amount'], $row['cogs_amount'], $row['status'],
         ];
@@ -1524,7 +1530,11 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         </dialog>
         <?php endif; ?>
         <div style="overflow-x:auto"><table>
-            <thead><tr><th>No.</th><th>Order ref.</th><th>Date</th><th>Customer</th><th class="is-numeric">Total</th><th class="is-numeric">Received</th><th class="is-numeric">Advance applied</th><th class="is-numeric">Exchange</th><th class="is-numeric">Pending</th><th class="is-numeric">COGS</th><th>Status</th><th>Actions</th></tr></thead>
+            <?php // The register showed only what the customer hands over. Which
+                  // part of that is SALES -- the figure that reaches the profit
+                  // and loss -- was not on the page at all: SPT and VAT are
+                  // collected for the government and never earned. ?>
+            <thead><tr><th>No.</th><th>Order ref.</th><th>Date</th><th>Customer</th><th class="is-numeric" title="Metal, making, stone and diamond, less any discount — the amount posted as sales">Net before SPT / VAT</th><th class="is-numeric">SPT</th><th class="is-numeric">VAT</th><th class="is-numeric">Total</th><th class="is-numeric">Received</th><th class="is-numeric">Advance applied</th><th class="is-numeric">Exchange</th><th class="is-numeric">Pending</th><th class="is-numeric">COGS</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
                 <?php if ($docPageRows === []): ?><tr><td colspan="12">No sales yet.</td></tr><?php endif; ?>
                 <?php foreach ($docPageRows as $row): ?>
@@ -1546,6 +1556,17 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                                 <br><small style="color:var(--mbw-muted)">billed as <?= e($rowBilledAs) ?></small>
                             <?php endif; ?>
                         </td>
+                        <?php
+                        // Net is taken by SUBTRACTION rather than by re-adding the
+                        // components: wastage is priced inside the metal amount, so
+                        // adding that column back would count it twice.
+                        $rowSpt = (float) ($row['tax_amount'] ?? 0);
+                        $rowVat = (float) ($row['vat_amount'] ?? 0);
+                        $rowNet = (float) $row['total_amount'] - $rowSpt - $rowVat;
+                        ?>
+                        <td class="is-numeric"><?= $fmt($rowNet) ?></td>
+                        <td class="is-numeric"><?= $rowSpt > 0 ? $fmt($rowSpt) : '—' ?></td>
+                        <td class="is-numeric"><?= $rowVat > 0 ? $fmt($rowVat) : '—' ?></td>
                         <td class="is-numeric"><strong><?= e($sym) ?><?= $fmt((float) $row['total_amount']) ?></strong></td>
                         <td class="is-numeric"><?= $fmt((float) $row['received_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) ($row['advance_amount'] ?? 0)) ?></td>

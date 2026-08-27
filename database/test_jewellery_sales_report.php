@@ -8,11 +8,16 @@ declare(strict_types=1);
  * it, which is a figure nobody can check against the bill in their hand. It
  * is, and now says it is:
  *
- *     metal + wastage + making + stone and diamond
+ *     metal + making + stone and diamond
  *       + other charges - discount        (allocated across the lines)
+ *     = NET BEFORE SPT AND VAT -- the figure that reaches the profit and loss
  *       + Skills Promotion Tax
  *       + VAT
- *     = TOTAL
+ *     = TOTAL -- what the customer hands over
+ *
+ * Wastage is not a term of that sum: the metal is priced on a weight that
+ * already includes the wastage weight, so its value is inside the metal
+ * amount. It is reported as a memo beside metal, never added.
  *
  * Every one of those is stored per LINE, which is why one grouping can serve
  * all of them -- bill, day, category, purity, item, metal, customer -- and why
@@ -61,26 +66,34 @@ $span = $span->fetch();
 echo "\n2. The components add up to the total\n";
 // The whole point of bifurcating it. If these do not sum, the report is
 // describing a total that is not the one it prints.
+//
+// WASTAGE IS NOT ONE OF THE TERMS. The metal is priced on a weight that
+// already includes the wastage weight, so its value sits inside the metal
+// amount; a first cut of this report added the wastage column as well and
+// double-counted it. That went unnoticed because the company it was measured
+// on charges no wastage anywhere -- which is exactly why section 8 below
+// refuses to let this suite look conclusive on such a company.
 $bill = jw_report_sales_bifurcated($companyId, $from, $to, 'invoice');
 $t = $bill['totals'];
-$sum = $t['metal_amount'] + $t['wastage_amount'] + $t['making_amount'] + $t['stone_side']
-    + $t['allocated_adjust'] + $t['tax_amount'] + $t['vat_amount'];
-ok(near($sum, $t['line_total']),
-    'Metal + Wastage + Making + Stone/diamond + (Charges − Disc.) + SPT + VAT = TOTAL ('
-        . number_format($sum, 2) . ' vs ' . number_format($t['line_total'], 2) . ')');
+$net = $t['metal_amount'] + $t['making_amount'] + $t['stone_side'] + $t['allocated_adjust'];
+ok(near($net, $t['net_before_tax']),
+    'Metal + Making + Stone/diamond + (Charges - Disc.) = Net before SPT / VAT ('
+        . number_format($net, 2) . ')');
+ok(near($net + $t['tax_amount'] + $t['vat_amount'], $t['line_total']),
+    '  ...and Net + SPT + VAT = TOTAL (' . number_format($t['line_total'], 2) . ')');
 
 $rowsChecked = 0;
 $rowsAgreeing = 0;
 foreach ($bill['rows'] as $row) {
     $rowsChecked++;
-    $rowSum = $row['metal_amount'] + $row['wastage_amount'] + $row['making_amount'] + $row['stone_side']
-        + $row['allocated_adjust'] + $row['tax_amount'] + $row['vat_amount'];
-    if (near($rowSum, (float) $row['line_total'])) {
+    $rowNet = $row['metal_amount'] + $row['making_amount'] + $row['stone_side'] + $row['allocated_adjust'];
+    if (near($rowNet, (float) $row['net_before_tax'])
+        && near($rowNet + (float) $row['tax_amount'] + (float) $row['vat_amount'], (float) $row['line_total'])) {
         $rowsAgreeing++;
     }
 }
 ok($rowsChecked > 0 && $rowsAgreeing === $rowsChecked,
-    '  ...and on every individual bill, not only in the foot (' . $rowsAgreeing . '/' . $rowsChecked . ')');
+    '  ...on every individual bill, not only in the foot (' . $rowsAgreeing . '/' . $rowsChecked . ')');
 
 echo "\n3. The total is the one in the books\n";
 // A report that foots to itself but not to the ledger is self-consistent and
@@ -130,6 +143,39 @@ foreach (['Skills Promotion Tax', 'VAT', 'TOTAL', 'Invoice ref.', 'Customer (bil
 $footRow = $exportRows[count($exportRows) - 1];
 ok((string) $footRow[0] === 'TOTAL' && near((float) $footRow[array_search('TOTAL', $head, true)], $reference),
     'Its foot carries the same total the screen shows');
+
+echo "\n8. And the same arithmetic where wastage is actually charged\n";
+// The double-count above could not show itself on a shop that charges no
+// wastage, so it is looked for wherever one does -- and where none does
+// anywhere on this database, that is SAID rather than passed over in silence.
+$wastageSale = db()->query("SELECT s.company_id, s.sale_date
+    FROM jewellery_sales s
+    INNER JOIN jewellery_sale_lines l ON l.sale_id = s.id
+    WHERE s.status = 'posted' AND l.wastage_amount > 0
+    ORDER BY s.id DESC LIMIT 1")->fetch();
+if (!$wastageSale) {
+    echo "  ....  no posted sale on this database charges wastage, so the\n";
+    echo "        double-count this section exists to catch cannot be\n";
+    echo "        demonstrated here. The arithmetic is asserted structurally\n";
+    echo "        instead: wastage must not be one of the additive terms.\n";
+    $engine = (string) file_get_contents(dirname(__DIR__) . '/app/jewellery_reports.php');
+    ok(preg_match('/\$additive\s*=\s*\[[^\]]*\]/', $engine, $m) === 1, 'The engine names its additive terms explicitly');
+    ok(isset($m[0]) && !str_contains($m[0], 'wastage_amount'),
+        '  ...and wastage is NOT among them');
+} else {
+    $wc = (int) $wastageSale['company_id'];
+    $wd = (string) $wastageSale['sale_date'];
+    $wr = jw_report_sales_bifurcated($wc, $wd, $wd, 'invoice');
+    $wt = $wr['totals'];
+    ok((float) $wt['wastage_amount'] > 0, 'Found a posted sale that charges wastage, on ' . $wd);
+    $wnet = $wt['metal_amount'] + $wt['making_amount'] + $wt['stone_side'] + $wt['allocated_adjust'];
+    ok(near($wnet + $wt['tax_amount'] + $wt['vat_amount'], $wt['line_total']),
+        '  ...and it STILL adds up, because wastage is inside the metal and not added again');
+    $booked = (float) db()->query("SELECT COALESCE(SUM(total_amount), 0) FROM jewellery_sales
+        WHERE company_id = {$wc} AND status = 'posted' AND sale_date = '{$wd}'")->fetchColumn();
+    ok(near($booked, (float) $wt['line_total']),
+        '  ...and matches the bills for that day (' . number_format($booked, 2) . ')');
+}
 
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

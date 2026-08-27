@@ -706,3 +706,12 @@ tbody > .jw-summary-section:first-child > th {
   padding: 3px 6px;
   font-size: 12.5px;
 }
+
+/* A memo column sits in the middle of a run of figures that add up, and does
+   not add up with them -- "of which wastage" is part of the metal beside it,
+   not a term of the total. Tinting it apart is what stops somebody totalling
+   the row by eye and finding it does not agree with the TOTAL column. */
+body.admin-layout .jw-memo-col {
+  background: var(--mbw-soft, #eef5f0);
+  font-style: italic;
+}

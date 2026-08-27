@@ -132,11 +132,18 @@ function jw_sales_group_options(): array
  * The register showed one figure called Total and no way to see inside it,
  * which is a figure nobody can check against the bill in their hand. It is:
  *
- *     metal + wastage + making + stone and diamond
+ *     metal + making + stone and diamond
  *       + other charges - discount            (allocated across the lines)
+ *     = NET, which is the figure that reaches the profit and loss
  *       + Skills Promotion Tax
  *       + VAT
- *     = TOTAL
+ *     = TOTAL, which is what the customer hands over
+ *
+ * WASTAGE IS NOT A TERM OF THAT SUM. The metal is priced on a weight that
+ * already includes the wastage weight, so its value is inside the metal
+ * amount; adding the wastage column as well counts it twice, and on a shop
+ * that charges wastage the report then fails to add up. It is carried as a
+ * memo -- "of which wastage" -- because a jeweller still wants to see it.
  *
  * Every one of those is stored per LINE, which is why one grouping can serve
  * all of them: group by day, by category, by purity, by item, by metal, by
@@ -175,8 +182,12 @@ function jw_report_sales_bifurcated(int $companyId, string $from, string $to, st
         };
     };
 
+    // wastage_amount is summed with the rest but is NOT one of the terms that
+    // makes up the total -- see the note above. It is reported beside metal,
+    // never added to it.
     $money = ['metal_amount', 'wastage_amount', 'making_amount', 'stone_side', 'allocated_adjust',
         'tax_amount', 'vat_amount', 'line_total', 'cogs_amount', 'gross_profit'];
+    $additive = ['metal_amount', 'making_amount', 'stone_side', 'allocated_adjust'];
     $groups = [];
     foreach ($detail['rows'] as $row) {
         $key = $keyFor($row);
@@ -218,11 +229,16 @@ function jw_report_sales_bifurcated(int $companyId, string $from, string $to, st
         foreach ($money as $field) {
             $groups[$key][$field] = jw_round_money($group[$field]);
         }
-        // Margin is measured against the revenue side only: VAT and the Skills
-        // Promotion Tax are collected for the government, never earned.
-        $revenue = $groups[$key]['metal_amount'] + $groups[$key]['wastage_amount']
-            + $groups[$key]['making_amount'] + $groups[$key]['stone_side'] + $groups[$key]['allocated_adjust'];
+        // THE FIGURE THAT REACHES THE PROFIT AND LOSS. VAT and the Skills
+        // Promotion Tax are collected for the government and never earned, so
+        // revenue is the total before both -- which is also the base gross
+        // profit is measured against.
+        $revenue = 0.0;
+        foreach ($additive as $field) {
+            $revenue += $groups[$key][$field];
+        }
         $groups[$key]['revenue'] = jw_round_money($revenue);
+        $groups[$key]['net_before_tax'] = $groups[$key]['revenue'];
         $groups[$key]['gp_pct'] = $revenue > 0
             ? round($groups[$key]['gross_profit'] / $revenue * 100, 2)
             : null;
@@ -241,8 +257,12 @@ function jw_report_sales_bifurcated(int $companyId, string $from, string $to, st
     foreach ($money as $field) {
         $totals[$field] = jw_round_money($totals[$field]);
     }
-    $totals['revenue'] = jw_round_money($totals['metal_amount'] + $totals['wastage_amount']
-        + $totals['making_amount'] + $totals['stone_side'] + $totals['allocated_adjust']);
+    $totals['revenue'] = 0.0;
+    foreach ($additive as $field) {
+        $totals['revenue'] += $totals[$field];
+    }
+    $totals['revenue'] = jw_round_money($totals['revenue']);
+    $totals['net_before_tax'] = $totals['revenue'];
     $totals['gp_pct'] = $totals['revenue'] > 0
         ? round($totals['gross_profit'] / $totals['revenue'] * 100, 2)
         : null;
@@ -289,8 +309,9 @@ function jw_report_sales_bifurcated_rows(array $report, string $currency = ''): 
         $head = array_merge($head, ['Date', 'Customer (billed as)', 'Invoice ref.', 'Status']);
     }
     $head = array_merge($head, ['Lines', 'Pieces', 'Gross wt', 'Fine wt',
-        'Metal', 'Wastage', 'Making', 'Stone / diamond', 'Charges less discount',
-        'Skills Promotion Tax', 'VAT', 'TOTAL', 'COGS', 'Gross profit', 'GP %']);
+        'Metal (incl. wastage)', 'of which wastage', 'Making', 'Stone / diamond', 'Charges less discount',
+        'Net before SPT and VAT', 'Skills Promotion Tax', 'VAT', 'TOTAL',
+        'COGS', 'Gross profit', 'GP %']);
     $out = [$head];
 
     foreach ($report['rows'] as $row) {
@@ -301,8 +322,8 @@ function jw_report_sales_bifurcated_rows(array $report, string $currency = ''): 
         $out[] = array_merge($line, [
             $row['lines'], $row['pieces'], $row['gross_weight'], $row['fine_weight'],
             $row['metal_amount'], $row['wastage_amount'], $row['making_amount'], $row['stone_side'],
-            $row['allocated_adjust'], $row['tax_amount'], $row['vat_amount'], $row['line_total'],
-            $row['cogs_amount'], $row['gross_profit'],
+            $row['allocated_adjust'], $row['net_before_tax'], $row['tax_amount'], $row['vat_amount'],
+            $row['line_total'], $row['cogs_amount'], $row['gross_profit'],
             $row['gp_pct'] === null ? '' : $row['gp_pct'],
         ]);
     }
@@ -315,8 +336,8 @@ function jw_report_sales_bifurcated_rows(array $report, string $currency = ''): 
     $out[] = array_merge($totalLine, [
         $totals['lines'], $totals['pieces'], $totals['gross_weight'], $totals['fine_weight'],
         $totals['metal_amount'], $totals['wastage_amount'], $totals['making_amount'], $totals['stone_side'],
-        $totals['allocated_adjust'], $totals['tax_amount'], $totals['vat_amount'], $totals['line_total'],
-        $totals['cogs_amount'], $totals['gross_profit'],
+        $totals['allocated_adjust'], $totals['net_before_tax'], $totals['tax_amount'], $totals['vat_amount'],
+        $totals['line_total'], $totals['cogs_amount'], $totals['gross_profit'],
         $totals['gp_pct'] === null ? '' : $totals['gp_pct'],
     ]);
 
