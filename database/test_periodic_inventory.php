@@ -1111,5 +1111,20 @@ $portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/
 ok(str_contains($portalCss, '.mbw-nav-parent.is-open > a .mbw-nav-caret')
     && str_contains($portalCss, 'rotate(180deg)'),
     'An open group turns its caret, which is how it reads as open');
+
+// A CLOSED nested heading is stated outright rather than left to inherit. Five
+// stylesheets load over this nav and the last word on a heading's resting state
+// should be one rule somebody can find, not the accident of which file loaded
+// last.
+ok(preg_match('/\.mbw-nav-sub > a\[data-nav-toggle\] \{[^}]*background: transparent[^}]*\}/s', $designCss) === 1,
+    'A closed group heading is explicitly plain, not merely un-styled');
+ok(preg_match('/\.mbw-nav-sub\.is-open > a\[data-nav-toggle\] \{([^}]*)\}/s', $designCss, $subOpen) === 1
+    && !str_contains($subOpen[1], '--ui-green'),
+    '  ...and an open one is a wash, never the colour of the page you are on');
+
+// Every group on a page that has nothing to do with them must render closed.
+$navCheck = (string) file_get_contents(dirname(__DIR__) . '/app/views/partials/admin_header.php');
+ok(str_contains($navCheck, '$groupHasActive ? \' is-open\' : \'\''),
+    'A group opens only when the page being looked at is inside it');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

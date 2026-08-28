@@ -618,11 +618,28 @@ body.admin-layout .admin-sidebar .mbw-nav-sub > a[data-nav-toggle] {
   min-height: 36px !important;
   padding: 7px 10px !important;
 }
+/* A CLOSED group is a heading, not a destination. Said explicitly rather than
+   left to inherit: this rule is the last word on a nested group's resting
+   state, so nothing further down any stylesheet can give it the look of the
+   page you are on. A group that merely CONTAINS the current page must not
+   compete with the link that IS it. */
+body.admin-layout .admin-sidebar .mbw-nav-sub > a[data-nav-toggle] {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
 body.admin-layout .admin-sidebar .mbw-nav-sub.is-open > a[data-nav-toggle] {
-  background: rgba(255, 255, 255, .12) !important;
+  background: rgba(255, 255, 255, .10) !important;
   box-shadow: none !important;
   border-color: transparent !important;
   opacity: 1;
+}
+/* Only a toggle that is itself the current page keeps the marker. No nested
+   group heading is ever a page, so in practice this is the module heading of a
+   module whose own landing page you are on. */
+body.admin-layout .admin-sidebar .mbw-nav-sub > a[data-nav-toggle].is-active {
+  background: var(--ui-green-700) !important;
+  box-shadow: inset 3px 0 0 var(--ui-gold) !important;
 }
 /* Each level steps in a little less than the last. Indenting every level by the
    same amount walks the third one off the edge of a narrow sidebar. */
