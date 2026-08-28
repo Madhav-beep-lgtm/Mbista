@@ -1082,5 +1082,34 @@ ok(substr_count($portalCss, '.mbw-nav-parent.is-open > .mbw-subnav') >= 2,
 $designCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/design-system.css');
 ok(!preg_match('/\.mbw-nav-parent\.is-open\s+a\[data-nav-toggle\]/', $designCss),
     'And no rule lights a heading by descent, which would make every group look selected');
+
+echo "\n23. Green means you are here, and nothing else\n";
+// Open and current shared one style. That was fine while one group could be open
+// at a time; nested three deep it painted the whole PATH to a page in the same
+// colour as the page -- Client Accounting, Jewellery Accounting, Trade and the
+// link itself, four things looking selected when only one was.
+$designCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/design-system.css');
+
+// The solid green and the gold marker belong to the active link alone.
+ok(preg_match('/\.mbw-nav-parent>a\[data-nav-toggle\]\.is-active\s*\{[^}]*--ui-green-700[^}]*\}/s', $designCss) === 1,
+    'The ACTIVE link keeps the solid green');
+ok(preg_match('/\.mbw-nav-parent>a\[data-nav-toggle\]\.is-active\s*\{[^}]*--ui-gold[^}]*\}/s', $designCss) === 1,
+    '  ...and the gold marker');
+
+// An open group says so quietly.
+ok(preg_match('/\.mbw-nav-parent\.is-open>a\[data-nav-toggle\]\s*\{([^}]*)\}/s', $designCss, $openBlock) === 1,
+    'An open group has a style of its own');
+ok(isset($openBlock[1]) && !str_contains($openBlock[1], '--ui-green-700'),
+    '  ...which is NOT the solid green — that would mark the path as the destination');
+ok(isset($openBlock[1]) && !str_contains($openBlock[1], '--ui-gold'),
+    '  ...and carries no gold marker either');
+ok(isset($openBlock[1]) && str_contains($openBlock[1], 'box-shadow:none'),
+    '  ...so nothing on the path competes with the page you are on');
+
+// The caret is what an open group is recognised by instead.
+$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/portal.css');
+ok(str_contains($portalCss, '.mbw-nav-parent.is-open > a .mbw-nav-caret')
+    && str_contains($portalCss, 'rotate(180deg)'),
+    'An open group turns its caret, which is how it reads as open');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

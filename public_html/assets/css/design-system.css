@@ -134,13 +134,26 @@ body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle] {
   box-shadow:none!important;
 }
 body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle]:hover {background:rgba(255,255,255,.1)!important}
-body.admin-layout .admin-sidebar .mbw-nav-parent.is-open>a[data-nav-toggle],
+/* GREEN MEANS "YOU ARE HERE", AND NOTHING ELSE.
+   Open and current used to share this style, which was fine while one group
+   could be open at a time. Nested three deep -- Client Accounting holding
+   Jewellery holding Trade -- it painted the whole PATH to the page in the same
+   colour as the page, so four things looked selected and only one was. An open
+   group now says so quietly, with a lit caret and a faint wash; the solid green
+   and the gold bar are kept for the one link you are actually on. */
 body.admin-layout .admin-sidebar .mbw-nav-parent>a[data-nav-toggle].is-active {
   background:var(--ui-green-700)!important;
   color:#fff!important;
   -webkit-text-fill-color:#fff!important;
   border-color:rgba(255,255,255,.3)!important;
   box-shadow:inset 3px 0 0 var(--ui-gold)!important;
+}
+body.admin-layout .admin-sidebar .mbw-nav-parent.is-open>a[data-nav-toggle] {
+  background:rgba(255,255,255,.08)!important;
+  color:#fff!important;
+  -webkit-text-fill-color:#fff!important;
+  border-color:transparent!important;
+  box-shadow:none!important;
 }
 body.admin-layout .admin-sidebar .mbw-nav-caret {color:#fff!important;opacity:1!important}
 body.admin-layout .admin-sidebar .mbw-subnav {
