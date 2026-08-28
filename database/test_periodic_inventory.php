@@ -1059,5 +1059,28 @@ ok(str_contains($mainJs, 'event.stopPropagation()'),
     '  ...without the click also reaching the group they sit in');
 ok(substr_count($mainJs, ':scope > [data-nav-toggle]') >= 2,
     'Each level binds its own toggle, not the first one it finds inside itself');
+
+echo "\n22. A closed group stays closed, however deep it sits\n";
+// THE FAULT THIS SECTION EXISTS FOR. The rule that reveals a submenu was written
+// with a DESCENDANT combinator:
+//
+//     .mbw-nav-parent.is-open .mbw-subnav { display: grid }
+//
+// which was harmless while the nav was one level deep. Nested, it matched every
+// submenu at every depth the moment the OUTER group opened -- so opening Client
+// Accounting opened all five jewellery groups at once, every heading lit up as
+// though selected, and nothing would collapse. The server was marking exactly
+// one group open the whole time; the stylesheet was ignoring it.
+$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/portal.css');
+ok(!preg_match('/\.mbw-nav-parent\.is-open\s+\.mbw-subnav\s*\{/', $portalCss),
+    'No rule reveals a submenu by DESCENT — that opens every level at once');
+ok(substr_count($portalCss, '.mbw-nav-parent.is-open > .mbw-subnav') >= 2,
+    '  ...both the display and the animation reach exactly one level down');
+
+// And the same trap in reverse: the heading styling must not paint every
+// nested heading as open either.
+$designCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/design-system.css');
+ok(!preg_match('/\.mbw-nav-parent\.is-open\s+a\[data-nav-toggle\]/', $designCss),
+    'And no rule lights a heading by descent, which would make every group look selected');
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

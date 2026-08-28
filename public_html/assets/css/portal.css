@@ -278,7 +278,12 @@ body.admin-layout .mbw-subnav {
   border-left: 1px solid rgba(205,187,175, 0.25);
 }
 
-body.admin-layout .mbw-nav-parent.is-open .mbw-subnav {
+/* A CHILD combinator, not a descendant one. With Jewellery nested inside
+   Client Accounting, ".is-open .mbw-subnav" matched every submenu at every
+   depth the moment the OUTER group opened -- so all five jewellery groups
+   showed their links at once and none of them would collapse. The rule has
+   to reach one level down, not all of them. */
+body.admin-layout .mbw-nav-parent.is-open > .mbw-subnav {
   display: grid;
   gap: 1px;
 }
@@ -6873,7 +6878,7 @@ body.admin-layout .admin-nav a:hover .ui-icon {
   opacity: 1;
 }
 
-body.admin-layout .mbw-nav-parent.is-open .mbw-subnav {
+body.admin-layout .mbw-nav-parent.is-open > .mbw-subnav {
   animation: skySlideDown 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
