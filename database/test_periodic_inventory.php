@@ -1112,15 +1112,19 @@ ok(str_contains($portalCss, '.mbw-nav-parent.is-open > a .mbw-nav-caret')
     && str_contains($portalCss, 'rotate(180deg)'),
     'An open group turns its caret, which is how it reads as open');
 
-// A CLOSED nested heading is stated outright rather than left to inherit. Five
-// stylesheets load over this nav and the last word on a heading's resting state
-// should be one rule somebody can find, not the accident of which file loaded
-// last.
-ok(preg_match('/\.mbw-nav-sub > a\[data-nav-toggle\] \{[^}]*background: transparent[^}]*\}/s', $designCss) === 1,
-    'A closed group heading is explicitly plain, not merely un-styled');
-ok(preg_match('/\.mbw-nav-sub\.is-open > a\[data-nav-toggle\] \{([^}]*)\}/s', $designCss, $subOpen) === 1
-    && !str_contains($subOpen[1], '--ui-green'),
-    '  ...and an open one is a wash, never the colour of the page you are on');
+// A GROUP HEADING IS NOT A BUTTON, IN ANY STATE. Out-specifying whichever rule
+// was tinting these failed three times over -- the winning declaration computed
+// to transparent every time and they still read as selected -- so the pill is
+// taken away altogether rather than argued with.
+ok(preg_match('/\.mbw-subnav a\[data-nav-toggle\][^{]*\{([^}]*)\}/s', $designCss, $headBlock) === 1,
+    'A heading that opens a submenu has a rule of its own');
+ok(isset($headBlock[1]) && str_contains($headBlock[1], 'background: none !important'),
+    '  ...taking its background away outright, in every state');
+ok(isset($headBlock[1]) && str_contains($headBlock[1], 'box-shadow: none !important')
+    && str_contains($headBlock[1], 'border-radius: 0 !important'),
+    '  ...along with the shadow and the rounding that made it look like a pill');
+ok(!preg_match('/\.mbw-subnav a\[data-nav-toggle\][^{]*\{[^}]*--ui-green/s', $designCss),
+    '  ...and it can never take the colour of the page you are on');
 
 // Every group on a page that has nothing to do with them must render closed.
 $navCheck = (string) file_get_contents(dirname(__DIR__) . '/app/views/partials/admin_header.php');

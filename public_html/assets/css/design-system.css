@@ -618,28 +618,39 @@ body.admin-layout .admin-sidebar .mbw-nav-sub > a[data-nav-toggle] {
   min-height: 36px !important;
   padding: 7px 10px !important;
 }
-/* A CLOSED group is a heading, not a destination. Said explicitly rather than
-   left to inherit: this rule is the last word on a nested group's resting
-   state, so nothing further down any stylesheet can give it the look of the
-   page you are on. A group that merely CONTAINS the current page must not
-   compete with the link that IS it. */
-body.admin-layout .admin-sidebar .mbw-nav-sub > a[data-nav-toggle] {
-  background: transparent !important;
+/* A GROUP HEADING IS NOT A BUTTON, IN ANY STATE.
+   Three separate attempts to out-specify whichever rule was tinting these
+   failed, because the winning declaration computed to transparent every time
+   and they still read as selected. So the argument is settled by taking the
+   pill away altogether: nothing inside a submenu that opens another submenu
+   gets a background, a border or a shadow, open or closed, hovered or not.
+   It is a label with a caret. The green pill and the gold edge then mean one
+   thing on the whole sidebar -- the page you are on -- because they are the
+   only things left wearing them. */
+body.admin-layout .admin-sidebar .admin-nav .mbw-subnav a[data-nav-toggle],
+body.admin-layout .admin-sidebar .admin-nav .mbw-subnav a[data-nav-toggle]:hover,
+body.admin-layout .admin-sidebar .admin-nav .mbw-subnav a[data-nav-toggle]:focus,
+body.admin-layout .admin-sidebar .admin-nav .mbw-subnav.is-open a[data-nav-toggle] {
+  background: none !important;
+  background-color: transparent !important;
+  border: 0 !important;
   box-shadow: none !important;
-  border-color: transparent !important;
+  border-radius: 0 !important;
 }
-body.admin-layout .admin-sidebar .mbw-nav-sub.is-open > a[data-nav-toggle] {
-  background: rgba(255, 255, 255, .10) !important;
-  box-shadow: none !important;
-  border-color: transparent !important;
+/* Closed reads quieter than open; the caret and the weight carry the state,
+   which is all a heading needs to say. */
+body.admin-layout .admin-sidebar .admin-nav .mbw-subnav a[data-nav-toggle] {
+  font-weight: 600 !important;
+  opacity: .82;
+  letter-spacing: .01em;
+}
+body.admin-layout .admin-sidebar .admin-nav .mbw-nav-parent.is-open > a[data-nav-toggle] {
   opacity: 1;
 }
-/* Only a toggle that is itself the current page keeps the marker. No nested
-   group heading is ever a page, so in practice this is the module heading of a
-   module whose own landing page you are on. */
-body.admin-layout .admin-sidebar .mbw-nav-sub > a[data-nav-toggle].is-active {
-  background: var(--ui-green-700) !important;
-  box-shadow: inset 3px 0 0 var(--ui-gold) !important;
+body.admin-layout .admin-sidebar .admin-nav .mbw-subnav a[data-nav-toggle]:hover {
+  opacity: 1;
+  text-decoration: underline !important;
+  text-underline-offset: 3px;
 }
 /* Each level steps in a little less than the last. Indenting every level by the
    same amount walks the third one off the edge of a narrow sidebar. */
