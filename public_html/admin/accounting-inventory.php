@@ -133,7 +133,12 @@ function inventory_set_item_ledger(int $companyId, int $itemId, string $purpose,
 /** The posting purposes that apply to ONE item, by its type (FA-style filter). */
 function inventory_purposes_for_item(array $item): array
 {
-    $base = ['inventory_asset', 'opening_equity', 'purchase_clearing', 'cogs', 'sales_revenue', 'inventory_gain', 'inventory_loss', 'write_down_expense', 'write_down_allowance', 'write_down_reversal', 'tax_input', 'tax_output'];
+    // 'purchases' and 'purchase_returns' are where bought-in goods land when
+    // the books are kept PERIODIC. They are per-item like everything else here:
+    // a shop that wants gold purchases in one account and packing material in
+    // another says so on the item, not by keeping one Purchases account and
+    // sorting it out afterwards.
+    $base = ['inventory_asset', 'purchases', 'purchase_returns', 'opening_equity', 'purchase_clearing', 'cogs', 'sales_revenue', 'inventory_gain', 'inventory_loss', 'write_down_expense', 'write_down_allowance', 'write_down_reversal', 'tax_input', 'tax_output'];
     return match ((string) ($item['item_type'] ?? 'stock')) {
         'raw_material' => array_merge($base, ['raw_material', 'wip']),
         'finished_good' => array_merge($base, ['finished_goods', 'wip', 'labour_clearing', 'overhead_absorbed']),
@@ -2879,7 +2884,18 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                     ? str_replace('<option ', '<option selected ', $invLedgerOptionById[$ledgerId])
                     : '';
             };
-            $itemFormPurposes = ['inventory_asset', 'purchase_clearing', 'cogs', 'opening_equity'];
+            // Which account a purchase of THIS item debits depends on how the
+            // books are kept, so the form asks for the one that will actually
+            // be posted to rather than a fixed four.
+            //
+            // Perpetual debits the item's own stock account. Periodic leaves
+            // the stock accounts alone all year and debits Purchases -- so on
+            // periodic books the Inventory Asset row alone could be set on
+            // every item in the company and every purchase would still land in
+            // one shared account, which is not a mapping anybody chose.
+            $itemFormPurposes = inv_accounting_method() === 'periodic'
+                ? ['purchases', 'purchase_clearing', 'inventory_asset', 'cogs', 'opening_equity']
+                : ['inventory_asset', 'purchase_clearing', 'cogs', 'opening_equity'];
             $itemPurposeMeta = inventory_mapping_purposes();
             ?>
             <?php foreach ($itemFormPurposes as $itemFormPurpose): ?>

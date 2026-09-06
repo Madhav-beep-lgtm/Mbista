@@ -1195,5 +1195,117 @@ $extra = jewellery_extra_inventory_purposes();
 ok(!array_key_exists('purchases', $extra),
     'And it is not added to the core screen a second time, where it already lives');
 
+// ---------------------------------------------------------------------------
+// One Purchases account for the whole shop is not a mapping anybody chose.
+// ---------------------------------------------------------------------------
+// The resolver has always walked item -> category -> company, so a purchase
+// CAN go to the item's own account. What was missing was anywhere to say so:
+// the item form asked for Inventory Asset, Purchase Clearing, COGS and Opening
+// Equity, and under periodic books a purchase debits none of those. Every
+// purchase in the company therefore landed in the one global Purchases
+// account, whatever was set on the item.
+//
+// Proved by posting, not by reading the mapping table back: two items with
+// their own accounts and one with none, and where each purchase actually
+// lands.
+echo "\n== A purchase goes to the item's own Purchases account ==\n";
+require_once dirname(__DIR__) . '/app/inventory_purchase_batch.php';
+
+$piCo = 0;
+foreach (db()->query("SELECT id FROM companies WHERE code = 'PIROUTE'")->fetchAll(PDO::FETCH_COLUMN) as $old) {
+    $old = (int) $old;
+    db()->exec("DELETE e FROM voucher_entries e JOIN vouchers v ON v.id = e.voucher_id WHERE v.company_id = $old");
+    db()->exec("DELETE FROM vouchers WHERE company_id = $old");
+    foreach (['inventory_ledger_mappings', 'inventory_cost_layers', 'inventory_transactions',
+              'inventory_items'] as $t) { db()->exec("DELETE FROM `$t` WHERE company_id = $old"); }
+    db()->exec("DELETE FROM ledgers WHERE company_id = $old");
+    db()->exec("DELETE FROM ledger_groups WHERE company_id = $old");
+    db()->exec("DELETE FROM fiscal_years WHERE company_id = $old");
+    db()->exec("DELETE FROM companies WHERE id = $old");
+}
+db()->prepare("INSERT INTO companies (name, code, is_active) VALUES ('Per Item Routing','PIROUTE',1)")->execute();
+$piCo = (int) db()->lastInsertId();
+$piFyRow = create_fiscal_year($piCo, 'PI FY', '2026-07-16', '2027-07-15', true);
+db()->prepare("UPDATE fiscal_years SET status = 'open' WHERE id = ?")->execute([$piFyRow['id']]);
+$piFy = (int) $piFyRow['id'];
+$piUser = (int) db()->query("SELECT id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY id LIMIT 1")->fetchColumn();
+
+$piLedger = static function (string $name, string $type) use ($piCo): int {
+    db()->prepare("INSERT INTO ledgers (company_id, code, name, type, status)
+        VALUES (:c, :code, :n, :t, 'active')")
+        ->execute(['c' => $piCo, 'code' => 'PIR-' . substr(md5($name), 0, 6), 'n' => $name, 't' => $type]);
+    return (int) db()->lastInsertId();
+};
+$piShared = $piLedger('Purchases — everything else', 'expense');
+$piGold   = $piLedger('Purchases — gold', 'expense');
+$piStone  = $piLedger('Purchases — stones', 'expense');
+foreach (['purchases' => $piShared, 'purchase_clearing' => $piLedger('Sundry creditors', 'liability'),
+          'inventory_asset' => $piLedger('Inventory', 'asset'),
+          'opening_equity' => $piLedger('Opening equity', 'equity')] as $piPurpose => $piLid) {
+    db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, purpose, ledger_id)
+        VALUES (:c, 'global', :p, :l)")->execute(['c' => $piCo, 'p' => $piPurpose, 'l' => $piLid]);
+}
+
+$piItem = static function (string $sku) use ($piCo): int {
+    db()->prepare("INSERT INTO inventory_items (company_id, sku, name, item_type, valuation_method, unit, purchase_rate, status)
+        VALUES (:c, :s, :n, 'stock', 'weighted_average', 'kg', 100, 'active')")
+        ->execute(['c' => $piCo, 's' => $sku, 'n' => $sku . ' item']);
+    return (int) db()->lastInsertId();
+};
+$piA = $piItem('GOLDBAR');
+$piB = $piItem('RUBY');
+$piC = $piItem('BOXES');
+// Written exactly as the item form writes it: scope 'item', category NULL.
+foreach ([[$piA, $piGold], [$piB, $piStone]] as [$piItemId, $piLid]) {
+    db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id)
+        VALUES (:c, 'item', NULL, :i, 'purchases', :l)")
+        ->execute(['c' => $piCo, 'i' => $piItemId, 'l' => $piLid]);
+}
+inv_mapping_forget();
+
+$piDebit = static function (int $voucherId): string {
+    $stmt = db()->prepare("SELECT l.name FROM voucher_entries e INNER JOIN ledgers l ON l.id = e.ledger_id
+        WHERE e.voucher_id = :v AND e.entry_type = 'debit' ORDER BY e.id LIMIT 1");
+    $stmt->execute(['v' => $voucherId]);
+    return (string) ($stmt->fetchColumn() ?: '(nothing)');
+};
+// Purchases only reach a Purchases account when the books are periodic; under
+// perpetual they debit the item's stock account, which is a different question.
+with_method('periodic', static function () use ($piCo, $piFy, $piUser, $piA, $piB, $piC, $piDebit): void {
+    foreach ([[$piA, 'GOLDBAR', 'Purchases — gold'], [$piB, 'RUBY', 'Purchases — stones'],
+              [$piC, 'BOXES', 'Purchases — everything else']] as [$piItemId, $piSku, $piWant]) {
+        $piChecked = inv_purchase_batch_validate($piCo, $piFy, [[
+            'item_id' => $piItemId, 'movement' => 'purchase', 'transaction_date' => '2026-08-01',
+            'quantity' => 5, 'rate' => 100, 'vat_mode' => 'zero', 'ref_no' => 'PIR-' . $piSku]]);
+        $piResult = inv_purchase_batch_post($piCo, $piFy, $piChecked, $piUser);
+        $piGot = $piResult['ok'] ? $piDebit((int) $piResult['lines'][0]['voucher_id'])
+            : 'refused — ' . $piResult['error'];
+        ok($piGot === $piWant, $piSku . ' is bought into "' . $piGot . '"'
+            . ($piGot === $piWant ? ($piSku === 'BOXES' ? ' — the company default, having none of its own' : '') : ', wanted "' . $piWant . '"'));
+    }
+});
+
+// And the form has to ASK, or none of the above can ever be set.
+$itemFormSource = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php');
+ok(str_contains($itemFormSource, "inv_accounting_method() === 'periodic'\n                ? ['purchases'"),
+    'The item form asks for the Purchases account when the books are periodic');
+ok(str_contains($itemFormSource, "'inventory_asset', 'purchases', 'purchase_returns'"),
+    '  ...and the full per-item ledger panel lists it too');
+
+foreach (['voucher_entries' => null, 'vouchers' => 'company_id = :c',
+          'inventory_ledger_mappings' => 'company_id = :c', 'inventory_cost_layers' => 'company_id = :c',
+          'inventory_transactions' => 'company_id = :c', 'inventory_items' => 'company_id = :c'] as $piT => $piWhere) {
+    if ($piWhere === null) {
+        db()->prepare("DELETE e FROM voucher_entries e JOIN vouchers v ON v.id = e.voucher_id WHERE v.company_id = :c")
+            ->execute(['c' => $piCo]);
+        continue;
+    }
+    db()->prepare("DELETE FROM `$piT` WHERE $piWhere")->execute(['c' => $piCo]);
+}
+db()->prepare("DELETE FROM ledgers WHERE company_id = :c")->execute(['c' => $piCo]);
+db()->prepare("DELETE FROM ledger_groups WHERE company_id = :c")->execute(['c' => $piCo]);
+db()->prepare("DELETE FROM fiscal_years WHERE company_id = :c")->execute(['c' => $piCo]);
+db()->prepare("DELETE FROM companies WHERE id = :c")->execute(['c' => $piCo]);
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);
