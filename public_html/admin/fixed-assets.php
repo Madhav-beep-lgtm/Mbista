@@ -2301,7 +2301,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div>
             <span class="fa-eyebrow">IAS 16 and IAS 38 policy control</span>
             <h2>Cost model or revaluation model</h2>
-            <p>Select one model for the complete asset class. The selection applies equally in admin, staff and client accounting because all portals use this shared page.</p>
+            <p>Select one model for the whole asset class.</p>
         </div>
         <div class="fa-policy-callout">
             <strong>Class-wide control</strong>
@@ -2713,7 +2713,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <div>
                             <span class="fa-eyebrow">New class-wide batch</span>
                             <h2>Create revaluation batch</h2>
-                            <p>Select one asset class. Every active asset in that class is included and frozen in the batch.</p>
+                            <p>Every active asset in the class is included and frozen in the batch.</p>
                         </div>
                     </div>
 
@@ -2886,7 +2886,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endif; ?>
             <?php if ((string) $activeLease['status'] === 'active'): ?>
             <details class="feature-disclosure" style="margin-bottom:12px">
-                <summary><span><strong><?= icon('settings') ?>Modify lease (change payment / term / rate)</strong><small>IFRS 16: the liability is remeasured to the PV of the revised payments at the revised rate; the RoU asset is adjusted by the same amount and the remaining schedule is regenerated. Posted periods stay untouched.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('settings') ?>Modify lease (change payment / term / rate)</strong><small>IFRS 16: the liability is remeasured to the PV of the revised payments, the RoU asset adjusted by the same amount and the remaining schedule regenerated. Posted periods are untouched.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid" data-confirm="Remeasure this lease? Unposted schedule periods are replaced with the revised terms.">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="modify_lease">
@@ -3007,7 +3007,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if ($detailAcquisitionUnposted): ?>
         <section class="mbw-card" data-collapsible style="border-left:4px solid #c0392b">
             <div class="mbw-card-head"><h2>Acquisition not posted to the ledger</h2></div>
-            <p style="margin:0 0 10px">This asset sits in the register, but its acquisition voucher was never posted, so the books do not yet show the asset cost. Choose the two ledgers and post it now (Dr asset cost / Cr funded-from). The choice sticks to this asset only.</p>
+            <p style="margin:0 0 10px">The acquisition voucher has not been posted, so the asset cost is not yet in the books. Choose the two ledgers and post it (Dr asset cost / Cr funded-from).</p>
             <?php
             $panelCostPurpose = (string) $detailAsset['asset_class'] === 'cwip' ? 'cwip' : 'ppe_cost';
             $panelCost = fa_resolve_mapping($companyId, $panelCostPurpose, (int) $detailAsset['id']);
@@ -3031,7 +3031,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if (user_can_do('accounting', 'edit')): ?>
     <section class="mbw-card" data-collapsible id="edit-asset">
         <div class="mbw-card-head"><h2>Edit asset details</h2>
-            <span class="frm-optional">Cost, code and class are not editable here — cost is already in the ledger and is changed by an addition, the code is inside every voucher number this asset has produced, and the class decides which ledgers it posts to</span>
+            <span class="frm-optional">Cost, code and class cannot be changed here. Cost changes by an addition.</span>
         </div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -3098,10 +3098,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                         <label style="font-size:12.5px">Days in service this period
                             <input type="number" name="period_days" value="30" min="1" max="31" class="field-compact" style="max-width:110px"
-                                   title="Charge = monthly charge × days/30. Use this when the asset was available for only part of the period — e.g. bought 15 days before the fiscal year closes, enter 15.">
+                                   title="Charge = monthly charge × days/30.">
                         </label>
                         <div><button type="submit"><?= icon('accounting') ?>Post depreciation</button></div>
-                        <small class="muted">A part period (IAS 16: depreciation starts when the asset is available for use) is charged pro-rata at days/30 — enter 15 for a half month.</small>
+                        <small class="muted">A part period is charged pro-rata at days/30.</small>
                     </form>
                 <?php endif; ?>
             </div>
@@ -3163,7 +3163,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </form>
             </details>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('reconcile') ?>Reverse impairment (IAS 36.117)</strong><small>Reversal is capped at the carrying amount (net of normal depreciation) that would have applied had no impairment ever been recognised.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('reconcile') ?>Reverse impairment (IAS 36.117)</strong><small>Reversal is capped at the carrying amount that would have applied without the impairment.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <?php if ((float) $detailAsset['accumulated_impairment'] <= 0): ?>
                     <p style="color:var(--mbw-muted);font-size:12.5px;margin:0 0 10px">No accumulated impairment on this asset — nothing to reverse yet.</p>
                 <?php endif; ?>
@@ -3195,7 +3195,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
             <?php if ((string) $detailAsset['asset_class'] === 'cwip'): ?>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('wallet') ?>Capitalize borrowing cost (IAS 23)</strong><small>Qualifying asset under construction: interest = borrowing × annual rate × months ÷ 12, added to the CWIP cost. Stops once the asset is ready for use.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('wallet') ?>Capitalize borrowing cost (IAS 23)</strong><small>Interest = borrowing × annual rate × months ÷ 12, added to CWIP cost. Stops when the asset is ready for use.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="capitalize_borrowing_cost"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Borrowing / expenditure amount<input type="number" step="0.01" name="borrowing_amount" value="<?= e(number_format((float) $detailAsset['cost'], 2, '.', '')) ?>"></label>
@@ -3211,7 +3211,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </form>
             </details>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('upload') ?>Complete &amp; transfer to fixed asset</strong><small>Construction finished: posts Dr PPE / Cr Capital WIP for the accumulated cost, reclassifies the asset and starts depreciation.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('upload') ?>Complete &amp; transfer to fixed asset</strong><small>Posts Dr PPE / Cr Capital WIP, reclassifies the asset and starts depreciation.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="capitalize_cwip"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Target class<select name="new_asset_class">
@@ -3250,7 +3250,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </form>
             </details>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('upload') ?>Add cost (subsequent expenditure)</strong><small>Capitalize additional cost onto this asset — Dr asset cost / Cr supplier, cash or clearing.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('upload') ?>Add cost (subsequent expenditure)</strong><small>Capitalise additional cost: Dr asset cost / Cr supplier, cash or clearing.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="add_asset_cost"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Additional cost<input type="number" step="0.01" name="amount" value="0.00" required></label>
@@ -3333,7 +3333,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php else: ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">The ledgers you choose here belong to THIS asset only — registration prepares the entry as a DRAFT; it reaches the ledger, and takes its voucher number, when you post it below</span></div>
+        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">These ledgers apply to this asset only. Registration creates a draft; post it below.</span></div>
         <?php
         $regDefCost = fa_resolve_mapping($companyId, 'ppe_cost');
         $regDefFunding = fa_resolve_mapping($companyId, 'acquisition_clearing');
@@ -3465,7 +3465,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     }
     ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Acquisition entries</h2><span class="frm-optional">A draft is not in the books yet — posting puts it there and gives it its voucher number</span></div>
+        <div class="mbw-card-head"><h2>Acquisition entries</h2><span class="frm-optional">A draft is not in the books until it is posted.</span></div>
         <?php if ($acqRows === []): ?>
             <p class="frm-optional" style="padding:12px">No acquisition entries yet. Register an asset above and its entry appears here.</p>
         <?php else: ?>
@@ -3605,11 +3605,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php if ((int) $depTotals['future_periods'] > 0): ?>
                 <strong><?= (int) $depTotals['future_periods'] ?> period(s)</strong> of this window are still to come; they appear here once they end.
             <?php endif; ?>
-            <br>Periods run from the financial year&rsquo;s own start day, not from calendar month ends: a year beginning 16 Shrawan charges
-            twelve periods of 16th&nbsp;to&nbsp;15th, the last ending on the year&rsquo;s final day. Only an asset that came into use part-way
-            through a period is pro-rated, since that is the only part period that is real. A month already charged is left alone, which makes this safe to re-run after adding
-            a late asset. Nothing is charged below residual value, and an asset held for sale is not charged at all (IFRS 5.25).
-            &ldquo;Charge for the window&rdquo; is what the register shows as this period&rsquo;s depreciation &mdash; the two always agree.
+            <br>Periods run from the financial year&rsquo;s start day, not calendar month ends.
+            Only an asset brought into use part-way through a period is pro-rated, and a period already charged is skipped, so this is safe to re-run.
+            Nothing is charged below residual value; an asset held for sale is not charged (IFRS 5.25).
 
         </p>
         <?php endif; ?>
@@ -3748,7 +3746,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <th colspan="4" class="align-right">Cost</th>
                     <th colspan="4" class="align-right">Accumulated depreciation</th>
                     <th colspan="4" class="align-right">Accumulated impairment</th>
-                    <th rowspan="2" class="align-right" title="Revalued assets are carried at fair value, so this is the difference between cost and what they are carried at">Revaluation</th>
+                    <th rowspan="2" class="align-right" title="The difference between cost and carrying amount on revalued assets">Revaluation</th>
                     <th rowspan="2" class="align-right">Gain/(loss) on disposal</th>
                     <th colspan="4" class="align-right">Carrying amount</th>
                     <th rowspan="2">Status</th><th rowspan="2"></th>
@@ -3860,8 +3858,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endif; ?>
         </table></div>
         <p class="frm-optional" style="padding:8px 12px">
-            Carrying amount is cost, plus any revaluation, less accumulated depreciation and accumulated impairment — at opening and at closing alike, so the two are comparable. It ties to the carrying amount held against each asset. Closing also reflects the depreciation and impairment charged inside the window, which is why the four carrying columns do not foot on their own — the charge for the period is in the two blocks to the left.
-            Depreciation counts only where it has been posted — a computed but unposted schedule row is a plan, not a charge.
+            Carrying amount = cost, plus revaluation, less accumulated depreciation and impairment, at both opening and closing. The four carrying columns do not foot on their own; the charge for the period is in the two blocks to the left.
+            Only posted depreciation is counted; an unposted schedule row is not a charge.
         </p>
     </section>
 <?php endif; ?>

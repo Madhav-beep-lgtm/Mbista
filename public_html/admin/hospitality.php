@@ -1195,9 +1195,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
 ?>
 <?php if ($view === 'sales-upload'): ?>
-    <div class="notice" style="margin-bottom:14px"><strong>Posts to accounting:</strong> unlike the costing tabs, sheets posted here create real daily sales vouchers (receivable, sales per category ledger, VAT, discount) in the Voucher Register.</div>
+    <div class="notice" style="margin-bottom:14px"><strong>Posts to accounting.</strong> Sheets posted here create daily sales vouchers in the Voucher Register.</div>
 <?php else: ?>
-    <div class="notice" style="margin-bottom:14px"><strong>Reference only:</strong> <?= e($disclaimer) ?> Hospitality costing is an estimate based on configured recipes and reference ingredient costs. It does not post to accounting or inventory (daily sales posting lives in the Sales Upload tab).</div>
+    <div class="notice" style="margin-bottom:14px"><strong>Reference only.</strong> <?= e($disclaimer) ?></div>
 <?php endif; ?>
 
 <nav class="mbw-tabbar" aria-label="Hospitality sections" style="flex-wrap:wrap">
@@ -1268,7 +1268,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <?php endforeach; ?>
                 </tbody>
             </table></div>
-            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Weighted GP % = category GP ÷ category net sales (never a plain average of item percentages).</p>
+            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Weighted GP % = category GP ÷ category net sales.</p>
         </section>
     </div>
 
@@ -1298,10 +1298,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     ?>
     <div class="notice" style="margin-bottom:14px">
         <strong>Ingredients come from the item master.</strong>
-        The kitchen buys rice once, so it is described once: tick <em>Use as a recipe ingredient</em> on an inventory item and it appears here.
-        Its code, name, category, purchase unit and cost stay with the item, where they are bought and valued.
-        What this screen holds is only what the item master has no opinion about — the unit a recipe measures it in,
-        how many of those are in a purchase unit, and the wastage and yield of preparing it.
+        Tick <em>Use as a recipe ingredient</em> on an inventory item to list it here.
+        This screen holds the recipe unit, its conversion, and wastage and yield.
         <a href="<?= e(url('admin/accounting-inventory.php?view=items')) ?>">Open the item master →</a>
         <?php if ($ingredientSync['created'] > 0 || $ingredientSync['retired'] > 0 || $ingredientSync['restored'] > 0): ?>
             <br><span class="mbw-pill tone-green" style="margin-top:6px;display:inline-block">Just refreshed:
@@ -1387,9 +1385,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php endif; ?>
         </form>
         <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-            Cost per recipe unit is the purchase cost divided by the conversion, adjusted for wastage and yield — it is what a recipe is costed at.
-            Un-ticking an item on the item master makes its ingredient inactive rather than deleting it, because recipes may already quote it and
-            their costed history must not move.
+            Cost per recipe unit = purchase cost ÷ conversion, adjusted for wastage and yield.
+            Un-ticking an item on the item master deactivates the ingredient; it is not deleted.
             <?php if ($unlinkedCount > 0): ?>
                 <br><?= (int) $unlinkedCount ?> ingredient<?= $unlinkedCount === 1 ? ' was' : 's were' ?> entered before ingredients came from the item master.
                 <?= $unlinkedCount === 1 ? 'It keeps' : 'They keep' ?> working; link <?= $unlinkedCount === 1 ? 'it' : 'them' ?> by creating the matching inventory item and ticking the box there.
@@ -1443,9 +1440,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php endif; ?>
     <?php if ($canEdit && !$editMenuItem): ?>
         <div class="notice" style="margin-bottom:14px">
-            The menu is built from the daily sales upload — every distinct item on a sheet becomes a menu item the first time it is sold,
-            with a standard price worked out from the busiest day it appears on. That keeps the menu matching what the kitchen is
-            actually selling, and it means every item here has sales behind it to cost.
+            Menu items are created from the daily sales upload, with a standard price taken from the busiest day.
             <strong>Edit</strong> an item below to correct its price, unit or category.
             <a href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Upload a sales sheet →</a>
         </div>
@@ -1677,7 +1672,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Sales description</th><th>Item ID</th><th>First sale / invoice</th><th class="is-numeric">Qty</th><th class="is-numeric">Sales value</th><th style="min-width:340px">Map to menu item / Ignore</th></tr></thead>
             <tbody>
-                <?php if ($queue === []): ?><tr><td colspan="6">No unmapped sales in this range — everything is mapped, ignored, or there are no sales.</td></tr><?php endif; ?>
+                <?php if ($queue === []): ?><tr><td colspan="6">No unmapped sales in this range.</td></tr><?php endif; ?>
                 <?php foreach ($queue as $entry): ?>
                     <tr>
                         <td><?= e($entry['description']) ?></td>
@@ -1715,7 +1710,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Mapping never changes the original sales record. Different sales descriptions can map to the same menu item.</p>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Mapping does not change the sales record. Several descriptions may map to one menu item.</p>
     </section>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Approved Mappings &amp; Ignores</h2></div>
@@ -1808,7 +1803,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px"><?= e($disclaimer) ?> Snapshots keep the recipe and costs used on the sale date; later changes never rewrite them.</p>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px"><?= e($disclaimer) ?> Snapshots hold the recipe and costs as at the sale date.</p>
     </section>
 
 <?php elseif ($view === 'gp' || $view === 'reports'): ?>
@@ -1841,7 +1836,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                       // told nobody which was which. ?>
             </div>
         </div>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Generated <?= e(date('Y-m-d H:i')) ?> by <?= e((string) ($currentUser['name'] ?? '')) ?> · <?= e($company['name']) ?> · Estimated management report based on configured recipes and reference ingredient costs. No accounting or inventory entry has been posted.</p>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Generated <?= e(date('Y-m-d H:i')) ?> by <?= e((string) ($currentUser['name'] ?? '')) ?> · <?= e($company['name']) ?> · Estimated management report. No accounting entry posted.</p>
     </section>
 
     <?php
@@ -2095,11 +2090,11 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     </tr>
                 <?php endforeach; ?>
                 <?php if ($categoryRows !== []): ?>
-                    <tr style="font-weight:700"><td colspan="6">Total (reconciles with consolidated costed figures)</td><td class="is-numeric"><?= $fmt($catTotals['net']) ?></td><td class="is-numeric"><?= $fmt($catTotals['cost']) ?></td><td class="is-numeric"><?= $fmt($catTotals['gp']) ?></td><td class="is-numeric"><?= $catTotals['net'] != 0.0 ? $fmt($catTotals['gp'] / $catTotals['net'] * 100) . '%' : 'N/A' ?></td><td colspan="2"></td></tr>
+                    <tr style="font-weight:700"><td colspan="6">Total</td><td class="is-numeric"><?= $fmt($catTotals['net']) ?></td><td class="is-numeric"><?= $fmt($catTotals['cost']) ?></td><td class="is-numeric"><?= $fmt($catTotals['gp']) ?></td><td class="is-numeric"><?= $catTotals['net'] != 0.0 ? $fmt($catTotals['gp'] / $catTotals['net'] * 100) . '%' : 'N/A' ?></td><td colspan="2"></td></tr>
                 <?php endif; ?>
             </tbody>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px" title="Weighted = total GP ÷ total net sales. A simple average of item percentages would treat a tiny item like a large one.">Weighted GP % = category estimated GP ÷ category net sales × 100 (never a plain average of item GP percentages).</p>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Weighted GP % = category estimated GP ÷ category net sales × 100.</p>
     </section>
 
     <section class="mbw-card" data-collapsible>
@@ -2171,10 +2166,10 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             Ingredient cost source: <?= e((string) $settings['cost_source']) ?>.
             VAT: sales are analysed <?= (int) $settings['net_of_vat'] === 1 ? 'net of VAT/tax' : 'inclusive of VAT/tax' ?>.
             Invoice discount: <?= (int) $settings['include_invoice_discount'] === 1 ? 'allocated to lines in proportion to line taxable value' : 'not allocated' ?>.
-            Returns: negative-quantity lines reverse consistently; cancelled and draft sales are excluded.
-            Uncosted sales are shown separately and are NEVER treated as zero-cost.
-            Recipe effective dating: the active version covering the sale date is snapshotted; later changes never rewrite history (use audited Recalculate).
-            <strong>Reference estimate only. This report does not represent posted Cost of Goods Sold and does not create or modify accounting entries.</strong>
+            Returns: negative-quantity lines reverse; cancelled and draft sales are excluded.
+            Uncosted sales are listed separately, not treated as zero-cost.
+            Recipe version: the one covering the sale date is snapshotted.
+            <strong>Reference estimate only. Not posted Cost of Goods Sold.</strong>
         </p>
     </section>
 
@@ -2239,7 +2234,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <input type="hidden" name="back_view" value="sales-upload">
             <label class="workspace-span-2">Sales workbook — both sheets (.xlsx, max 10 MB)
                 <input type="file" name="sales_file" accept=".xlsx" required>
-                <small style="color:var(--mbw-muted)">One Excel file holding the <strong>item-wise</strong> sheet (what was sold) and the <strong>invoice-wise</strong> sheet (how it was settled). Either order is fine — they are told apart by their column headings.</small>
+                <small style="color:var(--mbw-muted)">One file holding the <strong>item-wise</strong> and <strong>invoice-wise</strong> sheets, in either order.</small>
             </label>
             <div class="workspace-span-2">
                 <button type="submit"><?= icon('upload') ?>Upload &amp; Preview</button>
@@ -2250,13 +2245,13 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <div style="overflow-x:auto;margin-top:10px"><table>
             <thead><tr><th>Column</th><th>Required</th><th>What it takes</th></tr></thead>
             <tbody>
-                <tr><td>Date (AD or BS)</td><td>Yes</td><td>YYYY-MM-DD — years 2064+ are read as Bikram Sambat; Excel date cells also work. Rows are grouped into one voucher per date.</td></tr>
-                <tr><td>Category</td><td>Yes</td><td>Sales category (Food, Beverage, Bar…). Decides the sales ledger via the mapping above.</td></tr>
-                <tr><td>Item</td><td>Yes</td><td>Item name. An item-level mapping, when present, overrides the category ledger.</td></tr>
-                <tr><td>Qty</td><td>Optional</td><td>Units sold (kept for the record; the amounts drive the posting).</td></tr>
+                <tr><td>Date (AD or BS)</td><td>Yes</td><td>YYYY-MM-DD. Years 2064+ are read as Bikram Sambat. One voucher per date.</td></tr>
+                <tr><td>Category</td><td>Yes</td><td>Sales category (Food, Beverage, Bar…). Selects the sales ledger.</td></tr>
+                <tr><td>Item</td><td>Yes</td><td>Item name. An item mapping overrides the category ledger.</td></tr>
+                <tr><td>Qty</td><td>Optional</td><td>Units sold. Not used in the posting.</td></tr>
                 <tr><td>Total Sales Amount</td><td>Yes</td><td>Row's sales value before discount<?= (int) ($settings['post_amount_includes_vat'] ?? 1) === 1 ? ', including VAT (extracted at ' . e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2)) . '%)' : ' excluding VAT (added at ' . e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2)) . '%)' ?>.</td></tr>
-                <tr><td>Discount</td><td>Optional</td><td>Discount given on the row — debited to the Discount ledger and deducted from the receivable.</td></tr>
-                <tr><td>VAT</td><td>Optional</td><td>Explicit VAT amount; when filled it overrides the rate-based calculation for that row.</td></tr>
+                <tr><td>Discount</td><td>Optional</td><td>Debited to the Discount ledger, deducted from the receivable.</td></tr>
+                <tr><td>VAT</td><td>Optional</td><td>Overrides the rate-based calculation for that row.</td></tr>
             </tbody>
         </table></div>
     </section>
@@ -2433,9 +2428,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <span id="hsSelectedCount" style="color:var(--mbw-muted);font-size:12.5px">Nothing selected.</span>
             </div>
             <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12.5px">
-                Deleting removes the whole daily voucher — its sales, party and VAT entries — and the uploaded
-                lines behind it, so this screen and the ledger stay in step. To correct a figure, delete the day
-                and upload it again.
+                Deleting removes the daily voucher and the uploaded lines behind it.
+                To correct a figure, delete the day and upload it again.
             </p>
         <?php elseif ($canDeleteSales ?? false): ?>
             <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12.5px">Nothing here carries a posted voucher yet.</p>
@@ -2622,10 +2616,10 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         </table></div>
 
         <?php if ($salesPreview['config_errors'] !== []): ?>
-            <div class="notice error" style="margin-top:10px"><strong>Posting setup incomplete:</strong> <?= e(implode(' ', $salesPreview['config_errors'])) ?> Save the posting ledgers above, then re-open this preview.</div>
+            <div class="notice error" style="margin-top:10px"><strong>Posting setup incomplete:</strong> <?= e(implode(' ', $salesPreview['config_errors'])) ?></div>
         <?php endif; ?>
         <?php if ($salesPreview['duplicate_dates'] !== []): ?>
-            <div class="notice error" style="margin-top:10px"><strong>Already posted dates:</strong> <?= e(implode(', ', $salesPreview['duplicate_dates'])) ?> — an earlier upload already posted sales for these days. Post anyway only if these sheets hold ADDITIONAL sales for them.</div>
+            <div class="notice error" style="margin-top:10px"><strong>Already posted dates:</strong> <?= e(implode(', ', $salesPreview['duplicate_dates'])) ?>. Post again only for additional sales on those days.</div>
         <?php endif; ?>
     </section>
 
@@ -2660,7 +2654,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             </tbody>
         </table></div>
         <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
-            Discount is already taken off the credit — the sheets carry Taxable Sales net of it, and that is what the VAT was worked out on.
+            Discount is already deducted from the credit; Taxable Sales is net of it.
         </p>
     </section>
 
@@ -2894,10 +2888,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         <section class="mbw-card">
             <div class="mbw-card-head"><h2>Sheet Editor</h2></div>
             <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:13px">
-                Open an uploaded sheet here to correct it. A sheet that will not go in — a date typed wrong, a ledger code that
-                does not exist, a row whose VAT does not add up — can be fixed on this screen and posted, instead of going back to
-                Excel and uploading the whole file again for one cell.
-                <br>The uploaded file itself is left alone; what posts is what you see here.
+                Correct an uploaded sheet here and post it without re-uploading.
+                The uploaded file is left unchanged; what posts is what is on this screen.
             </p>
             <?php if ($heldUploads === []): ?>
                 <div class="notice">
@@ -3086,12 +3078,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                     <button type="submit" name="action" value="sheet_editor_clear" class="secondary" formnovalidate>Discard</button>
                 </div>
                 <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-                    <strong>Save &amp; check</strong> keeps your edits and re-reads every row exactly as an upload would.
-                    On a row, the first button works the money out again from Amount and Discount, and the second empties the line. Dates may be typed in AD or BS.
-                    Posting uses what is on this screen, not the file that was uploaded.
-                    <br>Category and Item are chosen from a list — a category nothing maps has no sales ledger to post to, and an
-                    item name that differs by a space becomes a second menu item for the same dish. The lists hold everything your
-                    books know plus everything on this sheet.
+                    <strong>Save &amp; check</strong> re-reads every row as an upload would.
+                    Row buttons recalculate the amounts, or clear the line. Dates may be AD or BS.
+                    <br>Category and Item are chosen from a list to keep names consistent.
                 </p>
             </section>
         </form>
@@ -3209,10 +3198,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Sales Category Ledgers &amp; VAT (<?= count($ledgerMapRows) ?> categor<?= count($ledgerMapRows) === 1 ? 'y' : 'ies' ?>)</h2></div>
         <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            One row per category, exactly as written in the sheet (Food, Beverage, Bar…). Each category's taxable sales are
-            <strong>credited</strong> to its own ledger, and VAT to the one below. The <strong>Default</strong> row covers any category without a row of its own.
-            <br>The debit side is not set here — it comes from the <strong>Party Ledger Code</strong> on the invoice sheet, so a day settled across cash,
-            wallet and credit posts a debit to each. Discount is netted into the sales credit, which is what the sheet's Taxable Sales column already is.
+            One row per sales category. Taxable sales are <strong>credited</strong> to its ledger, VAT to the one below.
+            The <strong>Default</strong> row covers categories without one.
+            <br>The debit side comes from the <strong>Party Ledger Code</strong> on the invoice sheet.
         </p>
         <?php if (!$canEdit): ?><div class="notice">You have view-only access to this setup.</div><?php endif; ?>
         <form method="post" <?= $canEdit ? '' : 'style="pointer-events:none;opacity:.7"' ?>>
@@ -3262,8 +3250,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <div class="notice error" style="margin-top:10px"><strong>Before a sheet can post:</strong> <?= e(implode(' ', $configErrors)) ?></div>
         <?php endif; ?>
         <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
-            Matching ignores letter case and extra spaces; an item override (from earlier setups) wins over its category row.
-            Untick Active to stop a row matching without losing it.
+            Matching ignores case and extra spaces. An item override wins over its category row.
+            Untick Active to stop a row matching without deleting it.
         </p>
     </section>
 
@@ -3280,7 +3268,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Inventory Posting Ledgers</h2></div>
         <p class="frm-optional" style="margin:0 0 12px">
-            The same rows the Inventory module reads — set here or there, it is one setting.
+            The same mappings the Inventory module uses.
         </p>
         <?php if ($canEdit && $invMapGaps !== []): ?>
         <div class="mbw-note tone-amber" style="margin:0 0 12px">
@@ -3367,9 +3355,8 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php if ($canEdit): ?><div class="workspace-span-2"><button type="submit"><?= icon('settings') ?>Save Settings</button></div><?php endif; ?>
         </form>
         <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-            Branch/outlet analysis is not available because this application has no branch dimension on sales.
-            Labour, rent, depreciation, electricity, and administrative overheads are NOT recipe costs and are never added here.
-            All settings are tenant-specific and audited. Recalculation additionally requires the hospitality adjust permission.
+            Recipe costs only. Labour, rent, depreciation and overheads are excluded.
+            Recalculation requires the hospitality adjust permission.
         </p>
     </section>
 <?php endif; ?>

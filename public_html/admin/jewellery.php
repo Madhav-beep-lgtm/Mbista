@@ -1415,7 +1415,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             $jwStockSet = array_unique(array_values($jwStockPurposes));
             $jwActiveStock = jewellery_item_stock_purpose($jwItemType);
             ?>
-            <p class="frm-optional" style="grid-column:1/-1;margin:8px 0 0"><strong>Where this item posts</strong> — leave a row blank to use the company default under Settings → Posting Ledgers.<?= $jwItemMethod === 'periodic' ? ' These books are kept the periodic way, so a purchase debits Purchases rather than the stock account.' : '' ?></p>
+            <p class="frm-optional" style="grid-column:1/-1;margin:8px 0 0"><strong>Where this item posts</strong> — leave a row on inherit to use the company default.</p>
             <?php foreach ($jwFormPurposes as $jwPurpose): ?>
                 <?php
                 $jwIsStock = in_array($jwPurpose, $jwStockSet, true);
@@ -1433,7 +1433,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </label>
             <?php endforeach; ?>
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editItem['notes'] ?? '')) ?>"></label>
-            <p class="frm-optional" style="grid-column:1/-1;margin:0">This creates the item/style master. Physical trace IDs are created when opening stock is imported, a purchase is posted, or a stock/customer order is assigned.</p>
+            <p class="frm-optional" style="grid-column:1/-1;margin:0">Creates the item / style master. Trace IDs are created when stock is received against it.</p>
             <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Create New Item' ?></button></div>
         </form>
     </section>
@@ -1905,11 +1905,10 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     </div>
     <?php else: ?>
     <div class="notice" style="margin-bottom:14px">
-        This is not the first year on these books, so its opening stock is <strong>brought forward</strong> from
+        Opening stock is <strong>brought forward</strong> from
         <strong><?= e((string) ($openingPrevFy['label'] ?? 'the previous year')) ?></strong>&rsquo;s closing on
-        <strong><?= e(app_date((string) ($openingPrevFy['end_date'] ?? ''))) ?></strong> rather than typed again —
-        a closing and the opening after it have to be the same figure. Bringing it forward posts nothing: the
-        stock and &ldquo;Metal with&hellip;&rdquo; ledgers carry their own balances through
+        <strong><?= e(app_date((string) ($openingPrevFy['end_date'] ?? ''))) ?></strong>. It posts nothing;
+        the ledger balances carry through
         <a href="<?= e(url('admin/opening-balances.php')) ?>">Opening Balances</a>.
     </div>
     <?php endif; ?>
@@ -2026,7 +2025,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php endif; ?>
         </div>
 
-        <p class="frm-optional" style="margin:0 0 10px">The spreadsheet columns appear first, in the same order as the Opening Stock Import template. Existing item, validation status and actions are review controls — they are not spreadsheet columns. Every uncommitted row remains editable until you deliberately commit it.</p>
+        <p class="frm-optional" style="margin:0 0 10px">Spreadsheet columns appear first, in template order. Existing item, status and actions are review controls. Rows stay editable until committed.</p>
         <div class="mbw-tablewrap jw-opening-import-wrap"><table class="jw-opening-import-table">
             <thead><tr>
                 <th>Source Excel Row</th><th>Stock Type *</th><th>Stock Group *</th><th>Item Code *</th><th>Item Name *</th>
@@ -2196,10 +2195,9 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php if ($canEdit && $openingIsCarried): ?>
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Recording an opening by hand</h2></div>
-        <p class="frm-optional" style="margin:0">Not in this year. An opening is typed once, in a company&rsquo;s
-            first year; from then on it is last year&rsquo;s closing and there is nothing to key. If a physical
-            count disagrees with a line above, use <strong>Correct</strong> on that line — it records the reason
-            and posts only the difference.</p>
+        <p class="frm-optional" style="margin:0">An opening is typed only in a company&rsquo;s first year.
+            If a physical count disagrees with a line above, use <strong>Correct</strong> on that line to
+            record the reason and post the difference.</p>
     </section>
     <?php endif; ?>
 

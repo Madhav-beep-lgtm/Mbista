@@ -473,8 +473,8 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
 <?php if ($mappingGaps !== []): ?>
 <div class="notice error" role="alert" style="margin-bottom:12px">
     <strong>Stock is posting to the wrong kind of account.</strong>
-    <p style="margin:6px 0">Until this is re-pointed, purchases charge straight to the profit and loss
-       and the balance sheet carries no inventory. Nothing below has been changed — fix the mapping in
+    <p style="margin:6px 0">Purchases are charging to the profit and loss and the balance sheet carries no inventory.
+       Nothing below has been changed. Fix the mapping in
        <a href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>">Inventory &rarr; Ledger mapping</a>,
        then decide separately what to do about what is already posted.</p>
     <ul style="margin:6px 0 0 18px">
@@ -568,7 +568,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         <?php endif; ?>
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px"><input type="checkbox" name="zero_movement" <?= $filters['zero_movement'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Include zero-movement items</label>
         <label style="flex-direction:row;display:flex;align-items:center;gap:8px"><input type="checkbox" name="zero_closing" <?= $filters['zero_closing'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Include zero closing balance</label>
-        <label style="flex-direction:row;display:flex;align-items:center;gap:8px" title="Items with no opening balance, no movement in this period and no closing balance are hidden. Tick to list them too."><input type="checkbox" name="dormant" <?= $filters['dormant'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Show items with no balance or movement</label>
+        <label style="flex-direction:row;display:flex;align-items:center;gap:8px" title="Hides items with no opening balance, no movement and no closing balance."><input type="checkbox" name="dormant" <?= $filters['dormant'] ? 'checked' : '' ?> style="width:auto;min-height:auto"> Show items with no balance or movement</label>
         <label>Rows per page
             <select name="per_page">
                 <?php foreach ([25, 50, 100, 200] as $pp): ?><option value="<?= $pp ?>" <?= $perPage === $pp ? 'selected' : '' ?>><?= $pp ?></option><?php endforeach; ?>
@@ -612,7 +612,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         </div>
     </div>
     <?php if (!sc_table_ready()): ?>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">Counted closing stock is not available on this database yet — reload the page once and the store creates itself.</p>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">Counted closing stock is not set up on this database yet. Reload the page once.</p>
     <?php elseif ($countScope === null): ?>
         <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">
             <?= count($filters['warehouse_ids']) ?> locations are selected. A count is taken at ONE place — pick a single location,
@@ -649,13 +649,13 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         </form>
         <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
             This posts every count punched for <?= e($to) ?> at <?= e($countScopeLabel) ?>, including rows the current filters keep off the screen.
-            Stock found <em>over</em> the books always goes back the other way — inward at carrying cost, crediting the same account.
-            An item whose ledgers are not mapped is left unposted with its reason rather than having its quantity moved while its cost lands nowhere.
+            Stock found over the books is posted inward at carrying cost, crediting the same account.
+            An item with unmapped ledgers is left unposted, with its reason.
         </p>
         <?php elseif (!$canPostCount): ?>
         <p style="margin:0;color:var(--mbw-muted);font-size:12px">Punched counts are listed in the sheet below. Posting them to the books needs the <strong>accounting · post</strong> permission.</p>
         <?php else: ?>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Nothing is waiting to be posted for <?= e($to) ?>. Punch a counted quantity into the sheet below and save it, and the posting button appears here.</p>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Nothing is waiting to be posted for <?= e($to) ?>. Enter a counted quantity in the sheet below to post one.</p>
         <?php endif; ?>
     <?php endif; ?>
 </section>
@@ -846,7 +846,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
                 <td colspan="2" class="grp-dmg"></td><td class="is-numeric grp-dmg"><?= e($sym . number_format($totals['damage_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-close"></td><td class="is-numeric grp-close"><?= e($sym . number_format($totals['closing_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-count"></td>
-                <td class="is-numeric grp-count" title="The difference still waiting to be posted. A row already posted has had its charge taken to the books, so it counts nothing here."><?= e($sym . number_format($totals['count_variance_amount'], 2)) ?></td>
+                <td class="is-numeric grp-count" title="The difference still waiting to be posted. Posted rows are excluded."><?= e($sym . number_format($totals['count_variance_amount'], 2)) ?></td>
                 <td colspan="3" class="grp-other"></td>
                 <?php if ($showJw): foreach ($jwColumns as [, $jwKey, $jwKind]): ?>
                     <td class="grp-jw<?= $jwKind === 'weight' ? ' is-numeric' : '' ?>"><?= $jwKind === 'weight'
@@ -923,11 +923,10 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         <?php endif; ?>
     </nav>
     <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-        Outward and damage amounts are inventory <strong>cost</strong> (FIFO / weighted average replay), never selling price. Damage rows (damage, expiry, write-off) are excluded from normal outward — no double counting.
-        Closing = opening + inward − outward − damage, and its amount comes from the remaining valuation layers as of <?= e($to) ?>.
-        Warehouse-scoped amounts value exact per-location quantities at company-level carrying cost (transfers never re-cost stock).
-        <strong>Physical Count</strong> is what somebody counted on the shelf as at <?= e($to) ?>; until it is posted it changes nothing,
-        and once it is posted the closing quantity beside it IS the counted one, with the difference charged as cost.
+        Outward and damage amounts are inventory <strong>cost</strong>, not selling price. Damage rows are excluded from outward.
+        Closing = opening + inward − outward − damage, valued from the remaining cost layers as at <?= e($to) ?>.
+        Warehouse amounts value per-location quantities at company-level carrying cost.
+        <strong>Physical Count</strong> changes nothing until posted; once posted, closing equals the counted quantity and the difference is charged as cost.
     </p>
 </section>
 
@@ -949,25 +948,25 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         </div>
     </div>
     <?php if (abs($glDiff) < 0.01 && $glGap['movements'] === 0 && $glGap['openings'] === 0): ?>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">The stock subledger and the inventory GL ledgers agree. Every report (Stock Summary, Inventory Summary, Trial Balance inventory lines) reads the same rupees.</p>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">The stock subledger and the inventory GL ledgers agree.</p>
     <?php else: ?>
         <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            One click posts everything the stock subledger has that the books don't, in the right order and at historical replayed cost:
+            Posts what the stock subledger holds and the books do not, at historical cost:
             <?= (int) $glGap['openings'] ?> opening-stock voucher(s) worth <?= e($sym . number_format($glGap['openings_value'], 2)) ?> ·
             <?= (int) $glGap['movements'] ?> movement voucher(s) worth <?= e($sym . number_format($glGap['movements_value'], 2)) ?> ·
             <?= (int) $glGap['manufacturing'] ?> manufacturing row(s) via retro production journal.
         </p>
         <form method="post" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"
-              data-confirm="Run the full stock-to-GL reconciliation now? All vouchers post through the normal engine on their historical dates and appear in the register/audit trail. This is the supported way to make the stock reports and the trial balance equal.">
+              data-confirm="Run the stock-to-GL reconciliation now? Vouchers post on their historical dates and appear in the register.">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="reconcile_stock_gl">
             <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;font-weight:500">
                 <input type="checkbox" name="zero_direct_openings" style="width:auto;min-height:auto">
-                Also zero DIRECT ledger openings typed straight on inventory GL ledgers (they duplicate the item-level opening vouchers; audited, reversible from Opening Balances)
+                Also zero direct openings typed on inventory GL ledgers (reversible from Opening Balances)
             </label>
             <button type="submit"><?= icon('badge-check') ?>Reconcile now</button>
         </form>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Anything that still cannot post (unmapped ledgers, locked periods) is listed afterwards with its reason, and Reports Center → Inventory-to-GL Reconciliation shows the cause rows for any remainder.</p>
+        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Anything that cannot post is listed afterwards with its reason. See Reports Center → Inventory-to-GL Reconciliation.</p>
     <?php endif; ?>
 </section>
 <?php endif; ?>

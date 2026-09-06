@@ -2436,10 +2436,6 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <h2>Inventory accounting system</h2>
             <div class="mbw-card-tools"><span class="mbw-pill <?= $invMethod === 'periodic' ? 'tone-amber' : 'tone-green' ?>"><?= $invMethod === 'periodic' ? 'Periodic' : 'Perpetual' ?></span></div>
         </div>
-        <p style="margin:0 0 14px;color:var(--mbw-muted);font-size:13px">
-            Both are accepted practice — IAS 2 governs how inventory is <em>measured</em>, not which system records
-            it. The difference shows on the face of the trial balance.
-        </p>
         <form method="post" class="workspace-form-grid" style="grid-template-columns:1fr;gap:14px">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_inventory_method">
@@ -2447,38 +2443,22 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 <input type="radio" name="inventory_accounting" value="perpetual" <?= $invMethod === 'perpetual' ? 'checked' : '' ?> style="margin-top:4px">
                 <span>
                     <strong>Perpetual</strong><br>
-                    <small style="color:var(--mbw-muted)">
-                        A purchase debits Inventory; every sale posts its own cost of sales. The ledger always knows
-                        what stock is worth, and the trial balance carries Inventory and Cost of Goods Sold.
-                    </small>
+                    <small style="color:var(--mbw-muted)">Purchases debit Inventory. Each sale posts its own cost of sales.</small>
                 </span>
             </label>
             <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
                 <input type="radio" name="inventory_accounting" value="periodic" <?= $invMethod === 'periodic' ? 'checked' : '' ?> style="margin-top:4px">
                 <span>
-                    <strong>Periodic — Opening + Purchases − Closing</strong><br>
-                    <small style="color:var(--mbw-muted)">
-                        A purchase debits <strong>Purchases</strong>; a sale posts no cost entry at all. The trial
-                        balance carries opening stock and purchases and carries <strong>neither closing stock nor
-                        cost of sales</strong>, because neither is a ledger balance. Cost of sales is worked out
-                        when the profit and loss is drawn, and closing stock reaches the balance sheet through the
-                        one year-end journal.
-                    </small>
+                    <strong>Periodic</strong><br>
+                    <small style="color:var(--mbw-muted)">Purchases debit Purchases. Cost of sales is derived at period end.</small>
                 </span>
             </label>
             <?php if ($methodMapped !== []): ?>
-                <div class="notice">
-                    <strong>Map these before switching:</strong> <?= e(implode(', ', $methodMapped)) ?>.
-                    The periodic system posts to them, and a purchase that cannot find its account will refuse to
-                    post rather than guess.
-                </div>
+                <div class="notice">Unmapped for periodic: <?= e(implode(', ', $methodMapped)) ?>.</div>
             <?php endif; ?>
             <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-                <small style="color:var(--mbw-muted)">
-                    Switching changes what happens NEXT. Books already posted the other way are untouched until
-                    they are converted, earliest year first.
-                </small>
-                <button type="submit" class="button" data-confirm="Change how every future purchase and sale posts to the ledger?">Save system</button>
+                <small style="color:var(--mbw-muted)">Applies to future postings only.</small>
+                <button type="submit" class="button" data-confirm="Change the inventory accounting system for this company?">Save</button>
             </div>
         </form>
     </section>
@@ -2486,7 +2466,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     <section class="mbw-card" id="valuation-nrv" data-collapsible aria-label="Valuation and NRV">
         <div class="mbw-card-head">
             <h2>Valuation &amp; NRV (IAS 2)</h2>
-            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Cost from perpetual layers; NRV uses each item's assessment or its sales rate as the selling price.</span></div>
+            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Cost from perpetual layers. NRV uses the item assessment, or its sales rate.</span></div>
         </div>
         <div class="rc-table-scroll">
             <table class="rc-table">
@@ -2549,7 +2529,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     <section class="mbw-card" data-collapsible aria-label="Post NRV assessment">
         <div class="mbw-card-head">
             <h2>Post NRV Assessment</h2>
-            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Computes lower of cost and net realisable value (IAS 2.28-33) and posts a write-down or a capped reversal.</span></div>
+            <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:12.5px">Lower of cost and net realisable value (IAS 2). Posts a write-down or capped reversal.</span></div>
         </div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
@@ -2757,7 +2737,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                       // half and pushed everything after it onto a new row. ?>
                 <label class="checkbox-line">
                     <input type="checkbox" name="is_ingredient" value="1" <?= (int) ($editItem['is_ingredient'] ?? 0) === 1 ? 'checked' : '' ?>
-                           title="Puts this item in the kitchen&#39;s ingredient list so recipes can quote it. Name, code, category, purchase unit and cost keep coming from here; the ingredient screen only adds the unit a recipe measures it in and the wastage and yield of preparing it.">
+                           title="Lists this item as a recipe ingredient. The recipe unit, wastage and yield are set on the ingredient screen.">
                     Use as a recipe ingredient
                 </label>
             <?php endif; ?>
@@ -3114,7 +3094,7 @@ $invMoveItemOptions = static function () use ($items): string {
                 <input type="hidden" name="replace_bill_id" value="<?= (int) $editBillId ?>">
                 <p class="mbw-pill tone-amber" style="display:block;margin:0 0 10px;padding:10px 12px;line-height:1.5">
                     <?= icon('tasks') ?> Editing <strong><?= e((string) ($editBill['voucher_no'] ?: 'a draft entry')) ?></strong><?= (string) ($editBill['reference_no'] ?? '') !== '' ? ' — bill ' . e((string) $editBill['reference_no']) : '' ?>.
-                    Recording it <strong>replaces</strong> that entry: the old stock movements and its accounting entry are removed and these are written in their place.
+                    Recording it <strong>replaces</strong> that entry: the previous stock movements and accounting entry are removed.
                     <a href="<?= e(url(inv_back_url('#movement-purchase-entries'))) ?>" style="margin-left:6px">Cancel and leave it as it is</a>
                 </p>
             <?php endif; ?>
@@ -3313,8 +3293,8 @@ $invMoveItemOptions = static function () use ($items): string {
                 <strong><?= icon('tasks') ?> <?= count($purMergePlan) ?> bill(s) were entered one voucher per item.</strong>
                 <p style="margin:6px 0 0;font-size:12.5px;color:var(--mbw-muted)">
                     <?= (int) $mergeVouchers ?> vouchers carry <?= (int) $mergeItems ?> items that belong to <?= count($purMergePlan) ?> invoice(s).
-                    Merging gathers each bill into a single entry: the item lines stay one per item, the supplier's credit and the VAT are stated once, and
-                    <strong>the figures are carried across rather than recalculated</strong> — the totals in the ledger do not move. The absorbed voucher numbers are written into the surviving entry's narration, so the gap they leave in the series can be read back.
+                    Merging gathers each bill into one entry: one line per item, with the supplier credit and VAT stated once.
+                    <strong>Figures are carried across, not recalculated</strong>, so ledger totals do not move. The absorbed voucher numbers are recorded in the narration.
                 </p>
                 <details style="margin-top:10px">
                     <summary style="cursor:pointer;font-weight:600;font-size:12.5px">Preview what would be merged</summary>
@@ -3568,7 +3548,7 @@ $invMoveItemOptions = static function () use ($items): string {
                 <label>Abnormal waste cost <small style="color:var(--mbw-muted)">(expensed, never inventoried)</small><input type="number" step="0.01" min="0" name="abnormal_waste_cost" value="0.00"></label>
                 <div class="workspace-span-2">
                     <strong style="font-size:13px;color:var(--mbw-heading)">Input materials</strong>
-                    <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Add as many input lines as the order needs. Leave the rate blank to use the item's purchase rate automatically. Rows without an item are ignored.</p>
+                    <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Leave the rate blank to use the item's purchase rate. Rows without an item are ignored.</p>
                     <div style="overflow-x:auto">
                     <table id="mo-input-lines">
                         <thead><tr><th>Input item</th><th class="is-numeric" style="width:150px">Quantity</th><th class="is-numeric" style="width:170px">Rate</th><th style="width:44px"></th></tr></thead>
@@ -3844,7 +3824,7 @@ $invMoveItemOptions = static function () use ($items): string {
                             && !in_array((string) $movement['transaction_type'], ['consume', 'produce'], true);
                         ?>
                         <?php if ($movementUnposted): ?>
-                            <span class="mbw-pill tone-amber" title="Stock was recorded but no accounting entry was raised — the ledgers for this item are not mapped, so there is nothing to reverse. Map them in Ledger mapping, then post the gap from Stock Summary → Reconcile Stock ↔ General Ledger.">stock only</span>
+                            <span class="mbw-pill tone-amber" title="Stock was recorded but no accounting entry was raised, because this item has no ledgers mapped. Map them in Ledger mapping, then reconcile from Stock Summary.">stock only</span>
                         <?php endif; ?>
                     </td>
                     <td class="is-numeric"><?= e(number_format((float) $movement['qty_in'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['qty_out'], 3)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['rate'], 2)) ?></td><td class="is-numeric"><?= e(number_format((float) $movement['amount'], 2)) ?></td><td><?= e($movement['ref_no'] ?? '-') ?></td>
@@ -3891,7 +3871,7 @@ $invMoveItemOptions = static function () use ($items): string {
         <table>
             <thead><tr><th>Order</th><th>Finished item</th><th class="is-numeric">Quantity</th><th class="is-numeric">Material cost</th><th>Status</th><th>Started</th><th>Completed</th><th>Actions</th></tr></thead>
             <tbody>
-                <?php if ($manufacturingOrders === []): ?><tr><td colspan="8">No manufacturing orders yet. Save one above — use Start mode to track Work in Progress.</td></tr><?php endif; ?>
+                <?php if ($manufacturingOrders === []): ?><tr><td colspan="8">No manufacturing orders yet.</td></tr><?php endif; ?>
                 <?php foreach ($manufacturingOrders as $order): ?>
                     <?php $orderOpen = in_array((string) $order['status'], ['draft', 'in_progress'], true); ?>
                     <tr>
