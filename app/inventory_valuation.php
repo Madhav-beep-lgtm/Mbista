@@ -744,7 +744,7 @@ function inv_post_closing_stock_voucher(int $companyId, int $fiscalYearId, ?int 
     if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
         return $none;
     }
-    if (inv_accounting_method() !== 'periodic') {
+    if (inv_accounting_method($companyId) !== 'periodic') {
         return array_replace($none, ['note' => 'These books are kept on the perpetual system, where the stock account is'
             . ' already at its closing figure. A closing-stock journal would post a nought.']);
     }
@@ -866,7 +866,7 @@ function inv_periodic_trading_figures(int $companyId, string $from, string $to):
 {
     $none = ['available' => false, 'opening' => 0.0, 'purchases' => 0.0, 'returns' => 0.0,
         'closing' => 0.0, 'cogs' => 0.0];
-    if (inv_accounting_method() !== 'periodic' || !table_exists('voucher_entries')) {
+    if (inv_accounting_method($companyId) !== 'periodic' || !table_exists('voucher_entries')) {
         return $none;
     }
 
@@ -1579,7 +1579,7 @@ function inv_post_allowance_release(
     if ($movementVoucherId <= 0) {
         return [0.0, 0];
     }
-    $plan = inv_movement_posting_plan($type, $direction);
+    $plan = inv_movement_posting_plan($type, $direction, $companyId);
     if ($plan === null) {
         return [0.0, 0];
     }
@@ -1775,12 +1775,90 @@ function inv_void_allowance_rows_for_txn(int $companyId, int $txnId, ?int $fisca
  * and carries neither closing stock nor cost of sales, because neither is a
  * ledger balance. That is the test of whether this is working.
  *
- * Global rather than per company: a group whose books are kept two different
- * ways cannot be consolidated without restating one of them first.
+ * PER COMPANY, with the installation's own setting as the fallback.
+ *
+ * It used to be one row in `settings`, whose key is the setting name alone --
+ * so it was a single switch for every set of books on the server. Turning a
+ * jewellery shop periodic turned the cafe next door periodic too, from that
+ * moment on, and neither screen said anything about it.
+ *
+ * The reason given for making it global was consolidation, and that reason is
+ * real: a group whose books are kept two different ways cannot be consolidated
+ * without restating one of them first. But it is a statement about a GROUP,
+ * and it says nothing about two unrelated clients who happen to share a
+ * server. The consolidation problem is answered where consolidation happens.
+ *
+ * A company with nothing chosen follows the installation default, so no
+ * company's behaviour changes on the day the column appears.
+ *
+ * $companyId is worth passing wherever the caller HAS one. Engine functions
+ * are handed a company and may run for a company that is not the one in the
+ * session -- a CLI conversion, a scheduled report, one client's books opened
+ * from another's screen -- and a posting rule read from the wrong company is
+ * exactly the kind of fault that leaves two layers disagreeing about one
+ * figure.
  */
-function inv_accounting_method(): string
+function inv_accounting_method(?int $companyId = null): string
 {
-    return setting('inventory_accounting', 'perpetual') === 'periodic' ? 'periodic' : 'perpetual';
+    $cache = &inv_accounting_method_cache();
+
+    if ($companyId === null && function_exists('current_company_id')) {
+        $companyId = (int) current_company_id();
+    }
+    $companyId = (int) $companyId;
+
+    if ($companyId > 0 && !array_key_exists($companyId, $cache)) {
+        $chosen = '';
+        if (table_exists('companies') && column_exists('companies', 'inventory_accounting')) {
+            $stmt = db()->prepare('SELECT inventory_accounting FROM companies WHERE id = :id LIMIT 1');
+            $stmt->execute(['id' => $companyId]);
+            $chosen = (string) ($stmt->fetchColumn() ?: '');
+        }
+        $cache[$companyId] = $chosen;
+    }
+
+    $chosen = $companyId > 0 ? (string) ($cache[$companyId] ?? '') : '';
+    if ($chosen === '') {
+        $chosen = (string) setting('inventory_accounting', 'perpetual');
+    }
+
+    return $chosen === 'periodic' ? 'periodic' : 'perpetual';
+}
+
+/**
+ * The per-company answers already read, by reference so they can be dropped
+ * from outside. A function static cannot be reached any other way, and the
+ * choice has to be re-readable the moment somebody changes it.
+ *
+ * @return array<int, string>
+ */
+function &inv_accounting_method_cache(): array
+{
+    static $cache = [];
+
+    return $cache;
+}
+
+/** A company's choice has changed; forget what was read of it. */
+function inv_accounting_method_forget(): void
+{
+    $cache = &inv_accounting_method_cache();
+    $cache = [];
+}
+
+/**
+ * Choose the system for ONE company. An empty string hands it back to the
+ * installation default. Returns what it was, so the caller can say what moved.
+ */
+function inv_set_accounting_method(int $companyId, string $method): string
+{
+    $before = inv_accounting_method($companyId);
+    $method = in_array($method, ['perpetual', 'periodic'], true) ? $method : '';
+    db()->prepare('UPDATE companies SET inventory_accounting = :m WHERE id = :id')
+        ->execute(['m' => $method !== '' ? $method : null, 'id' => $companyId]);
+    inv_accounting_method_forget();
+
+    return $before;
 }
 
 /**
@@ -1791,9 +1869,9 @@ function inv_accounting_method(): string
  * or null when the movement has NO general-ledger impact (departmental /
  * warehouse transfer within the same entity and ownership).
  */
-function inv_movement_posting_plan(string $type, string $direction): ?array
+function inv_movement_posting_plan(string $type, string $direction, ?int $companyId = null): ?array
 {
-    if (inv_accounting_method() === 'periodic') {
+    if (inv_accounting_method($companyId) === 'periodic') {
         return inv_periodic_posting_plan($type);
     }
 
@@ -1867,7 +1945,7 @@ function inv_post_movement_voucher(int $companyId, ?int $fiscalYearId, int $txnI
     // date it is meant to be posted on. Every existing caller passes nothing
     // and gets exactly the two-line posted voucher it always got.
 
-    $plan = inv_movement_posting_plan($type, $direction);
+    $plan = inv_movement_posting_plan($type, $direction, $companyId);
     if ($plan === null) {
         return 0; // departmental/warehouse transfer — stock only
     }
@@ -2021,9 +2099,9 @@ function inv_periodic_transaction_purposes(string $type): array
  * caller-supplied direction (matching the real form/handler), not separate
  * adjustment_increase/adjustment_decrease types.
  */
-function inv_transaction_purposes(string $transactionType): array
+function inv_transaction_purposes(string $transactionType, ?int $companyId = null): array
 {
-    if (inv_accounting_method() === 'periodic') {
+    if (inv_accounting_method($companyId) === 'periodic') {
         return inv_periodic_transaction_purposes($transactionType);
     }
 

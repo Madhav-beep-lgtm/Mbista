@@ -3910,5 +3910,14 @@ function accounting_module_repair_database(): array
             ) NOT NULL");
     });
 
+    $run('Which inventory system a company keeps is its own (migration 133)', static function (): void {
+        // It lived in `settings`, keyed by the setting name alone -- one row
+        // for the whole installation. Turning one client periodic turned every
+        // other client periodic with it, silently. NULL here means "follow the
+        // installation default", so nothing moves until somebody chooses.
+        accounting_repair_add_column('companies', 'inventory_accounting',
+            "`inventory_accounting` ENUM('perpetual', 'periodic') DEFAULT NULL AFTER `is_client_company`");
+    });
+
     return $errors;
 }

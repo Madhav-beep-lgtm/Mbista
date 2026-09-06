@@ -1287,8 +1287,8 @@ with_method('periodic', static function () use ($piCo, $piFy, $piUser, $piA, $pi
 
 // And the form has to ASK, or none of the above can ever be set.
 $itemFormSource = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php');
-ok(str_contains($itemFormSource, "inv_accounting_method() === 'periodic'\n                ? ['purchases'"),
-    'The item form asks for the Purchases account when the books are periodic');
+ok(preg_match('~inv_accounting_method\(\$companyId\) === .periodic.\s*\?\s*\[.purchases.~', $itemFormSource) === 1,
+    'The item form asks for the Purchases account when THIS COMPANY keeps periodic books');
 ok(str_contains($itemFormSource, "'inventory_asset', 'purchases', 'purchase_returns'"),
     '  ...and the full per-item ledger panel lists it too');
 
@@ -1306,6 +1306,73 @@ db()->prepare("DELETE FROM ledgers WHERE company_id = :c")->execute(['c' => $piC
 db()->prepare("DELETE FROM ledger_groups WHERE company_id = :c")->execute(['c' => $piCo]);
 db()->prepare("DELETE FROM fiscal_years WHERE company_id = :c")->execute(['c' => $piCo]);
 db()->prepare("DELETE FROM companies WHERE id = :c")->execute(['c' => $piCo]);
+
+// ---------------------------------------------------------------------------
+// One client's books are not every client's books.
+// ---------------------------------------------------------------------------
+// The choice lived in `settings`, whose primary key is the setting name alone,
+// so there was exactly one row for the whole installation. Turning a jewellery
+// shop periodic turned the cafe next door periodic at the same instant, and
+// nothing on the cafe's screen said so -- its purchases simply stopped
+// debiting stock.
+//
+// It was global on purpose: a group whose books are kept two ways cannot be
+// consolidated without restating one of them. That is true of a GROUP, and
+// says nothing about two unrelated clients sharing a server.
+echo "\n== The system is chosen per company ==\n";
+$pcOne = 0; $pcTwo = 0;
+foreach (['PCONE', 'PCTWO'] as $pcCode) {
+    foreach (db()->query("SELECT id FROM companies WHERE code = '$pcCode'")->fetchAll(PDO::FETCH_COLUMN) as $pcOld) {
+        db()->exec('DELETE FROM companies WHERE id = ' . (int) $pcOld);
+    }
+    db()->prepare("INSERT INTO companies (name, code, is_active) VALUES (:n, :c, 1)")
+        ->execute(['n' => $pcCode . ' Co', 'c' => $pcCode]);
+    if ($pcCode === 'PCONE') { $pcOne = (int) db()->lastInsertId(); } else { $pcTwo = (int) db()->lastInsertId(); }
+}
+ok(column_exists('companies', 'inventory_accounting'),
+    'A company carries its own choice (migration 133)');
+ok(inv_accounting_method($pcOne) === inv_accounting_method($pcTwo),
+    'Two new companies start out agreeing, because neither has chosen');
+
+$pcWas = inv_set_accounting_method($pcOne, 'periodic');
+ok(inv_accounting_method($pcOne) === 'periodic', 'One company is put on the periodic system');
+ok(inv_accounting_method($pcTwo) !== 'periodic'
+    || setting('inventory_accounting', 'perpetual') === 'periodic',
+    '  ...and the company beside it is untouched');
+ok($pcWas === 'perpetual', '  ...and the setter reports what it was, so a log can say what moved');
+
+// Empty hands it back to whatever the installation is set to.
+inv_set_accounting_method($pcOne, '');
+ok(inv_accounting_method($pcOne) === inv_accounting_method($pcTwo),
+    'Clearing a company\'s choice puts it back on the installation default');
+
+// The engines must read the company they were HANDED, not the session's.
+// This is the fault the whole change exists to prevent: a posting rule read
+// from the wrong company leaves two layers disagreeing about one figure.
+inv_set_accounting_method($pcOne, 'periodic');
+inv_set_accounting_method($pcTwo, 'perpetual');
+ok(inv_movement_posting_plan('purchase', 'in', $pcOne) === ['debit' => 'purchases', 'credit' => 'purchase_clearing'],
+    'A purchase for the periodic company debits Purchases');
+ok(inv_movement_posting_plan('purchase', 'in', $pcTwo) === ['debit' => 'inventory_asset', 'credit' => 'purchase_clearing'],
+    '  ...and the same call for the perpetual company debits Inventory, in the same request');
+ok(inv_transaction_purposes('purchase', $pcOne) === ['purchases', 'purchase_clearing'],
+    'The purposes a purchase needs mapped follow the company too');
+
+// Nothing in the engines may still read the session instead of its argument.
+$engineFiles = ['inventory_valuation', 'inventory_purchase_batch', 'jewellery_trade', 'jewellery_stock',
+    'stock_report_engine', 'stock_count', 'reports_engine'];
+$sessionReaders = [];
+foreach ($engineFiles as $engineFile) {
+    foreach (explode("\n", (string) @file_get_contents(dirname(__DIR__) . '/app/' . $engineFile . '.php')) as $engineNo => $engineLine) {
+        if (!str_contains($engineLine, 'inv_accounting_method()')) { continue; }
+        if (str_starts_with(trim($engineLine), '//') || str_starts_with(trim($engineLine), '*')) { continue; }
+        $sessionReaders[] = $engineFile . '.php:' . ($engineNo + 1);
+    }
+}
+ok($sessionReaders === [], 'No engine reads the session company instead of the one it was handed'
+    . ($sessionReaders === [] ? '' : ' — ' . implode(', ', $sessionReaders)));
+
+db()->exec('DELETE FROM companies WHERE id IN (' . $pcOne . ', ' . $pcTwo . ')');
 
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

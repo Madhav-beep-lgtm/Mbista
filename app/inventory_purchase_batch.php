@@ -376,7 +376,7 @@ function inv_purchase_bill_entry_lines(int $companyId, array $group, int $partyI
     $first = reset($group);
     $type = (string) $first['movement'];
     $direction = inventory_direction($type);
-    $plan = inv_movement_posting_plan($type, $direction);
+    $plan = inv_movement_posting_plan($type, $direction, $companyId);
     if ($plan === null) {
         throw new RuntimeException('There is no posting rule for a ' . $type . '.');
     }
@@ -1008,7 +1008,7 @@ function inv_purchase_bill_merge(int $companyId, int $keepVoucherId, array $abso
         foreach ($bill['items'] as $item) {
             $type = (string) $item['transaction_type'];
             $direction = inventory_direction($type);
-            $plan = inv_movement_posting_plan($type, $direction);
+            $plan = inv_movement_posting_plan($type, $direction, $companyId);
             $stockPurpose = $direction === 'in' ? $plan['debit'] : $plan['credit'];
             $stockSide = $direction === 'in' ? 'debit' : 'credit';
             $mapped = inv_resolve_mapping($companyId, $stockPurpose, (int) $item['item_id'], $item['category'] ?? null);

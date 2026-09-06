@@ -396,7 +396,7 @@ function sc_post_one(int $companyId, ?int $fiscalYearId, array $count, array $it
     // so a movement that reached no account has left the books and the shelf
     // disagreeing with nothing said.
     require_once __DIR__ . '/inventory_valuation.php';
-    if ($voucherId <= 0 && inv_accounting_method() !== 'periodic') {
+    if ($voucherId <= 0 && inv_accounting_method($companyId) !== 'periodic') {
         throw new RuntimeException('no accounting entry could be raised for this difference');
     }
     if ($voucherId > 0) {

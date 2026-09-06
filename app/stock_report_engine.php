@@ -684,7 +684,7 @@ function sr_unposted_summary(int $companyId): array
             continue;
         }
         $direction = (float) $t['qty_in'] > 0 ? 'in' : 'out';
-        if (inv_movement_posting_plan($type, $direction) === null) {
+        if (inv_movement_posting_plan($type, $direction, $companyId) === null) {
             if (in_array($type, ['consume', 'produce'], true)) {
                 $result['manufacturing']++;
             }
@@ -753,7 +753,7 @@ function sr_post_missing_movement_vouchers(int $companyId, int $userId): array
             continue;
         }
         $direction = (float) $t['qty_in'] > 0 ? 'in' : 'out';
-        if (inv_movement_posting_plan($type, $direction) === null) {
+        if (inv_movement_posting_plan($type, $direction, $companyId) === null) {
             continue;
         }
         $itemId = (int) $t['item_id'];

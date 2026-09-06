@@ -258,13 +258,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         require_permission('accounting', 'post');
         require_once __DIR__ . '/../../app/inventory_valuation.php';
         $wanted = (string) ($_POST['inventory_accounting'] ?? '') === 'periodic' ? 'periodic' : 'perpetual';
-        $current = inv_accounting_method();
+        $current = inv_accounting_method($companyId);
         if ($wanted !== $current) {
-            db()->prepare('REPLACE INTO settings (setting_key, setting_value) VALUES (:k, :v)')
-                ->execute(['k' => 'inventory_accounting', 'v' => $wanted]);
-            setting('inventory_accounting', '', true);
+            // THIS COMPANY's books, not the server's. It used to write one row
+            // in `settings`, whose key is the setting name alone, so choosing
+            // periodic for a jewellery shop chose it for every other client on
+            // the installation at the same instant -- the cafe's purchases
+            // stopped debiting stock and nothing on the cafe's screen said so.
+            inv_set_accounting_method($companyId, $wanted);
             log_activity('inventory', $companyId, 'updated',
-                'Inventory accounting switched from ' . $current . ' to ' . $wanted . '.', $userId);
+                'Inventory accounting for this company switched from ' . $current . ' to ' . $wanted . '.', $userId);
             flash('success', $wanted === 'periodic'
                 ? 'Now on the PERIODIC system. New purchases will debit Purchases, and sales will post no cost'
                     . ' entry. Books already posted the other way are unchanged until they are converted —'
@@ -2466,7 +2469,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     ?>
     <?php
     require_once __DIR__ . '/../../app/inventory_valuation.php';
-    $invMethod = inv_accounting_method();
+    $invMethod = inv_accounting_method($companyId);
     $methodMapped = [];
     foreach (['purchases' => 'Purchases', 'inventory_change' => 'Change in Inventory',
         'inventory_asset' => 'Inventory Asset'] as $methodPurpose => $methodLabel) {
@@ -2893,7 +2896,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             // periodic books the Inventory Asset row alone could be set on
             // every item in the company and every purchase would still land in
             // one shared account, which is not a mapping anybody chose.
-            $itemFormPurposes = inv_accounting_method() === 'periodic'
+            $itemFormPurposes = inv_accounting_method($companyId) === 'periodic'
                 ? ['purchases', 'purchase_clearing', 'inventory_asset', 'cogs', 'opening_equity']
                 : ['inventory_asset', 'purchase_clearing', 'cogs', 'opening_equity'];
             $itemPurposeMeta = inventory_mapping_purposes();

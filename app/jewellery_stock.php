@@ -767,7 +767,7 @@ function jw_item_stock_ledger_id(int $companyId, array $item): int
 function jw_metal_in_ledger_id(int $companyId, array $item): int
 {
     require_once __DIR__ . '/inventory_valuation.php';
-    if (inv_accounting_method() !== 'periodic') {
+    if (inv_accounting_method($companyId) !== 'periodic') {
         return jw_item_stock_ledger_id($companyId, $item);
     }
     require_once __DIR__ . '/inventory_mapping.php';

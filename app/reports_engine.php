@@ -281,7 +281,7 @@ function rc_trading_figures(int $scopeCompanyId, string $from, string $to): arra
     // books that way: the trading account and the trial balance are the same
     // numbers, so they cannot disagree.
     require_once __DIR__ . '/inventory_valuation.php';
-    if (inv_accounting_method() === 'periodic') {
+    if (inv_accounting_method($scopeCompanyId) === 'periodic') {
         $ledger = inv_periodic_trading_figures($scopeCompanyId, $from, $to);
 
         return [

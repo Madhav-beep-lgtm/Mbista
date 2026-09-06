@@ -1373,7 +1373,7 @@ function jewellery_post_purchase(int $companyId, int $purchaseId, int $userId = 
             $item = jewellery_item($companyId, (int) $line['item_id']);
             $stockLedgerId = jw_metal_in_ledger_id($companyId, $item);
             if ($stockLedgerId <= 0) {
-                throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                throw new RuntimeException('No ' . (inv_accounting_method($companyId) === 'periodic' ? 'Purchases' : 'stock')
                     . ' ledger is mapped for item ' . $item['code']
                     . '. Set it under Jewellery → Settings → Posting Ledgers.');
             }
@@ -2455,7 +2455,7 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
             $exItem = jewellery_item($companyId, (int) $exchange['item_id']);
             $exLedgerId = jw_metal_in_ledger_id($companyId, $exItem);
             if ($exLedgerId <= 0) {
-                throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                throw new RuntimeException('No ' . (inv_accounting_method($companyId) === 'periodic' ? 'Purchases' : 'stock')
                     . ' ledger is mapped for exchange item ' . $exItem['code'] . '.');
             }
             $legs[] = ['ledger_id' => $exLedgerId, 'amount' => (float) $exchange['amount'], 'memo' => 'Old gold in exchange ' . $sale['sale_no']];
@@ -2463,7 +2463,7 @@ function jewellery_post_sale(int $companyId, int $saleId, int $userId = 0): arra
 
         // Cost of sales, priced at the weighted average in force right now.
         // Whether it reaches the ledger depends on how the books are kept.
-        $periodic = inv_accounting_method() === 'periodic';
+        $periodic = inv_accounting_method($companyId) === 'periodic';
         $cogsTotal = 0.0;
         $lineCogs = [];
         foreach ($lines as $line) {
@@ -3526,7 +3526,7 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
                     $item = jewellery_item($companyId, (int) $tenderRow['item_id']);
                     $tenderLedgerId = jw_metal_in_ledger_id($companyId, $item);
                     if ($tenderLedgerId <= 0) {
-                        throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                        throw new RuntimeException('No ' . (inv_accounting_method($companyId) === 'periodic' ? 'Purchases' : 'stock')
                             . ' ledger is mapped for item ' . $item['code'] . '.');
                     }
                 } elseif ($tenderMode === 'adjustment') {
@@ -3556,7 +3556,7 @@ function jewellery_post_settlement(int $companyId, int $settlementId, int $userI
                 $item = jewellery_item($companyId, (int) $settlement['item_id']);
                 $counterLedgerId = jw_metal_in_ledger_id($companyId, $item);
                 if ($counterLedgerId <= 0) {
-                    throw new RuntimeException('No ' . (inv_accounting_method() === 'periodic' ? 'Purchases' : 'stock')
+                    throw new RuntimeException('No ' . (inv_accounting_method($companyId) === 'periodic' ? 'Purchases' : 'stock')
                         . ' ledger is mapped for item ' . $item['code'] . '.');
                 }
             } elseif ($mode === 'adjustment') {
