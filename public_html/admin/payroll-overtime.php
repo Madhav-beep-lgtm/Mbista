@@ -144,7 +144,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <th class="is-numeric">Approved</th><th>Status</th><th></th>
         </tr></thead>
         <tbody>
-            <?php if ($weeks === []): ?><tr><td colspan="10">No week in this period crossed the threshold. Working long on ONE day is not overtime — only cumulative weekly hours above <?= e(number_format((float) ($settings['ot_weekly_threshold'] ?? 40), 2)) ?> count.</td></tr><?php endif; ?>
+            <?php if ($weeks === []): ?><tr><td colspan="10">No week in this period crossed the threshold. Overtime is cumulative weekly hours above <?= e(number_format((float) ($settings['ot_weekly_threshold'] ?? 40), 2)) ?> count.</td></tr><?php endif; ?>
             <?php foreach ($weeks as $week): ?>
                 <?php $daily = json_decode((string) ($week['daily_json'] ?? ''), true) ?: []; ?>
                 <tr>
@@ -209,8 +209,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </table>
     </div>
     <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-        A week crossing two months is judged as a WHOLE week; each overtime hour is dated on the day it was worked and is paid by
-        the payroll run covering that date — never twice. Greyed dates in a breakdown belong to the neighbouring month's run.
+        A week crossing two months is judged whole. Each overtime hour is dated to the day worked and paid by
+        the run covering that date. Greyed dates belong to the neighbouring month's run.
     </p>
 </section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

@@ -67,8 +67,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" aria-label="Bulk import">
     <div class="mbw-card-head"><h2>Import a Chart of Accounts</h2><span class="frm-optional">Excel or CSV — groups, ledgers and opening balances in one sheet</span></div>
     <p class="frm-optional" style="margin:0 0 12px">
-        Upload a spreadsheet to create groups and ledgers together. Every row is checked and shown back to you
-        before anything is written, so you can see what will be created, what already exists, and what was
+        Upload a spreadsheet to create groups and ledgers together. Every row is previewed
+        before anything is written: what will be created, what exists already, and what was
         rejected and why.
     </p>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">

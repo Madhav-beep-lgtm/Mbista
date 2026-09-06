@@ -482,7 +482,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if (user_can_do('agreements', 'create')): ?>
 <section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>New Structured Agreement</h2></div>
-    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Drafts a section-tree agreement from a template snapshot — outline editing, automatic clause numbering, bilingual side-by-side or sequential layouts, review/approval workflow, immutable versions, and task wiring. This is the standard drafting method; the single-form editor below remains only for pre-existing classic agreements.</p>
+    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Drafts an agreement from a template snapshot, with outline editing, clause numbering, bilingual layouts and immutable versions. The single-form editor below is for existing classic agreements.</p>
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="create_builder">
@@ -583,7 +583,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
         <div class="workspace-span-2">
             <strong style="font-size:13px;color:var(--mbw-heading)">Annex-1: Service Scope — अनुसूची–१ सेवाको विस्तृत कार्यक्षेत्र</strong>
-            <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Customise per client: edit, clear (to drop), or add service rows. Both languages print side by side in the bilingual document.</p>
+            <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Edit, clear or add service rows per client. Both languages print side by side.</p>
             <div id="sa-services">
                 <?php foreach ($services as $service): ?>
                     <details class="feature-disclosure sa-service" style="margin-bottom:8px">
@@ -693,7 +693,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if (user_can_do('agreements', 'manage')): ?>
 <section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Agreement Templates (<?= count($agreementTemplates) ?>)</h2></div>
-    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Each new agreement copies its template as an independent snapshot — changing or archiving a template never alters existing agreements. To edit a template's content, open any agreement built from it, adjust the outline, and use “Save as template”.</p>
+    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">Each agreement copies its template as an independent snapshot, so changing a template does not alter existing agreements. To edit a template, open an agreement built from it and use “Save as template”.</p>
     <div style="overflow-x:auto">
     <table>
         <thead><tr><th>Name</th><th>Service type</th><th>Default</th><th>Status</th><th>Actions</th></tr></thead>

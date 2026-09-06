@@ -658,6 +658,6 @@ $overdueDeadlines = $overdueStmt->fetchAll();
             </form>
         <?php endif; ?>
     <?php endif; ?>
-    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">VAT: 15% p.a. simple interest per started Nepali month PLUS 10% p.a. additional duty counted daily. SST and other Duties &amp; Taxes heads: 15% p.a. simple interest per started Nepali month. Month counting follows the Bikram Sambat calendar ("a month or part of a month" counts in full).</p>
+    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">VAT: 15% p.a. simple interest per started Nepali month, plus 10% p.a. additional duty counted daily. SST and other Duties &amp; Taxes heads: 15% p.a. simple interest per started Nepali month. A part month counts in full.</p>
 </section>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>

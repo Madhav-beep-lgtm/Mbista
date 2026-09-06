@@ -1949,8 +1949,8 @@ jw_filter_bar_styles();
           // counter has to know at a glance which ones are still free. ?>
     <?php $heldCount = count(array_filter($readyToSale, static fn (array $r): bool => (int) ($r['reserved_order_id'] ?? 0) > 0)); ?>
     <div class="notice" style="margin-bottom:14px">
-        Pieces made for the showroom, back from the kaligad and on the shelf. Nobody ordered these — they replace
-        minimum stock, so they wait for whoever walks in rather than for a name. A customer who does want one is
+        Pieces made for the showroom, back from the kaligad and on the shelf. These replace
+        minimum stock rather than filling an order. A customer who wants one is
         given an order against that exact piece on the <a href="<?= e(url('admin/jewellery-workshop.php?view=orders')) ?>">order form</a>,
         and no kaligad is ever assigned to it.
     </div>

@@ -2341,7 +2341,9 @@ function request_password_reset(string $email, ?string $requestIp = null): ?stri
         require_once __DIR__ . '/mailer.php';
     }
     if (function_exists('send_app_email')) {
-        $resetUrl = url('reset-password.php') . '?token=' . $token;
+        // A reset link leaves the browser in an email, so a root-relative URL
+        // would point at the recipient's mail host rather than this portal.
+        $resetUrl = mail_public_url('reset-password.php') . '?token=' . $token;
         $safeUrl = htmlspecialchars($resetUrl, ENT_QUOTES, 'UTF-8');
         $name = htmlspecialchars((string) ($user['name'] ?? ''), ENT_QUOTES, 'UTF-8');
         $inner = '<p>Hello ' . ($name !== '' ? $name : 'there') . ',</p>'

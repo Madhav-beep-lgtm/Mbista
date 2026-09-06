@@ -86,7 +86,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </div>
     <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        Enter the yearly amount for each income and expense ledger. Leave a field empty (or zero) to remove that budget line. Actuals shown are posted movements this fiscal year.
+        Yearly amount per income and expense ledger. Empty or zero removes the line. Actuals are posted movements this fiscal year.
     </p>
     <div style="overflow-x:auto">
         <table>

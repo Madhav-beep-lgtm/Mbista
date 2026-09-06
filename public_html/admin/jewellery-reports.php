@@ -543,9 +543,9 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                 // well as a glyph — an icon-only button is a guess.
             ?>
             <span class="jw-report-exports">
-                <a class="jw-export" href="<?= e($exportUrl($view, 'csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?></a>
-                <a class="jw-export" href="<?= e($exportUrl($view, 'xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
-                <a class="jw-export" target="_blank" rel="noopener" href="<?= e($exportUrl($view, 'print')) ?>" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
+                <a class="jw-export" href="<?= e($exportUrl($view, 'csv')) ?>" aria-label="Export CSV" title="Export CSV"><?= icon('download') ?> CSV</a>
+                <a class="jw-export" href="<?= e($exportUrl($view, 'xlsx')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?> Excel</a>
+                <a class="jw-export" target="_blank" rel="noopener" href="<?= e($exportUrl($view, 'print')) ?>" aria-label="Export PDF / Print" title="Export PDF / Print"><?= icon('documents') ?> PDF / Print</a>
             </span>
         <?php endif; ?>
     </form>

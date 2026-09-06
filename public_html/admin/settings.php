@@ -584,10 +584,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         'sync_client_portal' => isset($_POST['sync_client_portal']) ? '1' : '0',
         'sync_home_page' => isset($_POST['sync_home_page']) ? '1' : '0',
-        'security_session_timeout' => (string) max(5, min(1440, (int) ($_POST['security_session_timeout'] ?? 120))),
-        'security_password_min_length' => (string) max(6, min(64, (int) ($_POST['security_password_min_length'] ?? 8))),
+        // Session timeout, password minimum length and audit retention were
+        // asked for here and stored, and nothing in the application ever read
+        // them. A setting that changes nothing is worse than no setting: it
+        // reads as a control that has been exercised.
         'security_2fa_required' => isset($_POST['security_2fa_required']) ? '1' : '0',
-        'audit_retention_days' => (string) max(30, min(3650, (int) ($_POST['audit_retention_days'] ?? 365))),
 
         'settings_draft' => '',
     ]);
@@ -626,7 +627,7 @@ $sectionDefs = [
     'invoice' => ['tab' => 'invoice', 'icon' => 'invoices', 'tone' => 'teal', 'title' => 'Invoice Settings', 'blurb' => 'Configure proforma and tax invoice labels, notes, terms, and footer text.', 'keys' => ['proforma_invoice_prefix', 'proforma_invoice_title', 'tax_invoice_prefix', 'tax_invoice_title', 'tax_invoice_tax_label', 'tax_invoice_tax_rate']],
     'notifications' => ['tab' => 'notifications', 'icon' => 'messages', 'tone' => 'red', 'title' => 'Notification Access', 'blurb' => 'Manage email addresses, notification preferences, and system alerts.', 'keys' => ['notification_from_email', 'notification_reply_to_email', 'notify_admin_email', 'notify_client_email']],
     'sync' => ['tab' => 'sync', 'icon' => 'reconcile', 'tone' => 'blue', 'title' => 'Portal Sync & Visibility Rules', 'blurb' => 'Choose which settings appear on Admin Portal, Client Portal, and Home Page.', 'keys' => ['sync_client_portal', 'sync_home_page']],
-    'security' => ['tab' => 'security', 'icon' => 'admin', 'tone' => 'green', 'title' => 'Security & Access Controls', 'blurb' => 'Session timeout, password policy, 2FA policy, audit retention, and backups.', 'keys' => ['security_session_timeout', 'security_password_min_length', 'audit_retention_days']],
+    'security' => ['tab' => 'security', 'icon' => 'admin', 'tone' => 'green', 'title' => 'Security & Access Controls', 'blurb' => 'Two-factor policy and backups.', 'keys' => ['security_2fa_required']],
 ];
 
 $sectionCompleteness = [];
@@ -653,7 +654,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <?php if ($hasDraft): ?>
     <div class="notice success" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <span>A saved draft is loaded below — the live settings are unchanged until you Save or Publish.</span>
+        <span>A draft is loaded. Live settings are unchanged until you Save or Publish.</span>
         <form method="post" style="margin-left:auto">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="reset_draft">
@@ -828,7 +829,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <input type="hidden" name="fiscal_year_id" value="<?= (int) $fyRow['id'] ?>">
                                     <label style="margin:0;font-size:11px">First part ends on<input type="date" name="split_date" min="<?= e($fyRow['start_date']) ?>" max="<?= e(date('Y-m-d', strtotime((string) $fyRow['end_date'] . ' -1 day'))) ?>" required></label>
                                     <label style="margin:0;font-size:11px">Second part name<input type="text" name="second_label" placeholder="<?= e($fyRow['label']) ?> (part 2)" style="min-width:130px"></label>
-                                    <button type="submit" class="button secondary" style="min-height:32px" onclick="return confirm('Split <?= e($fyRow['label']) ?>? The two parts stay continuous (no gap, no overlap) and vouchers follow their own dates into the correct part.')">Split</button>
+                                    <button type="submit" class="button secondary" style="min-height:32px" onclick="return confirm('Split <?= e($fyRow['label']) ?>? The two parts stay continuous, and vouchers follow their own dates into the correct part.')">Split</button>
                                 </form>
                             </details>
                         <?php endif; ?>
@@ -845,8 +846,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="color:var(--mbw-muted);font-size:12px;margin:8px 0 0">Lifecycle: Upcoming → Open → Closed → Locked. Closed and locked years stay fully viewable and exportable but reject every accounting change. Reopening requires a reason and is written to the audit log.</p>
-        <p style="color:var(--mbw-muted);font-size:12px;margin:4px 0 0">Continuity: the closing balance struck at each year's end date IS the next year's opening balance — the next year opens the very next calendar day, so every date belongs to exactly one year (a shared date would make boundary-day transactions ambiguous). Gaps are rejected on creation and flagged in red above; permanent accounts carry forward automatically and income/expense restart at zero with prior profits in Retained Earnings b/f.</p>
+        <p style="color:var(--mbw-muted);font-size:12px;margin:8px 0 0">Lifecycle: Upcoming → Open → Closed → Locked. Closed and locked years stay viewable and exportable but reject accounting changes. Reopening requires a reason and is audited.</p>
+        <p style="color:var(--mbw-muted);font-size:12px;margin:4px 0 0">Continuity: each year's closing balance is the next year's opening, and the next year opens the following day. Gaps are rejected on creation. Permanent accounts carry forward; income and expense restart at zero, with prior profits in Retained Earnings b/f.</p>
     </div>
 </details>
 
@@ -970,7 +971,7 @@ if (table_exists('company_shareholdings')) {
             <label>Payment note<input type="text" name="payment_note" value="<?= e($settings['payment_note'] ?? '') ?>"></label>
             <div style="grid-column:1/-1; border-top:1px solid var(--mbw-border); margin-top:6px; padding-top:12px">
                 <strong style="color:var(--mbw-heading)"><?= icon('card') ?> Online payment gateways</strong>
-                <p style="margin:4px 0 8px; font-size:12.5px; color:var(--mbw-muted)">Let clients pay their invoices online via eSewa, Khalti, Fonepay or Stripe — a confirmed payment posts a receipt automatically. The bank details above are shown to clients as a manual bank-transfer option, and every method here feeds the app-wide payment-method dropdowns.</p>
+                <p style="margin:4px 0 8px; font-size:12.5px; color:var(--mbw-muted)">Online payment via eSewa, Khalti, Fonepay or Stripe. A confirmed payment posts a receipt automatically. The bank details above are offered as manual bank transfer.</p>
                 <a class="button secondary" href="<?= e(url('admin/payment-gateways.php')) ?>"><?= icon('login') ?> Configure online gateways</a>
             </div>
         </div>
@@ -1013,7 +1014,7 @@ if (table_exists('company_shareholdings')) {
             <?php require_once __DIR__ . '/../../app/mailer.php'; ?>
             <div style="grid-column:1/-1;border-top:1px solid var(--mbw-border);margin-top:6px;padding-top:12px">
                 <strong style="color:var(--mbw-heading)"><?= icon('messages') ?> Outgoing email (SMTP)</strong>
-                <p style="margin:4px 0 0;font-size:12.5px;color:var(--mbw-muted)">Enter your company mailbox's SMTP details to actually send password resets, invoices, contracts, ledgers and scheduled reports. Status:
+                <p style="margin:4px 0 0;font-size:12.5px;color:var(--mbw-muted)">SMTP details for password resets, invoices, contracts, ledgers and scheduled reports. Status:
                     <strong style="color:<?= mail_is_configured() ? 'var(--mbw-green)' : 'var(--mbw-amber)' ?>"><?= mail_is_configured() ? 'Configured (' . e(mail_transport()) . ')' : 'Not configured — emails are only logged, not sent' ?></strong>
                 </p>
             </div>
@@ -1049,7 +1050,7 @@ if (table_exists('company_shareholdings')) {
             <label class="frm-toggle-wrap">Home Page
                 <span class="frm-toggle"><input type="checkbox" name="sync_home_page" value="1"<?= $checked('sync_home_page', '1') ?>><i></i></span>
             </label>
-            <p style="grid-column:1/-1;margin:0;color:var(--mbw-muted);font-size:12px">Branding, contact details, and payment info flow to the client portal and the public home page when their toggles are on. The hero and about text above render on the public home page.</p>
+            <p style="grid-column:1/-1;margin:0;color:var(--mbw-muted);font-size:12px">Branding, contact and payment details appear on the client portal and home page when their toggles are on.</p>
         </div>
     </details>
 
@@ -1061,13 +1062,10 @@ if (table_exists('company_shareholdings')) {
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
         <div class="frm-grid frm-grid-4" style="padding-top:14px">
-            <label>Session timeout (minutes)<input type="number" min="5" max="1440" name="security_session_timeout" value="<?= e($settings['security_session_timeout'] ?? '120') ?>"></label>
-            <label>Password minimum length<input type="number" min="6" max="64" name="security_password_min_length" value="<?= e($settings['security_password_min_length'] ?? '8') ?>"></label>
-            <label>Audit log retention (days)<input type="number" min="30" max="3650" name="audit_retention_days" value="<?= e($settings['audit_retention_days'] ?? '365') ?>"></label>
-            <label class="frm-toggle-wrap">Require 2FA (policy)
+            <label class="frm-toggle-wrap">Require 2FA
                 <span class="frm-toggle"><input type="checkbox" name="security_2fa_required" value="1"<?= $checked('security_2fa_required') ?>><i></i></span>
             </label>
-            <p style="grid-column:1/-1;margin:0;color:var(--mbw-muted);font-size:12px">These are stored as the account security policy. Enforcement is rolled out per module — the audit trail already records every change.</p>
+            <p style="grid-column:1/-1;margin:0;color:var(--mbw-muted);font-size:12px">Applies to admin and staff sign-in. Every change is recorded in the audit trail.</p>
         </div>
     </details>
 </form>

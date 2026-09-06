@@ -232,7 +232,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </table>
     </div>
     <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-        Simple totals add all companies without eliminating intercompany balances. The Altiora consolidation below applies ownership percentages and consolidation methods.
+        Simple totals add all companies without eliminating intercompany balances. The consolidation below applies ownership percentages and methods.
     </p>
 </section>
 

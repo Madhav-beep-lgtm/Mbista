@@ -330,7 +330,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <a class="button soft" href="<?= e(url('admin/voucher-import.php?template=csv')) ?>"><?= icon('documents') ?>Download CSV template</a>
                         <a class="button soft" href="<?= e(url('admin/voucher-import.php?template=ledgers')) ?>"><?= icon('tree') ?>Download ledger list</a>
                     </p>
-                    <p class="frm-optional">The ledger list shows every active ledger of <?= e($company['name']) ?> with its code, group, and whether it counts as Bank/Cash — use those codes or exact names in the Ledger column.</p>
+                    <p class="frm-optional">The ledger list gives every active ledger with its code and group. Use the code or the exact name in the Ledger column.</p>
                     <p><button type="submit" class="button frm-submit"><?= icon('chevron-right') ?>Upload &amp; Preview</button></p>
                 </div>
             </div>
@@ -340,14 +340,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
     <section class="mbw-card frm-section">
         <div class="frm-section-head"><span class="mbw-chip is-square tone-purple"><?= icon('layers') ?></span><h2>How the Sheet Works</h2></div>
-        <p>Each spreadsheet row is one ledger line. Rows are grouped into vouchers by the <strong>Voucher No</strong> column: put a value on the first line of a voucher and leave it blank on its continuation lines (or repeat the same value on every line). Voucher Type, Date, and Title are read from the first line of each group. Your Voucher No is stored as the reference; the system assigns its own sequential voucher numbers on import.</p>
+        <p>One row per ledger line. Rows are grouped into vouchers by the <strong>Voucher No</strong> column, set on the first line of each voucher or repeated on every line. Voucher Type, Date and Title are read from the first line. Your Voucher No is kept as the reference; voucher numbers are assigned on import.</p>
         <div style="overflow-x:auto">
         <table class="frm-entries vimp-columns-table">
             <thead><tr><th>Column</th><th>Required</th><th>What it takes</th></tr></thead>
             <tbody>
                 <tr><td>Voucher No</td><td>Yes (first line of each voucher)</td><td>Any grouping key, e.g. JV-001. Saved as the voucher reference.</td></tr>
                 <tr><td>Voucher Type</td><td>Yes</td><td>Journal, Payment, Receipt, Sales, Purchase, Contra, Debit Note, Credit Note (or shorthand JV, PV, RV, SV, CV, DN, CN).</td></tr>
-                <tr><td>Date (AD or BS)</td><td>Yes</td><td>YYYY-MM-DD. Years 2064+ are treated as Bikram Sambat and converted, e.g. 2083-03-24. Excel date cells also work.</td></tr>
+                <tr><td>Date (AD or BS)</td><td>Yes</td><td>YYYY-MM-DD. Years 2064+ are read as Bikram Sambat. Excel date cells also work.</td></tr>
                 <tr><td>Ledger (Code or Name)</td><td>Yes (every line)</td><td>Ledger code or exact ledger name from the Chart of Accounts.</td></tr>
                 <tr><td>Debit / Credit</td><td>Yes (one per line)</td><td>Amount in exactly one of the two columns. Commas are fine (1,25,000.50).</td></tr>
                 <tr><td>Title</td><td>Recommended</td><td>Voucher title; falls back to the narration or an auto title.</td></tr>
@@ -359,7 +359,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
     <section class="mbw-card frm-section">
         <div class="frm-section-head"><span class="mbw-chip is-square tone-teal"><?= icon('tasks') ?></span><h2>Voucher Rules Checked on Import</h2></div>
-        <p>Every voucher in the sheet is validated with the same rules as the New Voucher form before anything is saved:</p>
+        <p>Validated with the same rules as the New Voucher form before anything is saved:</p>
         <ul>
             <li>At least two ledger lines, and total debit must equal total credit.</li>
             <li>Ledgers must exist, belong to <?= e($company['name']) ?>, and be active.</li>
@@ -376,7 +376,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </tbody>
         </table>
         </div>
-        <p class="frm-optional">“Bank/Cash group ledger” means a ledger created under a Chart of Accounts group flagged as Bank/Cash — the downloadable ledger list marks them.</p>
+        <p class="frm-optional">A Bank/Cash group ledger sits under a Chart of Accounts group flagged Bank/Cash. The ledger list marks them.</p>
     </section>
 </div>
 

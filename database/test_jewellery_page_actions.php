@@ -203,6 +203,13 @@ ok($r['kind'] === 'SUCCESS', 'clear_opening — ' . $r['msg']);
 ok($q("SELECT COUNT(*) FROM vouchers WHERE company_id=$cid AND source_type='inventory_opening'") === 0, 'Its voucher was removed');
 ok($q("SELECT COUNT(*) FROM inventory_items WHERE id=$itemId AND opening_qty=0.000") === 1, 'And the shared master is zeroed');
 
+// The opening-clear assertions above deliberately leave the item with no
+// stock. Re-establish a posted opening before the sale-path checks below: those
+// checks exercise advance allocation, not a stock-shortage rejection.
+$r = $run(['action' => 'save_opening', 'back_view' => 'opening', 'item_id' => (string) $itemId,
+    'qty_pieces' => '5', 'gross_weight' => '12', 'amount' => '1700000']);
+ok($r['kind'] === 'SUCCESS', 'Opening stock is restored for the sale allocation checks — ' . $r['msg']);
+
 // --- Workshop: one advance paid several ways at once ------------------------
 // The engine test proves the maths; this proves the WIRING — the tender grid's
 // parallel arrays crossing the real POST path into one mixed settlement.

@@ -1345,7 +1345,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             </div>
             <?php if ($saleParty > 0 && $openOrders !== []): ?>
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
-                <legend style="padding:0 6px;font-weight:600">This customer's outstanding orders and delivery readiness</legend>
+                <legend style="padding:0 6px;font-weight:600">Orders this customer is here to collect</legend>
                 <div style="overflow-x:auto"><table>
                     <thead><tr><th style="width:34px"></th><th>Order</th><th>Ordered</th><th>Items ordered</th><th class="is-numeric">Weight</th><th class="is-numeric">Advance</th><th>Ready to deliver</th></tr></thead>
                     <tbody>

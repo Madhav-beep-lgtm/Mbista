@@ -580,6 +580,10 @@ $jwsCostOfOpeningList = static function () use ($cidA, $fyA, $jwsQueries): array
 };
 
 $jwsSeedOpenings(1, 10);
+// Warm schema/metadata caches before measuring query shape. Their one-time
+// lookup is unrelated to the number of opening rows and made the first sample
+// appear one query more expensive on a fresh connection.
+jewellery_opening_rows($cidA, $fyA);
 $jwsSmall = $jwsCostOfOpeningList();
 $jwsSeedOpenings(11, 90);
 $jwsLarge = $jwsCostOfOpeningList();

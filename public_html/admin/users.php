@@ -868,7 +868,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
     <div class="notice info" style="margin:14px 0;">
         <strong>Default permission policy:</strong> a new staff account inherits the checked capabilities for its access level.
-        A custom module-by-module permission set can override that default when you create or edit the user.
+        A custom permission set can override this default per user.
         Client-book members use their own Owner, Approver or Entry Maker assignment.
     </div>
 
@@ -937,7 +937,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </button>
 
             <span class="muted">
-                Super Admin remains protected. These checked defaults are applied to newly created staff users with the matching access level.
+                Super Admin is protected. These defaults apply to newly created staff at the matching access level.
             </span>
         </div>
     </form>
@@ -950,7 +950,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <span class="muted">Use this if roles ever end up with no permissions (all boxes unchecked).</span>
         </div>
     </form><?php else: ?>
-        <p class="notice info" style="margin:14px 0;">Only a Platform Super Admin may change these company defaults. You may still apply custom module permissions to staff members you manage.</p>
+        <p class="notice info" style="margin:14px 0;">Only a Platform Super Admin may change these defaults. Custom per-user permissions are still available.</p>
     <?php endif; ?>
 </details>
 <section class="mbw-kpi-grid uw-summary-grid">
@@ -1271,9 +1271,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <div class="form-card">
                     <h3>Module permissions</h3>
                     <p class="muted">
-                        Tick the exact actions this staff member may perform. While nothing is ticked the account keeps
-                        <strong>full legacy access</strong>; saving any selection switches it to <strong>strict mode</strong>
-                        — it can then do only what is checked. Admins are never restricted here.
+                        Tick the actions this staff member may perform. With nothing ticked the account keeps
+                        <strong>full legacy access</strong>; saving any selection switches it to <strong>strict mode</strong>.
+                        Admins are not restricted here.
                         <?php if ($viewUserConfigured): ?>
                             <span class="mbw-pill tone-amber">Strict mode — <?= e((string) count($viewUserPermKeys)) ?> grants</span>
                         <?php else: ?>
@@ -1397,7 +1397,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php if (in_array(($viewUser['role'] ?? ''), ['staff', 'admin'], true)): ?>
                 <div class="form-card">
                     <h3>Public profile</h3>
-                    <p class="muted">Only these fields can appear on the public team page — never contact details, documents, or credentials. The member stays hidden until "Show on public team page" is ticked.</p>
+                    <p class="muted">Only these fields appear on the public team page. The member stays hidden until "Show on public team page" is ticked.</p>
                     <form method="post" enctype="multipart/form-data">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="action" value="save_staff_profile">
@@ -1446,7 +1446,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endif; ?>
                     </h3>
                     <?php if ($viewKycStatus !== 'verified'): ?>
-                        <p class="muted">KYC requires at least one identity document (citizenship certificate, national ID, or passport) <strong>and</strong> a PAN document, each verified by an administrator. Files are stored in a protected directory outside the public website and are never shown publicly.</p>
+                        <p class="muted">KYC requires one identity document (citizenship, national ID or passport) <strong>and</strong> a PAN document, each verified by an administrator. Files are stored outside the public website.</p>
                     <?php endif; ?>
 
                     <form method="post" enctype="multipart/form-data" class="inline-action-form" style="flex-wrap: wrap;">
@@ -1652,7 +1652,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <details class="users-permission-template">
                     <summary>Set custom module permissions instead of the access-level default</summary>
-                    <p class="muted">Leave this closed to use the selected access-level default. Opening it lets you set this user's exact allowed actions now; any selected action makes this a custom override.</p>
+                    <p class="muted">Leave closed to use the access-level default. Any action selected here makes it a custom override.</p>
                     <label class="users-full"><input type="checkbox" name="use_custom_permissions" value="1"> Use the selected custom permissions for this user</label>
                     <div class="rc-table-scroll">
                         <table class="rc-table role-matrix-table perm-matrix-table">

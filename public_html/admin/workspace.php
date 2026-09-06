@@ -2066,7 +2066,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </div>
                 <div class="notice">
                     These logins were created from user management, so they are only <strong>users</strong> — not clients.
-                    They will not appear in the client directory or Work Portal until you create their client profile here.
+                    They appear in the client directory once a client profile is created here.
                 </div>
                 <div style="overflow-x:auto">
                 <table>
@@ -2364,7 +2364,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         
             <div class="form-card">
                 <h3>Create service contract</h3>
-                <p style="margin:4px 0 10px;color:var(--mbw-muted);font-size:12.5px">Saving opens the bilingual (नेपाली + English) agreement builder — each contract's printable document with cover page, chapters, annexures and signatures.</p>
+                <p style="margin:4px 0 10px;color:var(--mbw-muted);font-size:12.5px">Saving opens the bilingual (नेपाली + English) agreement builder.</p>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="create_service_contract">
@@ -2686,7 +2686,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <?php if ($hasTaskAssignment): ?>
                 <h3 style="margin-top:18px;">Replace assigned staff (with progress handoff)</h3>
-                <p style="color:var(--mbw-muted); margin:4px 0 10px;">The replacement staff member receives the task's work progress update (stage completion, billing position, and your handoff note) as a message.</p>
+                <p style="color:var(--mbw-muted); margin:4px 0 10px;">The replacement staff member receives the stage completion, billing position and handoff note as a message.</p>
                 <form method="post" class="workspace-form-grid" style="margin-bottom:12px;">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="replace_task_staff">
@@ -2723,7 +2723,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <?php if ($hasTermination): ?>
                 <h3 style="margin-top:18px;" id="terminate-task">Terminate task mid-way</h3>
-                <p style="color:var(--mbw-muted); margin:4px 0 10px;">Stops further work. Completed stages stay invoiceable, and a termination/compensation invoice can be issued from the Invoices tab.</p>
+                <p style="color:var(--mbw-muted); margin:4px 0 10px;">Stops further work. Completed stages stay invoiceable from the Invoices tab.</p>
                 <form method="post" class="workspace-form-grid" onsubmit="return confirm('Terminate this task? Remaining work stops; completed stages remain invoiceable.');">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="terminate_task">
@@ -2944,7 +2944,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                             <label style="font-size:12px;font-weight:600">Method<input type="text" name="advance_method" value="Cash" style="min-height:32px"></label>
                                             <label style="font-size:12px;font-weight:600">Received on<input type="date" name="advance_date" value="<?= e(date('Y-m-d')) ?>" style="min-height:32px"></label>
                                             <button type="submit">Record advance</button>
-                                            <small style="font-size:11px;color:var(--mbw-muted,#5b6b64);font-weight:400">Posts Dr Bank / Cr Advances-from-Customers, mirrors to the client, and offsets the task's next invoice.</small>
+                                            <small style="font-size:11px;color:var(--mbw-muted,#5b6b64);font-weight:400">Posts Dr Bank / Cr Advances-from-Customers and offsets the task's next invoice.</small>
                                         </form>
                                     </details>
                                 </div>
@@ -3071,7 +3071,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <h2>Staff Workload</h2>
             <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/workspace.php?view=teams')) ?>">Manage Teams</a></div>
         </div>
-        <p style="color:var(--mbw-muted);">Shows what each active staff member can see in their staff portal: clients assigned to them directly or through a team, and the open/completed tasks under those clients. Assign clients and teams from the <a href="<?= e(url('admin/workspace.php?view=clients')) ?>">Clients</a> and <a href="<?= e(url('admin/workspace.php?view=teams')) ?>">Teams</a> tabs.</p>
+        <p style="color:var(--mbw-muted);">Clients assigned to each staff member, directly or through a team, and the tasks under them. Assign from <a href="<?= e(url('admin/workspace.php?view=clients')) ?>">Clients</a> and <a href="<?= e(url('admin/workspace.php?view=teams')) ?>">Teams</a>.</p>
         <div style="overflow-x:auto">
         <table>
             <thead>

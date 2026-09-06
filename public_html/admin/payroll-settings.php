@@ -385,7 +385,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
               // says all three rather than only the one it was introduced for. ?>
         <label>Working days per month
             <input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>">
-            <small style="display:block;color:var(--mbw-muted)">The days a full month is paid for. Worked days typed on the salary sheet are measured against this, and the unpaid-leave day-rate divides by it.</small>
+            <small style="display:block;color:var(--mbw-muted)">The days a full month is paid for. Worked days and the unpaid-leave day rate are measured against it.</small>
         </label>
         <?php // Only offered where migration 120 has been applied; the engine uses 8
               // either way, so a server without the column is not misinformed. ?>
@@ -398,7 +398,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </label>
         <?php endif; ?>
         <div style="grid-column:1/-1;padding:10px 12px;border-radius:8px;background:var(--mbw-surface-2,rgba(0,0,0,.03));font-size:12px;color:var(--mbw-muted)">
-            <strong>Worked days pay regular pay.</strong> Typing worked days on the salary sheet pays basic and every standing allowance for those days, and gross follows. Overtime, service charge and one-time additions are not touched &mdash; they are earned by what happened, not by attendance. Where worked days are typed, the unpaid-leave cut is released rather than applied on top: both measure days not worked, and taking each would cut the same absence twice.
+            <strong>Worked days pay regular pay.</strong> Worked days pro-rate basic and every standing allowance, and gross follows. Overtime, service charge and one-time additions are not affected. Where worked days are typed, the unpaid-leave cut is released rather than applied on top.
         </div>
         <label>Excess tax withheld — treatment
             <select name="excess_tax_treatment" title="What happens when the revised annual tax estimate is below the tax already deducted">
@@ -414,9 +414,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" data-collapsible aria-label="Pay components" id="components">
     <div class="mbw-card-head"><h2>Pay Components</h2></div>
     <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        Every pay head is a component with its OWN accounting treatment. Amounts are suggestions only — payroll
-        preparation may accept, change, zero, add or remove them per employee and month (with an audited reason).
-        Ledger mappings here take priority; the general control ledgers above are the documented fallback.
+        Each pay head is a component with its own accounting treatment. Amounts are defaults; payroll
+        preparation may change, zero, add or remove them per employee and month, with a reason.
+        Ledger mappings here take priority over the control ledgers above.
     </p>
     <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -573,7 +573,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" data-collapsible aria-label="Income tax configuration" id="tax">
     <div class="mbw-card-head"><h2>Income Tax Configuration — <?= e($fiscalYear['label'] ?? '') ?></h2></div>
     <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        Slabs and limits are versioned and effective-dated. Enter values from the official IRD publication of the Income Tax Act, 2058 as amended by the applicable Finance Act — cite it in the legal reference. Published versions are immutable; calculated runs keep the version snapshot they used.
+        Slabs and limits are versioned and effective-dated. Enter values from the IRD publication of the Income Tax Act, 2058 as amended, and cite it in the legal reference. Published versions are immutable.
     </p>
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
