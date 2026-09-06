@@ -56,6 +56,21 @@ const JW_ITEM_FROM = ' FROM inventory_items i
 const JW_ITEM_GROUP_NONE = '__ungrouped__';
 
 /**
+ * What "no stock group" is CALLED on screen.
+ *
+ * Beside the sentinel above, which is what the filter sends. The label was
+ * written out by hand in four places, and two of them wrote it as the PHP
+ * escape '\u{2014} Ungrouped' inside SINGLE quotes -- where \u{...} is not an
+ * escape at all, only eleven literal characters. The items list therefore had
+ * a stock group called "\u{2014} Ungrouped", printed once per row.
+ *
+ * It is also an array KEY that has to match between the group subtotals and
+ * the rows under them, so two spellings would have quietly split one group in
+ * two. One constant, and they cannot disagree.
+ */
+const JW_ITEM_GROUP_NONE_LABEL = '— Ungrouped';
+
+/**
  * The distinct values each item filter can offer.
  *
  * Taken from every item the company has, never from the filtered result, or

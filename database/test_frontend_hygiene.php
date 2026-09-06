@@ -993,5 +993,40 @@ if ($node === '' || !is_file($placementJs)) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// A PHP escape only escapes in DOUBLE quotes.
+// ---------------------------------------------------------------------------
+// '\u{2014} Ungrouped' written in single quotes is not an em dash and a label.
+// It is eleven literal characters, and the jewellery items list printed them
+// as the name of a stock group, once for every row. It survived because the
+// same string was also the array KEY the rows were filed under: wrong in the
+// heading and wrong in the rows, so the two agreed and nothing else broke.
+echo "\n== Escapes that only work in double quotes ==\n";
+// Asked of the TOKENISER, not of a regular expression. A pattern over raw
+// source matches from the close of one single-quoted string, across a
+// correctly double-quoted one between them, to the open of the next -- and it
+// reads comments too, including the comment explaining this very fault. The
+// tokeniser hands back each string literal as one token and every comment as a
+// different kind of token, so neither mistake is available to it.
+$escapeOffenders = [];
+foreach (array_merge(hygiene_php_files($root . '/app'), hygiene_php_files($root . '/public_html/admin')) as $escPath) {
+    foreach (token_get_all((string) file_get_contents($escPath)) as $escToken) {
+        if (!is_array($escToken) || $escToken[0] !== T_CONSTANT_ENCAPSED_STRING) {
+            continue;
+        }
+        $escText = (string) $escToken[1];
+        if ($escText === '' || $escText[0] !== "'") {
+            continue;   // double-quoted, where the escape does what it looks like
+        }
+        if (str_contains($escText, '\u{')) {
+            $escapeOffenders[] = basename($escPath) . ':' . $escToken[2] . ' ' . $escText;
+        }
+    }
+}
+ok($escapeOffenders === [], 'No \u{...} escape is stranded inside single quotes'
+    . ($escapeOffenders === [] ? '' : ' — ' . implode(' | ', array_slice($escapeOffenders, 0, 4))));
+ok(str_contains((string) @file_get_contents($root . '/app/jewellery_stock.php'), 'JW_ITEM_GROUP_NONE_LABEL'),
+    'And "no stock group" is named in ONE place, so a heading and its rows cannot spell it differently');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

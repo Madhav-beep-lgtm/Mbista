@@ -1360,7 +1360,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             return $options;
         };
         $topItemGroupOptions = $topItemOptions($itemFilterOptions['groups'], 'All groups');
-        if ($itemFilterOptions['has_ungrouped']) { $topItemGroupOptions[JW_ITEM_GROUP_NONE] = '— Ungrouped'; }
+        if ($itemFilterOptions['has_ungrouped']) { $topItemGroupOptions[JW_ITEM_GROUP_NONE] = JW_ITEM_GROUP_NONE_LABEL; }
         $topItemPurityOptions = ['' => 'All'];
         foreach ($purities as $purityRow) {
             $topItemPurityOptions[(string) (int) $purityRow['id']] = (string) ($purityRow['metal_code'] ?? '') . ' · ' . (string) $purityRow['code'];
@@ -1419,7 +1419,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 $groupTotals = [];
                 foreach ($items as $groupRow) {
                     $groupKey = trim((string) ($groupRow['category'] ?? ''));
-                    $groupKey = $groupKey === '' ? '\u{2014} Ungrouped' : $groupKey;
+                    $groupKey = $groupKey === '' ? JW_ITEM_GROUP_NONE_LABEL : $groupKey;
                     if (!isset($groupTotals[$groupKey])) {
                         $groupTotals[$groupKey] = ['count' => 0, 'fine' => 0.0];
                     }
@@ -1442,7 +1442,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 $grouped = [];
                 foreach ($pageItems as $groupRow) {
                     $groupName = trim((string) ($groupRow['category'] ?? ''));
-                    $grouped[$groupName === '' ? '\u{2014} Ungrouped' : $groupName][] = $groupRow;
+                    $grouped[$groupName === '' ? JW_ITEM_GROUP_NONE_LABEL : $groupName][] = $groupRow;
                 }
                 ksort($grouped, SORT_NATURAL | SORT_FLAG_CASE);
                 $serial = ($itemPage - 1) * $itemPerPage;
@@ -1526,7 +1526,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         };
                         $groupOptions = $listOptions($itemFilterOptions['groups'], 'All groups');
                         if ($itemFilterOptions['has_ungrouped']) {
-                            $groupOptions[JW_ITEM_GROUP_NONE] = '— Ungrouped';
+                            $groupOptions[JW_ITEM_GROUP_NONE] = JW_ITEM_GROUP_NONE_LABEL;
                         }
                     ?>
                     <td><?= $filterSelect('f_group', $itemFilters['group'], $groupOptions) ?></td>
