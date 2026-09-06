@@ -968,6 +968,102 @@ function jewellery_save_mapping(int $companyId, string $purpose, int $ledgerId, 
 }
 
 /**
+ * Set (or with ledger 0 clear) the ledger ONE ITEM posts to for one purpose.
+ *
+ * The company default answers "where does gold go"; this answers "where does
+ * THIS gold go". A shop that buys 24k bars, ornaments for resale and loose
+ * stones through the same counter has three different things to report on, and
+ * one Purchases account cannot tell them apart afterwards.
+ *
+ * Translates the jewellery name to the canonical one first, exactly as
+ * jewellery_save_mapping() and jewellery_resolve_mapping() do, so a ledger set
+ * on this form IS the row the Inventory item form edits — there is no separate
+ * "jewellery item mapping".
+ */
+function jewellery_set_item_ledger(int $companyId, int $itemId, string $purpose, int $ledgerId, int $userId = 0): void
+{
+    if (!array_key_exists($purpose, jewellery_mapping_purposes())) {
+        throw new RuntimeException('Unknown posting purpose: ' . $purpose);
+    }
+    require_once __DIR__ . '/inventory_mapping.php';
+    $canonical = jw_canonical_purpose($purpose);
+    // Say so rather than drop it. inventory_set_item_ledger() answers an
+    // unknown purpose by returning quietly, which is right for a POSTed name
+    // nobody recognises -- but here the purpose IS recognised and would still
+    // be discarded, and the form would report "Item saved" over the top of a
+    // mapping that never landed.
+    if (!array_key_exists($canonical, inventory_mapping_purposes($companyId))) {
+        throw new RuntimeException('"' . (jewellery_mapping_purposes()[$purpose][0] ?? $purpose)
+            . '" cannot be set for this company: the shared mapping catalogue has no "'
+            . $canonical . '". Either the Jewellery module is switched off for it, or that '
+            . 'purpose is not one the catalogue carries.');
+    }
+    inventory_set_item_ledger($companyId, $itemId, $canonical, $ledgerId, $userId ?: null);
+}
+
+/**
+ * What ONE item has chosen for itself, keyed by JEWELLERY purpose name.
+ *
+ * @return array<string, int>
+ */
+function jewellery_item_ledger_map(int $companyId, int $itemId): array
+{
+    require_once __DIR__ . '/inventory_mapping.php';
+    $canonical = inventory_item_ledger_map($companyId, $itemId);
+    $map = [];
+    foreach (jewellery_mapping_purposes() as $purpose => [, , $canon]) {
+        if (isset($canonical[$canon])) {
+            $map[$purpose] = (int) $canonical[$canon];
+        }
+    }
+
+    return $map;
+}
+
+/**
+ * The purposes the item form may honestly ask about, in order.
+ *
+ * ONLY the ones the engines actually resolve with an item id. Offering a row
+ * that is resolved company-wide would take an answer, save it, and never read
+ * it again — a mapping screen that quietly ignores what it was told is worse
+ * than one that does not offer the row.
+ *
+ * The purchase row is not a fixed answer. Under the perpetual method a
+ * purchase debits the item's own stock account; under periodic the stock
+ * accounts sit still all year and it debits Purchases instead. The form asks
+ * for the one that will actually be posted to.
+ *
+ * The stock row follows the item's TYPE, because that is what
+ * jw_item_stock_ledger_id() resolves — an ornament's stock account is not the
+ * bullion one, and a form that saved the answer under the wrong purpose would
+ * take the mapping and post somewhere else.
+ *
+ * @return string[] jewellery purpose keys
+ */
+function jewellery_item_form_purposes(string $itemType, string $method = 'perpetual'): array
+{
+    $purposes = [];
+    if ($method === 'periodic') {
+        $purposes[] = 'purchases';
+    }
+    $purposes[] = jewellery_item_stock_purpose($itemType);
+
+    // Resolved per line by jw_item_ledger(), so a shop can report chains apart
+    // from bangles without keeping the difference in its head.
+    return array_merge($purposes, ['sales_metal', 'sales_making', 'sales_stone']);
+}
+
+/** Which stock purpose an item of this type posts to. Mirrors jw_item_stock_ledger_id(). */
+function jewellery_item_stock_purpose(string $itemType): string
+{
+    return match ($itemType) {
+        'ornament' => 'stock_finished',
+        'stone' => 'stock_stone',
+        default => 'stock_metal',
+    };
+}
+
+/**
  * Where each posting purpose belongs in a chart of accounts, so the whole set
  * can be opened in one action.
  *

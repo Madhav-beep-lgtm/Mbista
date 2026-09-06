@@ -582,6 +582,177 @@ with_method('periodic', static function () use ($jwCo, $jwFy, $jwUser, $jwItem, 
     ok(abs($sum) < 0.01, 'The sale voucher still balances to nought without its cost leg');
 });
 
+// ---------------------------------------------------------------------------
+// Old gold and bullion had nowhere to name an account of their own.
+// ---------------------------------------------------------------------------
+// The resolver has always walked item -> category -> company. The Jewellery
+// item form simply never asked: not one item_map[] field on the whole screen,
+// and the only writer for an item-scope row lived INSIDE
+// accounting-inventory.php, so nothing outside that one page could call it.
+// Every gram bought -- bars, ornaments, loose stones, old gold over the counter
+// -- went to whichever single Purchases account the company had mapped.
+echo "\n== A jewellery item can name its own account ==\n";
+
+// Jewellery on for this company, and the SESSION pointed somewhere else. The
+// purpose catalogue used to read the session to decide whether to offer the
+// jewellery purposes at all, so a writer acting for a jewellery company from a
+// CLI run or from another client's screen was told they did not exist.
+db()->prepare('UPDATE companies SET is_client_company = 1 WHERE id = :c')->execute(['c' => $jwCo]);
+// A user of its OWN. client_profiles is unique on user_id, so borrowing the
+// first admin would collide with whatever profile they already have -- and a
+// test that deletes a real one to make room is worse than no test.
+$jwOwner = create_user(['name' => 'Periodic Jeweller Owner', 'email' => 'periodic-jw-' . $jwSuffix . '@test.local',
+    'password' => 'Secret#12345', 'role' => 'customer', 'status' => 'active', 'company_id' => $jwCo]);
+db()->prepare('INSERT INTO client_profiles (user_id, company_id, books_company_id, organization_name, client_code, is_active, jewellery_accounting_enabled)
+    VALUES (:u, :c, :books, :o, :code, 1, 1)')
+    ->execute(['u' => $jwOwner, 'c' => $jwCo, 'books' => $jwCo, 'o' => 'Periodic Jeweller', 'code' => $jwSuffix . '-C']);
+$jwSessionWas = $_SESSION['company_id'] ?? null;
+$_SESSION['company_id'] = 0;
+ok(array_key_exists('stock_stone', inventory_mapping_purposes($jwCo)),
+    'The purpose catalogue answers for the company it was ASKED about, not the session');
+
+$jwOldGoldLedger = $jwLedger('Purchases — old gold', 'purchases', 'expense');
+$jwOldGold = jewellery_save_item($jwCo, ['code' => 'OLDGOLD', 'name' => 'Old gold', 'item_type' => 'bullion',
+    'metal_id' => $jwMetal, 'purity_id' => $jwPurity, 'unit_id' => $jwUnit, 'gross_weight' => 0], $jwUser);
+
+// The line the form runs. Before this change it could not be written at all:
+// inventory_set_item_ledger() was defined inside a page.
+ok(function_exists('inventory_set_item_ledger'),
+    'The item-scope writer is reachable from outside the Inventory screen');
+jewellery_set_item_ledger($jwCo, $jwOldGold, 'purchases', $jwOldGoldLedger, $jwUser);
+ok((int) (jewellery_item_ledger_map($jwCo, $jwOldGold)['purchases'] ?? 0) === $jwOldGoldLedger,
+    'A ledger set on one item reads back on that item');
+ok((int) (jewellery_item_ledger_map($jwCo, $jwItem)['purchases'] ?? 0) === 0,
+    '  ...and not on the item standing beside it');
+
+// Stored under the CANONICAL name. A jewellery name looks right in the table
+// and resolves to nothing.
+$jwStoreRefusal = '';
+try {
+    jewellery_set_item_ledger($jwCo, $jwOldGold, 'stock_metal', $jwStock, $jwUser);
+} catch (Throwable $jwStoreFailed) {
+    $jwStoreRefusal = $jwStoreFailed->getMessage();
+}
+$jwStored = array_keys(inventory_item_ledger_map($jwCo, $jwOldGold));
+ok(in_array('inventory_asset', $jwStored, true) && !in_array('stock_metal', $jwStored, true),
+    'The jewellery name is translated to the shared one before it is stored'
+        . ($jwStoreRefusal !== '' ? ' — refused: ' . $jwStoreRefusal : ' — stored as ' . implode(', ', $jwStored)));
+
+// The kind-of-account check reaches the item form too, or an item could point
+// its purchases at a debtor and nothing would say so until the year end.
+$jwWrongLedger = $jwLedger('Sundry debtors', 'current_asset', 'asset');
+$jwRefusal = '';
+try {
+    jewellery_set_item_ledger($jwCo, $jwOldGold, 'purchases', $jwWrongLedger, $jwUser);
+} catch (Throwable $jwRefused) {
+    $jwRefusal = $jwRefused->getMessage();
+}
+ok(str_contains($jwRefusal, 'has to be an expense ledger'),
+    'An account of the wrong kind is refused by name — ' . ($jwRefusal ?: 'it was ACCEPTED'));
+ok((int) (jewellery_item_ledger_map($jwCo, $jwOldGold)['purchases'] ?? 0) === $jwOldGoldLedger,
+    '  ...and the refusal leaves the mapping that was already there alone');
+
+// And now the only proof that counts: where the money actually lands.
+with_method('periodic', static function () use ($jwCo, $jwFy, $jwUser, $jwItem, $jwOldGold,
+    $jwPurity, $jwUnit, $jwSupplier, $legsOf): void {
+    foreach ([[$jwOldGold, 'OLDGOLD', 'Purchases — old gold'],
+              [$jwItem, 'RING1', 'Purchases — gold']] as [$buyItem, $buyLabel, $buyWant]) {
+        $buyId = jewellery_save_purchase($jwCo, $jwFy, [
+            'purchase_date' => '2026-08-05', 'party_id' => $jwSupplier, 'source' => 'supplier',
+            'settle_mode' => 'credit',
+        ], [['item_id' => $buyItem, 'purity_id' => $jwPurity, 'unit_id' => $jwUnit,
+            'gross_weight' => 2, 'rate' => 90000]], $jwUser);
+        $buyPosted = jewellery_post_purchase($jwCo, $buyId, $jwUser);
+        $buyLegs = !empty($buyPosted['ok']) ? $legsOf((int) $buyPosted['voucher_id']) : [];
+        $buyGot = '';
+        foreach ($buyLegs as $buyName => $buyAmount) {
+            if ($buyAmount > 0 && str_starts_with($buyName, 'Purchases')) { $buyGot = $buyName; }
+        }
+        ok($buyGot === $buyWant, $buyLabel . ' is bought into "' . ($buyGot ?: 'nothing')
+            . '"' . ($buyGot === $buyWant
+                ? ($buyLabel === 'RING1' ? ' — the company default, having none of its own' : '')
+                : ', wanted "' . $buyWant . '"' . (!empty($buyPosted['ok']) ? '' : ' — ' . ($buyPosted['error'] ?? ''))));
+    }
+});
+
+// The form has to ASK, or none of the above can ever be set from a screen.
+$jwFormSource = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/jewellery.php');
+ok(substr_count($jwFormSource, 'item_map[') > 0,
+    'The jewellery item form asks which ledgers this item posts to');
+ok(str_contains($jwFormSource, 'jewellery_set_item_ledger('),
+    '  ...and saves the answer');
+
+// Every row it offers must be one the engines actually resolve PER ITEM. A row
+// that is resolved company-wide would take the answer, store it, and never read
+// it again -- a mapping screen that quietly ignores what it was told is worse
+// than one that does not offer the row.
+$jwPerItemPurposes = ['purchases', 'stock_metal', 'stock_finished', 'stock_stone',
+    'sales_metal', 'sales_making', 'sales_stone'];
+foreach ([['ornament', 'periodic'], ['ornament', 'perpetual'], ['bullion', 'periodic'],
+          ['stone', 'perpetual'], ['other', 'periodic']] as [$askType, $askMethod]) {
+    $askOffered = jewellery_item_form_purposes($askType, $askMethod);
+    $askStrays = array_values(array_diff($askOffered, $jwPerItemPurposes));
+    ok($askStrays === [], 'A ' . $askType . ' on ' . $askMethod
+        . ' books is only asked about ledgers that are resolved per item'
+        . ($askStrays === [] ? '' : ' — ' . implode(', ', $askStrays)));
+}
+ok(in_array('purchases', jewellery_item_form_purposes('bullion', 'periodic'), true),
+    'Periodic books are asked for the Purchases account, which is what a purchase debits');
+ok(!in_array('purchases', jewellery_item_form_purposes('bullion', 'perpetual'), true),
+    '  ...and perpetual books are not, because there is no such account under that system');
+
+// The stock row must follow the item's TYPE, because that is the purpose
+// jw_item_stock_ledger_id() looks for. One definition, used by both.
+foreach (['ornament' => 'stock_finished', 'stone' => 'stock_stone',
+          'bullion' => 'stock_metal', 'other' => 'stock_metal'] as $askType => $askStock) {
+    ok(in_array($askStock, jewellery_item_form_purposes($askType, 'perpetual'), true),
+        'A ' . $askType . ' is asked for its ' . $askStock . ' account, the one the resolver reads');
+}
+ok(str_contains((string) file_get_contents(dirname(__DIR__) . '/app/jewellery_stock.php'),
+    'jewellery_item_stock_purpose('),
+    'The resolver and the form share one definition of which stock account a type uses');
+// Changing Type and saving in one action must not file the answer under the
+// purpose the resolver will never ask for, so the rows that do not apply are
+// DISABLED -- a disabled select is not submitted at all.
+ok(str_contains($jwFormSource, 'select.disabled = !on;'),
+    'The stock rows that do not apply are disabled, not merely hidden');
+
+// No engine may ask the purpose catalogue about "the current company". Which
+// purposes exist depends on whether the Jewellery module is on for a company,
+// and every function here is HANDED one — a CLI run, a scheduled job, or one
+// client's books opened from another's screen would otherwise be told the
+// jewellery purposes do not exist and drop the mapping without a word.
+$catalogueReaders = [];
+foreach (['inventory_mapping', 'jewellery_engine', 'inventory_valuation'] as $catalogueFile) {
+    foreach (explode("\n", (string) @file_get_contents(dirname(__DIR__) . '/app/' . $catalogueFile . '.php')) as $catNo => $catLine) {
+        if (!str_contains($catLine, 'inventory_mapping_purposes()')) { continue; }
+        if (str_starts_with(trim($catLine), '//') || str_starts_with(trim($catLine), '*')) { continue; }
+        if (str_contains($catLine, 'function inventory_mapping_purposes(')) { continue; }
+        $catalogueReaders[] = $catalogueFile . '.php:' . ($catNo + 1);
+    }
+}
+ok($catalogueReaders === [], 'No engine asks the purpose catalogue about the session company'
+    . ($catalogueReaders === [] ? '' : ' — ' . implode(', ', $catalogueReaders)));
+
+// And the wrong-kind refusal has to actually fire. It reads the catalogue it
+// looked the purpose up in, and when those two came apart the check went quiet:
+// $expected fell back to '' and every mapping was accepted, including stock
+// pointed at an expense account. Nothing said so.
+$natureCheckers = ['inventory_mapping_save', 'inventory_set_item_ledger'];
+foreach ($natureCheckers as $natureFn) {
+    $natureSource = (string) file_get_contents(dirname(__DIR__) . '/app/inventory_mapping.php');
+    $natureStart = strpos($natureSource, 'function ' . $natureFn . '(');
+    $natureBody = $natureStart === false ? '' : substr($natureSource, $natureStart, 3000);
+    ok($natureStart !== false
+        && str_contains($natureBody, '$catalogue = inventory_mapping_purposes($companyId);')
+        && str_contains($natureBody, "\$expected = (string) (\$catalogue[\$purpose]['expect'] ?? '');"),
+        $natureFn . '() checks the kind of account against the catalogue it was looking in');
+}
+
+$_SESSION['company_id'] = $jwSessionWas;
+db()->prepare('DELETE FROM client_profiles WHERE books_company_id = :c')->execute(['c' => $jwCo]);
+db()->prepare('DELETE FROM users WHERE id = :u')->execute(['u' => $jwOwner]);
+
 foreach (['voucher_entries' => 'voucher_id IN (SELECT id FROM vouchers WHERE company_id = :c)',
     'vouchers' => 'company_id = :c', 'jewellery_sale_lines' => 'company_id = :c',
     'jewellery_sales' => 'company_id = :c', 'jewellery_purchase_lines' => 'company_id = :c',

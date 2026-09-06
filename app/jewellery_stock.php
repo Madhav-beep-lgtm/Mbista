@@ -701,11 +701,9 @@ function jw_item_making_basis(array $item, array $settings): string
  */
 function jw_item_stock_ledger_id(int $companyId, array $item): int
 {
-    $typePurpose = match ((string) ($item['item_type'] ?? 'ornament')) {
-        'ornament' => 'stock_finished',
-        'stone' => 'stock_stone',
-        default => 'stock_metal',
-    };
+    // One definition, shared with the item form. When they were two, the form
+    // could save a mapping under a purpose this resolver never asked for.
+    $typePurpose = jewellery_item_stock_purpose((string) ($item['item_type'] ?? 'ornament'));
     $itemId = (int) ($item['id'] ?? 0);
     $category = ($item['category'] ?? '') !== '' ? (string) $item['category'] : null;
 

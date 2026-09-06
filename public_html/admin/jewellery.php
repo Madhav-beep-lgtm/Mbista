@@ -4,6 +4,11 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/jewellery_engine.php';
 require_once __DIR__ . '/../../app/jewellery_stock.php';
+// The item form chooses ledgers per item and has to say which system the
+// books are kept under, so neither is left to whatever happened to be
+// loaded by something else first.
+require_once __DIR__ . '/../../app/inventory_valuation.php';
+require_once __DIR__ . '/../../app/inventory_mapping.php';
 require_once __DIR__ . '/../../app/opening_stock_import.php';
 
 // Server-side gate: books access + company context + client feature flag +
@@ -287,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_item') {
         require_permission('jewellery', 'edit');
         try {
-            jewellery_save_item($companyId, [
+            $savedItemId = jewellery_save_item($companyId, [
                 'id' => (int) ($_POST['item_id'] ?? 0),
                 'code' => (string) ($_POST['code'] ?? ''),
                 'name' => (string) ($_POST['name'] ?? ''),
@@ -313,7 +318,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'status' => isset($_POST['active']) ? 'active' : 'inactive',
                 'notes' => (string) ($_POST['notes'] ?? ''),
             ], $userId);
-            flash('success', 'Item saved.');
+            // The ledgers chosen on the form belong to THIS item, saved as
+            // item-scope rows in the shared mapping table. 0 = inherit the
+            // category or company default, which is what every item did
+            // before there was anywhere to say otherwise.
+            //
+            // Reported SEPARATELY from the item. A ledger of the wrong kind
+            // is refused by name, and rolling the item save back over it
+            // would throw away twenty typed fields to punish one dropdown.
+            $mapRefusals = [];
+            foreach ((array) ($_POST['item_map'] ?? []) as $mapPurpose => $mapLedgerId) {
+                try {
+                    jewellery_set_item_ledger($companyId, $savedItemId, (string) $mapPurpose, (int) $mapLedgerId, $userId);
+                } catch (Throwable $mapException) {
+                    $mapRefusals[] = $mapException->getMessage();
+                }
+            }
+            if ($mapRefusals !== []) {
+                flash('error', 'Item saved, but its ledgers were not: ' . implode(' ', $mapRefusals));
+            } else {
+                flash('success', 'Item saved.');
+            }
         } catch (Throwable $itemException) {
             flash('error', $itemException->getMessage());
         }
@@ -940,12 +965,14 @@ $taxRows = [];
 $editTax = null;
 $taxBases = jewellery_tax_bases();
 $mappingGaps = [];
+// The item form needs the same list: a ledger is chosen per item there, not
+// only per company here.
+if (($view === 'settings' || $view === 'items') && table_exists('ledgers')) {
+    $ledgerStmt = db()->prepare('SELECT id, code, name FROM ledgers WHERE company_id = :cid ORDER BY code ASC, name ASC');
+    $ledgerStmt->execute(['cid' => $companyId]);
+    $ledgerOptions = $ledgerStmt->fetchAll(PDO::FETCH_ASSOC);
+}
 if ($view === 'settings') {
-    if (table_exists('ledgers')) {
-        $ledgerStmt = db()->prepare('SELECT id, code, name FROM ledgers WHERE company_id = :cid ORDER BY code ASC, name ASC');
-        $ledgerStmt->execute(['cid' => $companyId]);
-        $ledgerOptions = $ledgerStmt->fetchAll(PDO::FETCH_ASSOC);
-    }
     $taxRows = jewellery_taxes_list($companyId, '', '', false);
     $editTax = jewellery_tax($companyId, (int) ($_GET['edit_tax'] ?? 0));
     // Which purposes the one-click setup would still have to open a ledger for.
@@ -1278,9 +1305,23 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 <?php if ($categoryChoices === []): ?>
                 <?php endif; ?>
             </label>
+            <?php
+            // One list of types, read by the Type select and by the mapping
+            // panel below. A type the panel did not know about would have no
+            // stock row at all, and nothing would say so.
+            $jwItemTypes = ['ornament' => 'Ornament', 'bullion' => 'Bullion / raw metal',
+                'stone' => 'Stone', 'other' => 'Other'];
+            // Which stock account each of them posts to, asked of the same
+            // function the resolver uses, and handed to the script below as
+            // data so the rule is not written a second time in JavaScript.
+            $jwStockPurposes = [];
+            foreach (array_keys($jwItemTypes) as $jwTypeKey) {
+                $jwStockPurposes[$jwTypeKey] = jewellery_item_stock_purpose($jwTypeKey);
+            }
+            ?>
             <label>Type
-                <select name="item_type">
-                    <?php foreach (['ornament' => 'Ornament', 'bullion' => 'Bullion / raw metal', 'stone' => 'Stone', 'other' => 'Other'] as $typeKey => $typeLabel): ?>
+                <select name="item_type" id="jw-item-type" data-jw-stock-purposes="<?= e((string) json_encode($jwStockPurposes)) ?>">
+                    <?php foreach ($jwItemTypes as $typeKey => $typeLabel): ?>
                         <option value="<?= e($typeKey) ?>" <?= (string) ($editItem['item_type'] ?? 'ornament') === $typeKey ? 'selected' : '' ?>><?= e($typeLabel) ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -1346,6 +1387,51 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <label>HS code<input type="text" name="hs_code" maxlength="40" value="<?= e((string) ($editItem['hs_code'] ?? '')) ?>"></label>
             <label class="frm-check"><input type="checkbox" name="vat_applicable" <?= (int) ($editItem['vat_applicable'] ?? 0) === 1 ? 'checked' : '' ?>> VAT applicable</label>
             <label class="frm-check"><input type="checkbox" name="active" <?= $editItem === null || (string) $editItem['status'] === 'active' ? 'checked' : '' ?>> Active</label>
+            <?php
+            // Where THIS item posts. The company default already answers "where
+            // does gold go"; without this there was no way to say "and old gold
+            // goes somewhere else", so a shop buying bars, ornaments and loose
+            // stones through one counter had them all in a single account and
+            // no way to tell them apart afterwards.
+            //
+            // Blank means inherit — the ladder is still item, then category,
+            // then the company default, so leaving every row alone changes
+            // nothing about how this item posts today.
+            $jwItemType = (string) ($editItem['item_type'] ?? 'ornament');
+            $jwItemMethod = inv_accounting_method($companyId);
+            $jwItemMap = $editItem ? jewellery_item_ledger_map($companyId, (int) $editItem['id']) : [];
+            $jwItemCategory = trim((string) ($editItem['category'] ?? '')) ?: null;
+            $jwPurposeLabels = jewellery_mapping_purposes();
+            // Every stock purpose is rendered, and the script below enables only
+            // the one matching the Type currently chosen. A disabled select is
+            // not submitted, so changing Type and saving in one go cannot file
+            // the answer under the purpose the resolver will never ask for.
+            $jwFormPurposes = jewellery_item_form_purposes($jwItemType, $jwItemMethod);
+            foreach (array_unique(array_values($jwStockPurposes)) as $jwStockPurpose) {
+                if (!in_array($jwStockPurpose, $jwFormPurposes, true)) {
+                    $jwFormPurposes[] = $jwStockPurpose;
+                }
+            }
+            $jwStockSet = array_unique(array_values($jwStockPurposes));
+            $jwActiveStock = jewellery_item_stock_purpose($jwItemType);
+            ?>
+            <p class="frm-optional" style="grid-column:1/-1;margin:8px 0 0"><strong>Where this item posts</strong> — leave a row blank to use the company default under Settings → Posting Ledgers.<?= $jwItemMethod === 'periodic' ? ' These books are kept the periodic way, so a purchase debits Purchases rather than the stock account.' : '' ?></p>
+            <?php foreach ($jwFormPurposes as $jwPurpose): ?>
+                <?php
+                $jwIsStock = in_array($jwPurpose, $jwStockSet, true);
+                $jwInherit = jewellery_resolve_mapping($companyId, $jwPurpose, null, $jwItemCategory);
+                $jwOwn = (int) ($jwItemMap[$jwPurpose] ?? 0);
+                ?>
+                <label data-jw-map-row="<?= e($jwPurpose) ?>" <?= $jwIsStock && $jwPurpose !== $jwActiveStock ? 'hidden' : '' ?>>
+                    <?= e((string) ($jwPurposeLabels[$jwPurpose][0] ?? $jwPurpose)) ?> <span class="frm-optional">this item only</span>
+                    <select name="item_map[<?= e($jwPurpose) ?>]" <?= $jwIsStock && $jwPurpose !== $jwActiveStock ? 'disabled' : '' ?>>
+                        <option value="0">— inherit default<?= $jwInherit ? ': ' . e((string) $jwInherit['name']) : ' (not set)' ?> —</option>
+                        <?php foreach ($ledgerOptions as $ledgerRow): ?>
+                            <option value="<?= (int) $ledgerRow['id'] ?>" <?= $jwOwn === (int) $ledgerRow['id'] ? 'selected' : '' ?>><?= e(($ledgerRow['code'] ? $ledgerRow['code'] . ' — ' : '') . $ledgerRow['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+            <?php endforeach; ?>
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editItem['notes'] ?? '')) ?>"></label>
             <p class="frm-optional" style="grid-column:1/-1;margin:0">This creates the item/style master. Physical trace IDs are created when opening stock is imported, a purchase is posted, or a stock/customer order is assigned.</p>
             <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Create New Item' ?></button></div>
@@ -1757,6 +1843,43 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             if (preferred) { purity.value = preferred; preferred = ''; }
         }
         metal.addEventListener('change', sync);
+        sync();
+    })();
+    </script>
+
+    <script>
+    // The stock account an item posts to depends on its TYPE, so the row on
+    // show follows the Type select rather than whatever the item was when the
+    // page loaded. The hidden ones are DISABLED, not just hidden: a disabled
+    // select is never submitted, so changing Type and saving in one action
+    // cannot file the answer under a purpose the resolver will never ask for.
+    (function () {
+        var type = document.getElementById('jw-item-type');
+        var rows = document.querySelectorAll('[data-jw-map-row]');
+        if (!type || !rows.length) { return; }
+        // Handed over as data by the form, which asked the same function the
+        // posting resolver asks. Written out here as a second copy of the rule,
+        // it would be one deploy away from disagreeing with it.
+        var stockFor = {};
+        try { stockFor = JSON.parse(type.getAttribute('data-jw-stock-purposes') || '{}'); } catch (e) { return; }
+        var stockRows = [];
+        Object.keys(stockFor).forEach(function (key) {
+            if (stockRows.indexOf(stockFor[key]) === -1) { stockRows.push(stockFor[key]); }
+        });
+        if (!stockRows.length) { return; }
+        function sync() {
+            var want = stockFor[type.value];
+            if (!want) { return; }
+            Array.prototype.forEach.call(rows, function (row) {
+                var purpose = row.getAttribute('data-jw-map-row');
+                if (stockRows.indexOf(purpose) === -1) { return; }
+                var on = purpose === want;
+                row.hidden = !on;
+                var select = row.querySelector('select');
+                if (select) { select.disabled = !on; }
+            });
+        }
+        type.addEventListener('change', sync);
         sync();
     })();
     </script>

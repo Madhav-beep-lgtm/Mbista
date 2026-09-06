@@ -25,7 +25,7 @@ declare(strict_types=1);
  * rather than keeping a private list — otherwise a ledger set on one screen
  * and a ledger set on another are two half-answers to the same question.
  */
-function inventory_mapping_purposes(): array
+function inventory_mapping_purposes(?int $companyId = null): array
 {
     $purposes = [
         'inventory_asset'      => ['label' => 'Inventory Asset', 'expect' => 'asset'],
@@ -57,10 +57,19 @@ function inventory_mapping_purposes(): array
 
     // Shown only where the vertical is actually in use, so a plain-inventory
     // company is not asked to map accounts it will never post to.
-    if (function_exists('jewellery_extra_inventory_purposes')
+    //
+    // Which company, though, is not always the one in the session: a writer
+    // validating a purpose is acting FOR a company it was handed, and reading
+    // the session there would refuse a jewellery purpose whenever the caller
+    // is a CLI run, a background job, or one client's books opened from
+    // another's screen. Callers that have a company say so.
+    if ($companyId === null && function_exists('current_company_id')) {
+        $companyId = (int) current_company_id();
+    }
+    if ((int) $companyId > 0
+        && function_exists('jewellery_extra_inventory_purposes')
         && function_exists('jewellery_enabled_for_company')
-        && function_exists('current_company_id')
-        && jewellery_enabled_for_company(current_company_id())) {
+        && jewellery_enabled_for_company((int) $companyId)) {
         $purposes += jewellery_extra_inventory_purposes();
     }
 
@@ -151,7 +160,8 @@ function inventory_mapping_rows(int $companyId): array
 /** Set (or with ledger 0 clear) one company-default mapping. */
 function inventory_mapping_save(int $companyId, string $purpose, int $ledgerId, int $userId = 0): void
 {
-    if (!array_key_exists($purpose, inventory_mapping_purposes())) {
+    $catalogue = inventory_mapping_purposes($companyId);
+    if (!array_key_exists($purpose, $catalogue)) {
         throw new RuntimeException('Unknown posting purpose: ' . $purpose);
     }
     if ($ledgerId <= 0) {
@@ -179,10 +189,10 @@ function inventory_mapping_save(int $companyId, string $purpose, int $ledgerId, 
     // balance sheet carries no inventory at all, and the whole purchase lands
     // in the profit and loss on the day it is bought. Nothing in the books
     // says why. A stock account is an asset; that is not a preference.
-    $expected = (string) (inventory_mapping_purposes()[$purpose]['expect'] ?? '');
+    $expected = (string) ($catalogue[$purpose]['expect'] ?? '');
     $actual = inv_ledger_nature($companyId, $ledgerId);
     if ($expected !== '' && $actual !== '' && $actual !== $expected) {
-        $label = (string) (inventory_mapping_purposes()[$purpose]['label'] ?? $purpose);
+        $label = (string) ($catalogue[$purpose]['label'] ?? $purpose);
         throw new RuntimeException($label . ' has to be ' . inv_nature_article($expected)
             . ' ledger, and that one is ' . inv_nature_article($actual) . ' ledger.'
             . ($expected === 'asset'
@@ -211,6 +221,81 @@ function inventory_mapping_save(int $companyId, string $purpose, int $ledgerId, 
 }
 
 /**
+ * Sets (or with ledger id 0 clears) ONE item-scope ledger mapping — the same
+ * per-record arrangement as fixed assets: ledgers are chosen on the item form
+ * and the item's "This item posts to" panel; inv_resolve_mapping still walks
+ * item -> category -> global, so old global rows keep working as defaults.
+ *
+ * It lived inside accounting-inventory.php, which is a PAGE. Nothing outside
+ * that one screen could reach it, so the Jewellery item form had no way to
+ * save a per-item ledger at all and every jewellery purchase — gold, stones,
+ * packing boxes — went to whatever single account the company had mapped. A
+ * writer for a table three modules share does not belong inside one of their
+ * screens.
+ */
+function inventory_set_item_ledger(int $companyId, int $itemId, string $purpose, int $ledgerId, ?int $userId = null): void
+{
+    $catalogue = inventory_mapping_purposes($companyId);
+    if ($itemId <= 0 || !array_key_exists($purpose, $catalogue)) {
+        return;
+    }
+    if ($ledgerId > 0) {
+        $own = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
+        $own->execute(['id' => $ledgerId, 'cid' => $companyId]);
+        if ((int) $own->fetchColumn() === 0) {
+            return; // never map a foreign company's ledger
+        }
+        // The purpose says what kind of account it needs, and an item-scoped
+        // mapping is held to it exactly as the company-wide one is. Stock
+        // pointed at an expense ledger charges every purchase to the profit
+        // and loss and leaves the balance sheet with no inventory on it.
+        $expected = (string) ($catalogue[$purpose]['expect'] ?? '');
+        $actual = inv_ledger_nature($companyId, $ledgerId);
+        if ($expected !== '' && $actual !== '' && $actual !== $expected) {
+            throw new RuntimeException((string) ($catalogue[$purpose]['label'] ?? $purpose)
+                . ' has to be ' . inv_nature_article($expected) . ' ledger, and that one is '
+                . inv_nature_article($actual) . ' ledger.');
+        }
+    }
+    db()->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND purpose = :p AND category IS NULL")
+        ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose]);
+    // These mappings just changed; forget what was read of them.
+    inv_mapping_forget();
+    if ($ledgerId > 0) {
+        db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id, created_by) VALUES (:cid, 'item', NULL, :iid, :p, :lid, :uid)")
+            ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose, 'lid' => $ledgerId, 'uid' => $userId ?: null]);
+        // These mappings just changed; forget what was read of them.
+        inv_mapping_forget();
+    }
+}
+
+/**
+ * The ledgers ONE item names for itself, keyed by canonical purpose.
+ *
+ * Item scope only, and deliberately not the resolved answer: a form has to
+ * show what this item CHOSE and what it would INHERIT as two separate things,
+ * or an inherited default looks like a choice and clearing it looks like no
+ * change at all.
+ *
+ * @return array<string, int>
+ */
+function inventory_item_ledger_map(int $companyId, int $itemId): array
+{
+    if ($itemId <= 0 || !table_exists('inventory_ledger_mappings')) {
+        return [];
+    }
+    $stmt = db()->prepare("SELECT purpose, ledger_id FROM inventory_ledger_mappings
+        WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND category IS NULL");
+    $stmt->execute(['cid' => $companyId, 'iid' => $itemId]);
+    $map = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(string) $row['purpose']] = (int) $row['ledger_id'];
+    }
+
+    return $map;
+}
+
+/**
  * Open and map every standard inventory ledger still missing.
  *
  * Only fills GAPS — a purpose already mapped, to anything, is left alone. The
@@ -231,7 +316,7 @@ function inventory_mapping_autocreate(int $companyId, int $userId = 0): array
     require_once __DIR__ . '/jewellery_engine.php';
 
     $existing = inventory_mapping_rows($companyId);
-    $labels = inventory_mapping_purposes();
+    $labels = inventory_mapping_purposes($companyId);
 
     foreach (inventory_mapping_plan() as $purpose => [$groupName, $masterKey]) {
         $label = (string) ($labels[$purpose]['label'] ?? $purpose);
@@ -283,7 +368,7 @@ function inventory_mapping_gaps(int $companyId): array
 {
     $mapped = inventory_mapping_rows($companyId);
     $gaps = [];
-    foreach (inventory_mapping_purposes() as $purpose => $meta) {
+    foreach (inventory_mapping_purposes($companyId) as $purpose => $meta) {
         if (!isset($mapped[$purpose]) && array_key_exists($purpose, inventory_mapping_plan())) {
             $gaps[] = (string) $meta['label'];
         }
@@ -312,7 +397,7 @@ function inventory_mapping_nature_gaps(int $companyId): array
     if (!table_exists('ledgers') || !table_exists('ledger_groups')) {
         return [];
     }
-    $purposes = inventory_mapping_purposes();
+    $purposes = inventory_mapping_purposes($companyId);
     $gaps = [];
 
     $add = static function (string $scope, string $purpose, int $ledgerId, string $itemSku)

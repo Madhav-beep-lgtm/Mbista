@@ -83,53 +83,6 @@ $movementTypes = [
     'write_off', 'damage', 'expiry', 'warehouse_transfer', 'departmental_transfer',
 ];
 
-/**
- * The inventory posting purposes (chosen per item on the item form and its
- * human label and the account type each SHOULD point at (used for the
- * "wrong-type" warning so an asset is not mapped to income, etc.).
- */
-
-/**
- * Sets (or with ledger id 0 clears) ONE item-scope ledger mapping — the same
- * per-record arrangement as fixed assets: ledgers are chosen on the item form
- * and the item's "This item posts to" panel; inv_resolve_mapping still walks
- * item -> category -> global, so old global rows keep working as defaults.
- */
-function inventory_set_item_ledger(int $companyId, int $itemId, string $purpose, int $ledgerId, ?int $userId = null): void
-{
-    if ($itemId <= 0 || !array_key_exists($purpose, inventory_mapping_purposes())) {
-        return;
-    }
-    if ($ledgerId > 0) {
-        $own = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE id = :id AND company_id = :cid');
-        $own->execute(['id' => $ledgerId, 'cid' => $companyId]);
-        if ((int) $own->fetchColumn() === 0) {
-            return; // never map a foreign company's ledger
-        }
-        // The purpose says what kind of account it needs, and an item-scoped
-        // mapping is held to it exactly as the company-wide one is. Stock
-        // pointed at an expense ledger charges every purchase to the profit
-        // and loss and leaves the balance sheet with no inventory on it.
-        $expected = (string) (inventory_mapping_purposes()[$purpose]['expect'] ?? '');
-        $actual = inv_ledger_nature($companyId, $ledgerId);
-        if ($expected !== '' && $actual !== '' && $actual !== $expected) {
-            throw new RuntimeException((string) (inventory_mapping_purposes()[$purpose]['label'] ?? $purpose)
-                . ' has to be ' . inv_nature_article($expected) . ' ledger, and that one is '
-                . inv_nature_article($actual) . ' ledger.');
-        }
-    }
-    db()->prepare("DELETE FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND purpose = :p AND category IS NULL")
-        ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose]);
-    // These mappings just changed; forget what was read of them.
-    inv_mapping_forget();
-    if ($ledgerId > 0) {
-        db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, category, item_id, purpose, ledger_id, created_by) VALUES (:cid, 'item', NULL, :iid, :p, :lid, :uid)")
-            ->execute(['cid' => $companyId, 'iid' => $itemId, 'p' => $purpose, 'lid' => $ledgerId, 'uid' => $userId ?: null]);
-        // These mappings just changed; forget what was read of them.
-        inv_mapping_forget();
-    }
-}
-
 /** The posting purposes that apply to ONE item, by its type (FA-style filter). */
 function inventory_purposes_for_item(array $item): array
 {
@@ -2855,14 +2808,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             // the four everyday purposes are chosen here and belong to THIS
             // item only; the full lifecycle list lives in the panel below
             // when editing. 0 = inherit the category/global default.
-            $itemMapCurrent = [];
-            if ($editItem) {
-                $itemMapStmt = db()->prepare("SELECT purpose, ledger_id FROM inventory_ledger_mappings WHERE company_id = :cid AND scope = 'item' AND item_id = :iid AND category IS NULL");
-                $itemMapStmt->execute(['cid' => $companyId, 'iid' => (int) $editItem['id']]);
-                foreach ($itemMapStmt->fetchAll(PDO::FETCH_ASSOC) as $imRow) {
-                    $itemMapCurrent[(string) $imRow['purpose']] = (int) $imRow['ledger_id'];
-                }
-            }
+            $itemMapCurrent = $editItem ? inventory_item_ledger_map($companyId, (int) $editItem['id']) : [];
             // The ledger list, built once for the page.
             //
             // Eighteen selects on this screen each carried their own copy of a

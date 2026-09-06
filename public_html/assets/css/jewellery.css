@@ -199,6 +199,13 @@
 .jw-excess-choice:has(input:checked) { border-color: var(--mbw-amber, #d9a441); box-shadow: 0 0 0 1px var(--mbw-amber, #d9a441); }
 [data-jw-excess-ledger][hidden] { display: none; }
 
+/* The item form shows one stock-account row -- the one that matches the Type
+   chosen -- and hides the rest. The form grid sets `display: grid` on every
+   label, which is more specific than the browser's own [hidden] rule, so
+   without this the hidden rows draw anyway and the form asks the same
+   question three times. */
+body.admin-layout .workspace-form-grid label[data-jw-map-row][hidden] { display: none; }
+
 /* A disclosure in the rail — how the money was tendered — kept narrow enough
    that its fields stack rather than fighting for a row. */
 .jw-rail-extra { margin-top: 14px; border-top: 1px solid var(--mbw-border-soft, #eef2f6); padding-top: 12px; }
