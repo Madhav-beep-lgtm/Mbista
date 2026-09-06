@@ -2808,7 +2808,29 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                     <option value="specific" <?= $vm === 'specific' ? 'selected' : '' ?>>Specific Identification</option>
                 </select>
             </label>
-            <label>Category<input type="text" name="category" maxlength="120" value="<?= e($editItem['category'] ?? '') ?>" placeholder="e.g. Raw Materials"></label>
+            <?php // The categories this company already uses, offered rather than
+                  // remembered. They were on the page all along -- the item list
+                  // filters by them -- but the one form that CREATES a category
+                  // asked for it as free text, so "Raw Materials", "Raw material"
+                  // and "raw materials" became three groups nobody meant to have,
+                  // and every report that groups by category showed all three.
+                  //
+                  // A list, not a dropdown, because this is the form where a
+                  // genuinely new category is born: it suggests what exists and
+                  // still accepts what does not. ?>
+            <label>Category
+                <input type="text" name="category" maxlength="120" value="<?= e($editItem['category'] ?? '') ?>"
+                       list="inv-item-categories" autocomplete="off"
+                       placeholder="<?= $itemCategoryOptions === [] ? 'e.g. Raw Materials' : 'Choose or type a new one' ?>">
+                <datalist id="inv-item-categories">
+                    <?php foreach ($itemCategoryOptions as $categoryChoice): ?>
+                        <option value="<?= e($categoryChoice) ?>"></option>
+                    <?php endforeach; ?>
+                </datalist>
+                <?php if ($itemCategoryOptions !== []): ?>
+                    <small style="color:var(--mbw-muted);font-size:11.5px"><?= count($itemCategoryOptions) ?> already in use — click the box to see them</small>
+                <?php endif; ?>
+            </label>
             <label>Status<select name="status"><option value="active" <?= ($editItem['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option><option value="inactive" <?= ($editItem['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option></select></label>
             <label>Unit<input type="text" name="unit" value="<?= e($editItem['unit'] ?? 'pcs') ?>" required></label>
             <label>HS code<input type="text" name="hs_code" value="<?= e($editItem['hs_code'] ?? '') ?>"></label>

@@ -1130,5 +1130,70 @@ ok(!preg_match('/\.mbw-subnav a\[data-nav-toggle\][^{]*\{[^}]*--ui-green/s', $de
 $navCheck = (string) file_get_contents(dirname(__DIR__) . '/app/views/partials/admin_header.php');
 ok(str_contains($navCheck, '$groupHasActive ? \' is-open\' : \'\''),
     'A group opens only when the page being looked at is inside it');
+
+// ---------------------------------------------------------------------------
+// A purpose the books DEMAND must be mappable on the screen the error names.
+// ---------------------------------------------------------------------------
+// Under the periodic system, metal coming in is debited to Purchases rather
+// than to the item's own stock account. The jewellery module resolves that
+// purpose and, when it is missing, says so in these words:
+//
+//     No Purchases ledger is mapped for item CHAIN22.
+//     Set it under Jewellery -> Settings -> Posting Ledgers.
+//
+// That screen lists jewellery_mapping_purposes(), and 'purchases' was not in
+// it. So a periodic jewellery shop was told exactly where to go by a screen
+// that did not offer the row -- and until it was mapped nothing could be
+// bought, which meant nothing could be sold either. The one-click setup mapped
+// twenty-nine purposes and still left it open, because it works off the same
+// catalogue.
+echo "\n== Every purpose the periodic books need is mappable ==\n";
+require_once dirname(__DIR__) . '/app/jewellery_engine.php';
+require_once dirname(__DIR__) . '/app/inventory_mapping.php';
+$jwPurposes = jewellery_mapping_purposes();
+$jwPlan = jewellery_standard_ledger_plan();
+$invPurposes = inventory_mapping_purposes();
+
+$periodicNeeds = [];
+foreach (['opening', 'purchase', 'purchase_receipt', 'purchase_return'] as $movement) {
+    foreach (inv_periodic_transaction_purposes($movement) as $purpose) {
+        $periodicNeeds[$purpose] = true;
+    }
+}
+$periodicNeeds = array_keys($periodicNeeds);
+ok(in_array('purchases', $periodicNeeds, true),
+    'The periodic plan debits Purchases (' . implode(', ', $periodicNeeds) . ')');
+
+// The jewellery module resolves 'purchases' by name, so its own screen has to
+// offer it; the others belong to the core module and are checked there.
+ok(array_key_exists('purchases', $jwPurposes),
+    'Jewellery -> Settings -> Posting Ledgers offers the Purchases row it tells people to set');
+ok(array_key_exists('purchases', $jwPlan),
+    '  ...and the one-click setup opens the account, so the row is not left to be found by hand');
+ok(array_key_exists('purchases', $invPurposes),
+    'The core Inventory mapping screen offers it too');
+
+// Whatever the jewellery code resolves through the CORE resolver has to be on
+// the jewellery screen as well — that is the screen its errors send people to.
+$engineSource = '';
+foreach (['jewellery_trade', 'jewellery_stock', 'jewellery_workshop', 'jewellery_engine'] as $file) {
+    $engineSource .= (string) @file_get_contents(dirname(__DIR__) . '/app/' . $file . '.php');
+}
+preg_match_all("~inv_resolve_mapping\\(\\\$companyId, '([a-z_]+)'~", $engineSource, $crossCalls);
+$missingFromJewellery = [];
+foreach (array_unique($crossCalls[1] ?? []) as $purpose) {
+    if (!array_key_exists($purpose, $jwPurposes)) {
+        $missingFromJewellery[] = $purpose;
+    }
+}
+ok($missingFromJewellery === [],
+    'No purpose the jewellery code resolves is missing from its own mapping screen'
+    . ($missingFromJewellery === [] ? '' : ' — ' . implode(', ', $missingFromJewellery)));
+
+// An alias onto a core purpose must not be listed twice on the core screen.
+$extra = jewellery_extra_inventory_purposes();
+ok(!array_key_exists('purchases', $extra),
+    'And it is not added to the core screen a second time, where it already lives');
+
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
 exit($fail > 0 ? 1 : 0);

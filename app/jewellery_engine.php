@@ -826,6 +826,19 @@ function jewellery_mapping_purposes(): array
         'sales_return'      => ['Sales return', 'Sales', 'sales_return', 'expense'],
         'purchase_clearing' => ['Purchase clearing', 'Purchases', 'purchase_clearing', 'liability'],
         'purchase_return'   => ['Purchase return', 'Purchases', 'purchase_return', 'revenue'],
+        // Where metal COMING IN is debited when the books are kept PERIODIC.
+        // Under the perpetual method it is the item's own stock account and
+        // this is never touched; under periodic the stock accounts sit still
+        // all year and every purchase lands here instead.
+        //
+        // It was missing from this catalogue, and the catalogue is what the
+        // Posting Ledgers screen lists -- so a periodic shop was told "No
+        // Purchases ledger is mapped ... set it under Jewellery -> Settings ->
+        // Posting Ledgers" by a screen that did not offer the row. Nothing
+        // could be bought and therefore nothing could be sold. The core
+        // Inventory mapping screen has always had it, which is no help to
+        // somebody standing in the jewellery module reading that sentence.
+        'purchases'         => ['Purchases (periodic books)', 'Purchases', 'purchases', 'expense'],
         'cogs'              => ['Cost of goods sold', 'Purchases', 'cogs', 'expense'],
         'vat_output'        => ['VAT payable (output)', 'Tax', 'tax_output', 'liability'],
         'vat_input'         => ['VAT receivable (input)', 'Tax', 'tax_input', 'asset'],
@@ -889,8 +902,9 @@ function jewellery_extra_inventory_purposes(): array
             $extra[$canonical] = ['label' => $label, 'expect' => $expect];
         }
     }
-    // These four already exist in the core catalogue under the same key.
-    unset($extra['cogs'], $extra['purchase_clearing'], $extra['opening_equity']);
+    // These already exist in the core catalogue under the same key, so listing
+    // them again would put the same row on the Inventory screen twice.
+    unset($extra['cogs'], $extra['purchase_clearing'], $extra['opening_equity'], $extra['purchases']);
 
     return $extra;
 }
@@ -983,6 +997,11 @@ function jewellery_standard_ledger_plan(): array
         'sales_return'      => ['Sales', 'direct_expense', 'Sales return'],
         'purchase_return'   => ['Purchases', 'direct_income', 'Purchase return'],
         'purchase_clearing' => ['Current Liabilities', 'current_liability', 'Purchase clearing'],
+        // Opened whichever method the books are kept under. A perpetual shop
+        // never posts to it, and an unused account in Purchases costs nothing;
+        // a shop that switches to periodic later would otherwise be stopped
+        // dead at its first purchase by an account nobody had opened.
+        'purchases'         => ['Purchases', 'direct_expense', 'Purchases (periodic books)'],
         'cogs'              => ['Direct Expenses', 'direct_expense', 'Cost of goods sold'],
         'making_expense'    => ['Direct Expenses', 'direct_expense', 'Making / labour expense'],
         'wastage_loss'      => ['Direct Expenses', 'direct_expense', 'Wastage loss'],
