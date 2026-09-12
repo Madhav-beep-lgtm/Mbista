@@ -304,7 +304,15 @@ ok($unbalanced === [], 'No voucher in the company is out of balance'
 
 $orphanEntries = (int) db()->query("SELECT COUNT(*) FROM voucher_entries e
     LEFT JOIN vouchers v ON v.id = e.voucher_id WHERE v.id IS NULL")->fetchColumn();
-ok($orphanEntries === $orphanEntriesBefore, 'No voucher entry is orphaned from its voucher');
+// Say what is actually checked. The assertion compares against a BASELINE, so
+// it cannot claim the database holds no orphans -- it holds 45 of them, left by
+// a test company deleted in the wrong order long ago. What this suite is
+// entitled to assert is that ITS OWN create and reverse paths add none.
+ok($orphanEntries === $orphanEntriesBefore,
+    'This suite orphans no voucher entry from its voucher'
+    . ($orphanEntries === $orphanEntriesBefore
+        ? ($orphanEntriesBefore > 0 ? ' (' . $orphanEntriesBefore . ' pre-existing, none added)' : '')
+        : ' — added ' . ($orphanEntries - $orphanEntriesBefore)));
 
 echo "\n7. Bill allocation cannot over-settle, by any route\n";
 // The bill from section 3 is already part settled by 1,000.
