@@ -412,6 +412,21 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
         }
     }
 
+    // An opening journal is dated on the fiscal year's first day, which is
+    // also the first day of a "this year" window -- so it used to be counted
+    // as a TRANSACTION of day one and the Opening column read nought. It is
+    // not something that happened in the period; it is where the period
+    // started. Moving it between the two columns leaves the closing balance
+    // untouched, because closing = opening + tx_dr - tx_cr either way.
+    //
+    // Four copies of the same predicate because this driver does not allow a
+    // named parameter to be used twice in one statement.
+    $openingSrc = accounting_opening_source_sql('d.source_type');
+    $openingAt = "(d.vdate = :open1 AND {$openingSrc})";
+    $openingAt2 = "(d.vdate = :open2 AND {$openingSrc})";
+    $openingAt3 = "(d.vdate = :open3 AND {$openingSrc})";
+    $openingAt4 = "(d.vdate = :open4 AND {$openingSrc})";
+
     $sql = "
         SELECT l.id, l.code, l.name, l.type, lg.name AS group_name, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank,
                COALESCE(b.op_dr, 0) AS op_dr, COALESCE(b.op_cr, 0) AS op_cr,
@@ -421,15 +436,15 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
         LEFT JOIN ledger_groups lg ON lg.id = l.group_id
         LEFT JOIN (
             SELECT e.ledger_id,
-                   SUM(CASE WHEN d.vdate < :from1 AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS op_dr,
-                   SUM(CASE WHEN d.vdate < :from2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS op_cr,
-                   SUM(CASE WHEN d.vdate BETWEEN :from3 AND :to1 AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS tx_dr,
-                   SUM(CASE WHEN d.vdate BETWEEN :from4 AND :to2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS tx_cr,
+                   SUM(CASE WHEN ({$openingAt} OR d.vdate < :from1) AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS op_dr,
+                   SUM(CASE WHEN ({$openingAt2} OR d.vdate < :from2) AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS op_cr,
+                   SUM(CASE WHEN d.vdate BETWEEN :from3 AND :to1 AND NOT {$openingAt3} AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS tx_dr,
+                   SUM(CASE WHEN d.vdate BETWEEN :from4 AND :to2 AND NOT {$openingAt4} AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS tx_cr,
                    SUM(CASE WHEN d.vdate < :fy_start1 AND e.entry_type = 'debit' THEN e.amount ELSE 0 END) AS pre_fy_dr,
                    SUM(CASE WHEN d.vdate < :fy_start2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS pre_fy_cr
             FROM voucher_entries e
             INNER JOIN (
-                SELECT id, voucher_date AS vdate
+                SELECT id, voucher_date AS vdate, source_type
                 FROM vouchers
                 WHERE {$voucherWhere}
             ) d ON d.id = e.voucher_id
@@ -440,6 +455,7 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     $fyBoundary = $fyStart !== null && $fyStart !== '' ? $fyStart : $from;
     $params = $subParams + [
         'from1' => $from, 'from2' => $from, 'from3' => $from, 'from4' => $from,
+        'open1' => $from, 'open2' => $from, 'open3' => $from, 'open4' => $from,
         'to1' => $to, 'to2' => $to,
         'fy_start1' => $fyBoundary, 'fy_start2' => $fyBoundary,
         'company_id2' => $scopeCompanyId,

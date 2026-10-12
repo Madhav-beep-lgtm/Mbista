@@ -3799,6 +3799,50 @@ function create_voucher_with_entries(array $voucher, array $entries): int
 }
 
 /**
+ * The voucher sources that ESTABLISH a balance rather than move one.
+ *
+ * Every one of these is dated on the fiscal year's first day, because that is
+ * when the balance is true from. That date is also the first day of the
+ * reporting window, so a report asking for "this year" found them sitting
+ * inside it and listed them as transactions of day one — the ledger showed an
+ * opening balance of nought and a journal entry for the figure instead, and
+ * the trial balance put it in the Transactions column.
+ *
+ * An opening is not something that HAPPENED in the period. It is where the
+ * period started. Both readings produce the same closing balance, which is why
+ * this survived: the money was never wrong, only the column it sat in.
+ *
+ * @return string[]
+ */
+function accounting_opening_source_types(): array
+{
+    return [
+        'ledger_opening',
+        'party_opening',
+        'opening_balance_adj',
+        'inventory_opening',
+        'inventory_opening_adj',
+        'jewellery_opening',
+        'jewellery_opening_adj',
+    ];
+}
+
+/**
+ * The same list as a SQL predicate, for the queries that have to tell an
+ * opening from a transaction. Interpolated rather than bound: every value is
+ * a literal this file owns, and the list is the same for every caller.
+ */
+function accounting_opening_source_sql(string $column): string
+{
+    $quoted = array_map(
+        static fn (string $type): string => "'" . $type . "'",
+        accounting_opening_source_types()
+    );
+
+    return $column . ' IN (' . implode(', ', $quoted) . ')';
+}
+
+/**
  * Set (or update, or clear with amount 0) the opening balance of a
  * balance-sheet ledger — assets, liabilities and equity only; income and
  * expense ledgers open at zero by definition. Posts a journal against the

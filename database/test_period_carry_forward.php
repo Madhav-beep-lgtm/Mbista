@@ -426,6 +426,95 @@ ok($readsOpening === [],
     'Every call site that reads an opening balance passes the year start'
     . ($readsOpening === [] ? '' : ' — MISSING ON ' . implode(' | ', $readsOpening)));
 
+// ---------------------------------------------------------------------------
+// An opening balance is where the period STARTED, not a transaction in it.
+// ---------------------------------------------------------------------------
+// Every opening journal is dated on the fiscal year's first day, because that
+// is the day the balance is true from. That is also the first day of a "this
+// year" window -- so the reports found them sitting inside the window and
+// counted them as transactions of day one. The ledger showed an opening
+// balance of nought with a journal entry for the figure underneath it, and the
+// trial balance put the money in the Transactions column.
+//
+// The closing balance was right either way, which is why it went unnoticed:
+// closing = opening + tx_dr - tx_cr, and moving an amount between those two
+// terms does not change the sum. What was wrong was the column.
+echo "\n7. An opening balance reads as an opening, not as a day-one transaction\n";
+
+$obLedger = $mkLedger('PCF-1200', 'Opening Test Debtor', 'asset', 'assets');
+$obEquity = $mkLedger('PCF-3200', 'Opening Balance Adjustments', 'equity', 'equity');
+
+// Dated on the fiscal year's first day, exactly as post_ledger_opening_balance()
+// and every other opening writer dates it.
+$seq++;
+$obVoucherId = (int) create_voucher_with_entries([
+    'company_id' => $cid, 'fiscal_year_id' => $fy1Id,
+    'voucher_no' => 'PCF-OB-0001', 'voucher_type' => 'journal',
+    'voucher_date' => $FY1_START, 'total_amount' => 80000.00,
+    'narration' => 'Opening balance', 'status' => 'posted', 'posted_by' => $uid,
+    'source_type' => 'ledger_opening', 'source_id' => $obLedger,
+], [
+    ['ledger_id' => $obLedger, 'entry_type' => 'debit', 'amount' => 80000.00],
+    ['ledger_id' => $obEquity, 'entry_type' => 'credit', 'amount' => 80000.00],
+]);
+ok($obVoucherId > 0, 'An opening journal is posted on the first day of the year, ' . $FY1_START);
+
+// A real transaction on the same ledger, later in the year, so the two can be
+// told apart rather than both landing in whichever column happens to be read.
+$post('2026-10-05', $fy1Id, [[$LED['asset'], 30000], [$obLedger, -30000]], 'Debtor pays 30,000');
+
+$obRows = $balancesFor($FY1_START, $FY1_END, $FY1_START);
+$obRow = $obRows[$obLedger] ?? [];
+ok(round((float) ($obRow['op_dr'] ?? 0), 2) === 80000.00,
+    'The trial balance carries it as an OPENING debit of 80,000, got '
+        . money((float) ($obRow['op_dr'] ?? 0)));
+ok(round((float) ($obRow['tx_dr'] ?? 0), 2) === 0.00,
+    '  ...and not as a transaction debit, got ' . money((float) ($obRow['tx_dr'] ?? 0)));
+ok(round((float) ($obRow['tx_cr'] ?? 0), 2) === 30000.00,
+    '  ...while the real payment of 30,000 IS a transaction, got '
+        . money((float) ($obRow['tx_cr'] ?? 0)));
+
+// The figure that must not move. This is the whole reason the fault was
+// invisible, so it is the thing most worth pinning.
+ok(near($closingOf($obRow), 50000.00),
+    'The closing balance is unchanged at 80,000 - 30,000 = 50,000, got ' . money($closingOf($obRow)));
+
+// The same question the ledger statement asks, in the same two queries it
+// uses: what goes above the line, and what is listed below it.
+$obOpeningSql = accounting_opening_source_sql('v.source_type');
+$obOpenStmt = db()->prepare("
+    SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
+    FROM voucher_entries ve INNER JOIN vouchers v ON v.id = ve.voucher_id
+    WHERE ve.ledger_id = :lid AND v.company_id = :cid AND v.status = 'posted'
+      AND (v.voucher_date < :from_date OR (v.voucher_date = :from_open AND {$obOpeningSql}))");
+$obOpenStmt->execute(['lid' => $obLedger, 'cid' => $cid, 'from_date' => $FY1_START, 'from_open' => $FY1_START]);
+ok(near(round((float) $obOpenStmt->fetchColumn(), 2), 80000.00),
+    'The ledger statement shows 80,000 on its "Opening balance (carried forward)" line');
+
+$obRowStmt = db()->prepare("
+    SELECT COUNT(*) FROM voucher_entries ve INNER JOIN vouchers v ON v.id = ve.voucher_id
+    WHERE ve.ledger_id = :lid AND v.company_id = :cid AND v.status = 'posted'
+      AND v.voucher_date BETWEEN :from_date AND :to_date
+      AND NOT (v.voucher_date = :from_open AND {$obOpeningSql})");
+$obRowStmt->execute(['lid' => $obLedger, 'cid' => $cid, 'from_date' => $FY1_START,
+    'from_open' => $FY1_START, 'to_date' => $FY1_END]);
+ok((int) $obRowStmt->fetchColumn() === 1,
+    '  ...and lists ONE transaction under it, the payment — not the opening as well');
+
+// A window that starts AFTER the opening must not change: the journal is
+// already before it and has always been counted as brought forward.
+$obMidRows = $balancesFor('2026-10-01', $FY1_END, $FY1_START);
+ok(round((float) ($obMidRows[$obLedger]['op_dr'] ?? 0), 2) === 80000.00,
+    'A window opening mid-year still carries it forward, as it always did');
+
+// Every writer that establishes a balance has to be in the list, or its own
+// screens go on reporting an opening as day-one activity.
+$obWanted = ['ledger_opening', 'party_opening', 'opening_balance_adj', 'inventory_opening',
+    'jewellery_opening'];
+$obMissing = array_values(array_diff($obWanted, accounting_opening_source_types()));
+ok($obMissing === [], 'Every opening writer is named in accounting_opening_source_types()'
+    . ($obMissing === [] ? '' : ' — missing ' . implode(', ', $obMissing)));
+
 pcf_cleanup();
 echo "
 " . str_repeat('=', 62) . "

@@ -54,15 +54,24 @@ foreach ($allLedgers as $ledgerRow) {
 $statementRows = [];
 $openingBalance = 0.0;
 if ($selectedLedger) {
-    // Everything posted before the window (any fiscal year) carries forward.
+    // Everything posted before the window (any fiscal year) carries forward --
+    // AND the opening journals dated on the window's own first day. Those are
+    // dated on the fiscal year's start because that is when the balance is
+    // true from, so a statement for "this year" used to find them inside the
+    // window and list them as transactions of day one, under an opening
+    // balance of nought. An opening is where the period started, not something
+    // that happened in it.
+    $openingSourceSql = accounting_opening_source_sql('v.source_type');
     $openingStmt = db()->prepare("
         SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
         FROM voucher_entries ve
         INNER JOIN vouchers v ON v.id = ve.voucher_id
         WHERE ve.ledger_id = :lid AND v.company_id = :cid AND v.status = 'posted'
-          AND v.voucher_date < :from_date
+          AND (v.voucher_date < :from_date
+               OR (v.voucher_date = :from_open AND {$openingSourceSql}))
     ");
-    $openingStmt->execute(['lid' => $selectedLedgerId, 'cid' => $companyId, 'from_date' => $fromDate]);
+    $openingStmt->execute(['lid' => $selectedLedgerId, 'cid' => $companyId,
+        'from_date' => $fromDate, 'from_open' => $fromDate]);
     $openingBalance = round((float) $openingStmt->fetchColumn(), 2);
 
     $stmtSql = "
@@ -74,8 +83,10 @@ if ($selectedLedger) {
         LEFT JOIN accounting_parties p ON p.id = v.party_id
         WHERE ve.ledger_id = :lid AND v.company_id = :cid AND v.status = 'posted'
           AND v.voucher_date BETWEEN :from_date AND :to_date
+          AND NOT (v.voucher_date = :from_open AND {$openingSourceSql})
     ";
-    $stmtParams = ['lid' => $selectedLedgerId, 'cid' => $companyId, 'from_date' => $fromDate, 'to_date' => $toDate];
+    $stmtParams = ['lid' => $selectedLedgerId, 'cid' => $companyId, 'from_date' => $fromDate,
+        'from_open' => $fromDate, 'to_date' => $toDate];
     if ($searchQuery !== '') {
         $stmtSql .= ' AND (v.voucher_no LIKE :q1 OR v.reference_no LIKE :q2 OR v.narration LIKE :q3 OR ve.memo LIKE :q4 OR p.name LIKE :q5)';
         $like = '%' . $searchQuery . '%';
