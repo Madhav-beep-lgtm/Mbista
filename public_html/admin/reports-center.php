@@ -680,7 +680,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </div>
 </section>
 
-<details class="mbw-card rc2-notes-editor" <?= $reportNotes !== [] ? 'open' : '' ?>>
+<?php if ($reportNotes !== []): ?>
+<details class="mbw-card rc2-notes-editor" open>
     <summary class="rc2-notes-summary">
         <?= icon('documents') ?>
         <span>
@@ -714,6 +715,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </form>
 </details>
+<?php endif; ?>
 
 <script>
 (function () {

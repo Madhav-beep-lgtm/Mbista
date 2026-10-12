@@ -15,11 +15,10 @@ declare(strict_types=1);
 $bankSide = (string) $spec['bank_side'];
 $isMoneyIn = $bankSide === 'debit';
 ?>
-<section class="mbw-card frm-section vch-focus vch-work-section vch-money-section">
+<section class="mbw-card frm-section vch-focus vch-work-section vch-money-section vch-entry-panel">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-<?= e((string) $spec['tone']) ?>"><?= icon($isMoneyIn ? 'trend-up' : 'trend-down') ?></span>
         <h2><?= e((string) $spec['bank_label']) ?></h2>
-        <span class="frm-optional"><?= e((string) $spec['bank_hint']) ?></span>
     </div>
 
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['tender'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
@@ -68,45 +67,10 @@ $isMoneyIn = $bankSide === 'debit';
     </div>
 </section>
 
-<section class="mbw-card frm-section vch-work-section vch-party-section">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-green"><?= icon('clients') ?></span>
-        <h2><?= e((string) $spec['party_label']) ?></h2>
-        <span class="frm-optional">Optional — pick the party and their ledger drops into the first free line below</span>
-    </div>
-    <div class="frm-grid frm-grid-4">
-        <label><?= e((string) $spec['party_label']) ?>
-            <select name="party_id" id="vch-party">
-                <option value="0">Not against a party</option>
-                <?php foreach ($partyOptions as $party): ?>
-                    <option value="<?= (int) $party['id'] ?>"
-                            data-ledger="<?= (int) $party['side_ledger_id'] ?>"
-                            data-type="<?= e(ucfirst((string) $party['party_type'])) ?>"
-                            <?= (int) ($prefill['party_id'] ?? 0) === (int) $party['id'] ? 'selected' : '' ?>><?= e((string) $party['name']) ?> (<?= e((string) $party['code']) ?>)</option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <label>Party type<input type="text" id="vch-party-type" value="" placeholder="—" disabled></label>
-        <?php // Which bill this settles. A payment recorded against the party
-              // alone can be traced no further than the party: telling which
-              // invoice it cleared means reading narrations and guessing. The
-              // list is whatever bills that party has on record, and it narrows
-              // as soon as a party is chosen. ?>
-        <label>Against bill
-            <select name="reference_no" id="vch-bill" data-selected="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
-                <option value="">Not against a specific bill</option>
-            </select>
-            <span class="frm-optional" id="vch-bill-note">Choose a party to see their bills</span>
-        </label>
-        <label>Instrument date<input type="date" name="instrument_date" value="<?= e((string) ($prefill['instrument_date'] ?? '')) ?>"></label>
-    </div>
-</section>
-
-<section class="mbw-card frm-section vch-work-section vch-against-section">
+<section class="mbw-card frm-section vch-work-section vch-against-section vch-entry-panel">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-blue"><?= icon('layers') ?></span>
         <h2><?= e((string) $spec['lines_label']) ?></h2>
-        <span class="frm-optional"><?= e((string) $spec['lines_hint']) ?></span>
     </div>
 
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['lines'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
@@ -195,131 +159,60 @@ document.addEventListener('DOMContentLoaded', function () {
     form.addEventListener('input', recalc);
     recalc();
 
-    // Choosing a party fills the first empty particulars line with their own
-    // ledger — the step everybody takes next, done for them. A line already
-    // filled in is never overwritten.
-    var partySelect = document.getElementById('vch-party');
-    if (partySelect) {
-        var applyParty = function (fillLine) {
-            var option = partySelect.options[partySelect.selectedIndex];
-            document.getElementById('vch-party-type').value = (option && option.getAttribute('data-type')) || '';
-            var ledgerId = option ? option.getAttribute('data-ledger') : '';
-            if (!fillLine || !ledgerId || ledgerId === '0') { return; }
-            var empty = null;
-            document.querySelectorAll('.vch-line-ledger').forEach(function (select) {
-                if (empty === null && select.value === '') { empty = select; }
-            });
-            if (empty && empty.querySelector('option[value="' + ledgerId + '"]')) {
-                empty.value = ledgerId;
-                recalc();
-            }
-        };
-        // The bill list is rebuilt for the chosen party rather than rendered
-        // once and filtered: a company with hundreds of bills would otherwise
-        // ship every one of them into every payment screen.
-        var billsByParty = <?= json_encode($partyBills ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-        var billSelect = document.getElementById('vch-bill');
-        var billNote = document.getElementById('vch-bill-note');
-        var applyBills = function () {
-            if (!billSelect) { return; }
-            var keep = billSelect.value || billSelect.getAttribute('data-selected') || '';
-            var bills = billsByParty[partySelect.value] || [];
-            billSelect.innerHTML = '';
-            var none = document.createElement('option');
-            none.value = '';
-            none.textContent = 'Not against a specific bill';
-            billSelect.appendChild(none);
-            bills.forEach(function (bill) {
-                var option = document.createElement('option');
-                option.value = bill.ref;
-                option.textContent = bill.label;
-                if (bill.ref === keep) { option.selected = true; }
-                billSelect.appendChild(option);
-            });
-            // A bill already on this voucher stays on it even when it is not in
-            // the list any more, so editing an old payment never drops the
-            // reference somebody recorded.
-            if (keep !== '' && billSelect.value !== keep) {
-                var kept = document.createElement('option');
-                kept.value = keep;
-                kept.textContent = keep + ' (on this voucher)';
-                kept.selected = true;
-                billSelect.appendChild(kept);
-            }
-            if (billNote) {
-                billNote.textContent = partySelect.value === '0' || partySelect.value === ''
-                    ? 'Choose a party to see their bills'
-                    : (bills.length === 0 ? 'No bills on record for this party' : bills.length + ' bill(s) on record');
-            }
-        };
-
-        // With a party chosen, the line ledgers narrow to that party's own
-        // ledgers plus the cash and bank accounts money actually moves through -
-        // a payment settles a party from a bank, and nothing else belongs on it.
-        // With no party chosen the full chart is offered, exactly as before.
-        //
-        // The list is rebuilt rather than having options hidden: hiding an
-        // <option> is honoured by some browsers and quietly ignored by others,
-        // which would leave a "filtered" list that could still be used to pick a
-        // ledger that was supposed to be out of scope.
-        var ledgerCatalog = <?= json_encode($vchLedgerCatalog ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-        var partyLedgers = <?= json_encode($vchPartyLedgers ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-
-        var applyLedgerScope = function () {
-            var own = partyLedgers[partySelect.value] || null;
-            var narrowed = partySelect.value !== '' && partySelect.value !== '0';
-            document.querySelectorAll('.vch-line-ledger').forEach(function (select) {
-                var keep = select.value;
-                var group = null;
-                var frag = document.createDocumentFragment();
-                var blank = document.createElement('option');
-                blank.value = '';
-                blank.textContent = 'Select ledger';
-                frag.appendChild(blank);
-                var shown = 0;
-                ledgerCatalog.forEach(function (ledger) {
-                    if (narrowed) {
-                        var isOwn = own && own.indexOf(ledger.id) !== -1;
-                        if (!isOwn && ledger.cash_bank !== 1) { return; }
-                    }
-                    if (group === null || group.label !== ledger.group) {
-                        group = document.createElement('optgroup');
-                        group.label = ledger.group;
-                        frag.appendChild(group);
-                    }
-                    var option = document.createElement('option');
-                    option.value = String(ledger.id);
-                    option.textContent = ledger.label;
-                    if (String(ledger.id) === keep) { option.selected = true; }
-                    group.appendChild(option);
-                    shown++;
-                });
-                // A ledger already on the line stays on it even when the narrowed
-                // list would not offer it, so switching party on a part-typed
-                // voucher never silently discards a line somebody entered.
-                select.innerHTML = '';
-                select.appendChild(frag);
-                if (keep !== '' && select.value !== keep) {
-                    var kept = document.createElement('option');
-                    kept.value = keep;
-                    kept.textContent = 'Already on this line';
-                    kept.selected = true;
-                    select.appendChild(kept);
-                }
-                // searchable-select reads the options each time it opens, but its
-                // visible box is only re-synced on change.
-                select.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-        };
-
-        partySelect.addEventListener('change', function () {
-            applyLedgerScope();
-            applyParty(true);
-            applyBills();
+    // The visible party selector was redundant: choosing a bill already tells
+    // us both the party and its posting ledger. Keep that relationship in the
+    // submitted metadata and fill the first free "Paid towards" line without
+    // asking for the same party twice.
+    var partyField = document.getElementById('vch-party');
+    var billSelect = document.getElementById('vch-bill');
+    var partyLedgers = <?= json_encode($vchPartyLedgers ?? [], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    var partyByLedger = {};
+    Object.keys(partyLedgers).forEach(function (partyId) {
+        partyLedgers[partyId].forEach(function (ledgerId) {
+            if (!partyByLedger[String(ledgerId)]) { partyByLedger[String(ledgerId)] = String(partyId); }
         });
-        applyParty(false);
-        applyBills();
-        applyLedgerScope();
+    });
+
+    function fillPartyLedger(ledgerId) {
+        if (!ledgerId || ledgerId === '0') { return; }
+        var empty = null;
+        document.querySelectorAll('.vch-line-ledger').forEach(function (select) {
+            if (empty === null && select.value === '') { empty = select; }
+        });
+        if (empty && empty.querySelector('option[value="' + ledgerId + '"]')) {
+            empty.value = ledgerId;
+            empty.dispatchEvent(new Event('change', { bubbles: true }));
+        }
     }
+
+    function applyBill(fillLine) {
+        if (!billSelect || !partyField) { return; }
+        var option = billSelect.options[billSelect.selectedIndex];
+        var partyId = option ? (option.getAttribute('data-party') || '0') : '0';
+        var ledgerId = option ? (option.getAttribute('data-ledger') || '') : '';
+        partyField.value = partyId;
+        if (fillLine) { fillPartyLedger(ledgerId); }
+    }
+
+    function derivePartyFromLines() {
+        if (!partyField || (billSelect && billSelect.value !== '')) { return; }
+        var derived = '0';
+        document.querySelectorAll('.vch-line-ledger').forEach(function (select) {
+            if (derived === '0' && partyByLedger[String(select.value)]) {
+                derived = partyByLedger[String(select.value)];
+            }
+        });
+        partyField.value = derived;
+    }
+
+    if (billSelect) {
+        billSelect.addEventListener('change', function () { applyBill(true); });
+        applyBill(false);
+    }
+    form.addEventListener('change', function (event) {
+        if (event.target && event.target.classList.contains('vch-line-ledger')) {
+            derivePartyFromLines();
+        }
+    });
 });
 </script>

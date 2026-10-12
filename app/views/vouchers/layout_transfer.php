@@ -73,7 +73,7 @@ $renderContraLegs = static function (string $side, array $rows) use ($optionsCas
     <?php
 };
 ?>
-<section class="mbw-card frm-section vch-focus">
+<section class="mbw-card frm-section vch-focus vch-entry-panel">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-teal"><?= icon('reconcile') ?></span>
         <h2>The transfer</h2>

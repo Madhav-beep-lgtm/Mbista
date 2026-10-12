@@ -11,7 +11,7 @@ declare(strict_types=1);
  * break entries this system already holds, saying so is worth doing.
  */
 ?>
-<section class="mbw-card frm-section vch-focus">
+<section class="mbw-card frm-section vch-focus vch-entry-panel">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-blue"><?= icon('journal') ?></span>
         <h2>Debits and credits</h2>

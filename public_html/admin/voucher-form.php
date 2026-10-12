@@ -793,10 +793,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a>
 </nav>
 
-<?php if ($editVoucher === null): ?>
-    <?php include __DIR__ . '/../../app/views/vouchers/type_strip.php'; ?>
-<?php endif; ?>
-
 <?php if ($editIsAutoPosted): ?>
     <div class="notice">This voucher was auto-posted from <strong><?= e(str_replace('_', ' ', $editSourceType)) ?><?= !empty($editVoucher['source_id']) ? ' #' . (int) $editVoucher['source_id'] : '' ?></strong>. Editing changes only the books — the source document stays as it is.</div>
 <?php endif; ?>
@@ -814,18 +810,87 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="frm-main">
         <section class="mbw-card frm-section vch-head-card tone-<?= e((string) $spec['tone']) ?>">
             <div class="frm-section-head">
-                <span class="mbw-chip is-square tone-<?= e((string) $spec['tone']) ?>"><?= icon((string) $spec['icon']) ?></span>
-                <h2><?= e((string) $spec['label']) ?></h2>
-                <span class="frm-optional"><?= e((string) $spec['blurb']) ?></span>
+                <div class="vch-document-title">
+                    <h2><?= e((string) $spec['label']) ?></h2>
+                    <span class="vch-currency"><?= e(trim($currency)) ?></span>
+                </div>
+                <span class="vch-document-state"><?= $editVoucher ? e(ucfirst((string) ($editVoucher['status'] ?? 'draft'))) : 'Draft' ?> · Prepared by <?= e((string) ($currentUser['name'] ?? 'User')) ?></span>
             </div>
-            <div class="frm-grid frm-grid-4">
+            <div class="frm-grid vch-header-grid">
+                <?php if ($editVoucher === null): ?>
+                    <?php include __DIR__ . '/../../app/views/vouchers/type_strip.php'; ?>
+                <?php else: ?>
+                    <label>Voucher type
+                        <input type="text" value="<?= e((string) $spec['short']) ?>" disabled>
+                    </label>
+                <?php endif; ?>
                 <label>Voucher no.
                     <input type="text" value="<?= e($nextNumberPreview) ?>" disabled title="<?= $editVoucher ? 'A voucher keeps its number for life' : 'The next number in this type\'s series — issued when you save' ?>">
                 </label>
                 <label><span>Voucher date <em>*</em></span>
                     <input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($prefill['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required>
                 </label>
-                <label class="frm-span-3"><span>Title <em>*</em></span>
+                <label>Branch
+                    <select name="location">
+                        <option value="">Not assigned</option>
+                        <?php foreach ($locations as $locationOption): ?>
+                            <option value="<?= e($locationOption) ?>" <?= (string) ($prefill['location'] ?? '') === $locationOption ? 'selected' : '' ?>><?= e($locationOption) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <?php if ((string) $spec['layout'] === 'tender'): ?>
+                    <?php
+                    $selectedTenderBill = (string) ($prefill['reference_no'] ?? '');
+                    $selectedTenderParty = (int) ($prefill['party_id'] ?? 0);
+                    $selectedTenderBillFound = false;
+                    ?>
+                    <input type="hidden" name="party_id" id="vch-party" value="<?= (int) ($prefill['party_id'] ?? 0) ?>">
+                    <label>Against bill
+                        <select name="reference_no" id="vch-bill">
+                            <option value="">Not against a specific bill</option>
+                            <?php foreach ($partyOptions as $billParty): ?>
+                                <?php $billsForParty = $partyBills[(int) $billParty['id']] ?? []; ?>
+                                <?php if ($billsForParty !== []): ?>
+                                    <optgroup label="<?= e((string) $billParty['name']) ?>">
+                                        <?php foreach ($billsForParty as $billOption): ?>
+                                            <?php
+                                            $isSelectedTenderBill = $selectedTenderBill === (string) $billOption['ref']
+                                                && ($selectedTenderParty === 0 || $selectedTenderParty === (int) $billParty['id']);
+                                            if ($isSelectedTenderBill) {
+                                                $selectedTenderBillFound = true;
+                                            }
+                                            ?>
+                                            <option value="<?= e((string) $billOption['ref']) ?>"
+                                                    data-party="<?= (int) $billParty['id'] ?>"
+                                                    data-ledger="<?= (int) $billParty['side_ledger_id'] ?>"
+                                                    <?= $isSelectedTenderBill ? 'selected' : '' ?>><?= e((string) $billOption['label']) ?></option>
+                                        <?php endforeach; ?>
+                                    </optgroup>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                            <?php if ($selectedTenderBill !== '' && !$selectedTenderBillFound): ?>
+                                <option value="<?= e($selectedTenderBill) ?>" data-party="<?= $selectedTenderParty ?>" selected><?= e($selectedTenderBill) ?> (on this voucher)</option>
+                            <?php endif; ?>
+                        </select>
+                    </label>
+                    <label>Instrument date
+                        <input type="date" name="instrument_date" value="<?= e((string) ($prefill['instrument_date'] ?? '')) ?>">
+                    </label>
+                <?php endif; ?>
+                <?php if (in_array((string) $spec['layout'], ['journal', 'transfer'], true)): ?>
+                    <label>Reference
+                        <input type="text" name="reference_no" maxlength="120" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
+                    </label>
+                <?php endif; ?>
+                <label>Cost centre
+                    <select name="cost_centre">
+                        <option value="">Not assigned</option>
+                        <?php foreach ($costCentres as $costCentreOption): ?>
+                            <option value="<?= e($costCentreOption) ?>" <?= (string) ($prefill['cost_centre'] ?? '') === $costCentreOption ? 'selected' : '' ?>><?= e($costCentreOption) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label class="vch-title-field"><span>Title <em>*</em></span>
                     <input type="text" name="title" id="frm-title" maxlength="180" placeholder="<?= e((string) $spec['title_hint']) ?>" value="<?= e($editTitle) ?>" required>
                 </label>
             </div>
@@ -845,38 +910,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         // A narration already on a voucher is carried through hidden so that
         // editing one never silently drops the sentence somebody wrote.
         ?>
-        <?php if ($editNarration !== ''): ?>
-            <input type="hidden" name="narration" value="<?= e($editNarration) ?>">
-        <?php endif; ?>
-
-        <section class="mbw-card frm-section">
+        <section class="mbw-card frm-section vch-support-card">
             <div class="frm-section-head">
                 <span class="mbw-chip is-square tone-purple"><?= icon('documents') ?></span>
-                <h2>Attachments</h2>
-                <span class="frm-optional">The bill, the cheque, the delivery note — anything that backs this entry</span>
+                <h2>Narration &amp; supporting documents</h2>
             </div>
+            <div class="vch-support-grid">
+                <label>Narration
+                    <textarea name="narration" rows="4" placeholder="Additional description for this voucher"><?= e($editNarration) ?></textarea>
+                </label>
+                <div>
             <span class="frm-dropzone" id="frm-dropzone">
                 <?= icon('documents') ?>
                 <strong>Drag &amp; drop files here <u>or click to upload</u></strong>
                 <small>PDF, Excel, JPG, PNG (max. 10MB each)</small>
                 <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">
-                <span id="frm-file-list"></span>
+                <span id="frm-file-list">No files selected</span>
             </span>
-        </section>
-
-        <section class="mbw-card frm-section">
-            <div class="frm-section-head"><span class="mbw-chip is-square tone-teal"><?= icon('admin') ?></span><h2>Approval &amp; review</h2></div>
-            <div class="frm-grid frm-grid-4 frm-approvers">
-                <div><small>Prepared by</small><strong><?= e((string) ($currentUser['name'] ?? 'User')) ?></strong><span><?= e(date('d M Y, h:i A')) ?></span></div>
-                <div><small>Approved by</small><strong class="frm-muted"><?= $canApprove ? e((string) ($currentUser['name'] ?? 'You')) . ' (on save)' : 'Pending assignment' ?></strong></div>
-                <div><small>Posted by</small><strong class="frm-muted"><?= $canApprove ? e((string) ($currentUser['name'] ?? 'You')) . ' (on save)' : 'Pending approval' ?></strong></div>
-                <div><small>Series</small><strong class="frm-muted"><?= e((string) $spec['prefix']) ?> · <?= e(voucher_series_code($fiscalYear)) ?></strong></div>
+                </div>
             </div>
         </section>
 
         <div class="frm-footer mbw-card">
-            <button type="submit" class="button secondary" onclick="document.getElementById('frm-save-mode').value='draft'"><?= icon('save') ?>Save as draft</button>
             <a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>">Cancel</a>
+            <button type="submit" class="button secondary vch-save-draft" onclick="document.getElementById('frm-save-mode').value='draft'"><?= icon('save') ?>Save draft</button>
             <button type="submit" class="button frm-submit" onclick="document.getElementById('frm-save-mode').value='submit'"><?= icon('chevron-right') ?><?= $editVoucher ? ($canApprove ? 'Save &amp; post changes' : 'Save &amp; submit for approval') : ($canApprove ? 'Post ' . e((string) $spec['short']) : 'Submit for approval') ?></button>
         </div>
     </div>

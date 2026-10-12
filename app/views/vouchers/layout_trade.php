@@ -110,7 +110,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
       // the party side of the voucher, so the till, the wallet and the
       // receivable each carry exactly what they took — which is the only way
       // the drawer can be counted against the day book at close of business. ?>
-<section class="mbw-card frm-section" data-settlement-field="split" id="vch-settle-section" hidden>
+<section class="mbw-card frm-section vch-entry-panel" data-settlement-field="split" id="vch-settle-section" hidden>
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-green"><?= icon('coins') ?></span>
         <h2>How it was settled</h2>
@@ -166,7 +166,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
     <p class="vch-settle-note" id="vch-settle-note" data-state="short"></p>
 </section>
 
-<section class="mbw-card frm-section">
+<section class="mbw-card frm-section vch-entry-panel">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-blue"><?= icon('layers') ?></span>
         <h2><?= e((string) $spec['value_label']) ?></h2>
