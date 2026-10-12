@@ -83,8 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             : 'Ledger saved.');
 
         // Balance-sheet ledgers (asset/liability/equity) can carry an opening
-        // balance, journalled once against Opening Balance Adjustments and
-        // replaced whenever the figure here changes. The field arrives empty
+        // balance stored on the ledger. The field arrives empty
         // when untouched — only act when the user typed something.
         $openingRaw = trim((string) ($_POST['opening_balance'] ?? ''));
         if ($openingRaw !== '' && $ledgerId > 0 && in_array($ledgerType, ['asset', 'liability', 'equity'], true)) {
@@ -98,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($openingError !== null) {
                 flash('error', 'Opening balance not posted: ' . $openingError);
             } elseif ((float) $openingRaw > 0) {
-                flash('success', 'Opening balance journalled against Opening Balance Adjustments.');
+                flash('success', 'Opening balance saved on the ledger.');
             }
         }
         redirect('admin/chart-ledgers.php');
@@ -221,10 +220,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </select>
             </label>
             <?php
-            // Current opening balance (from the ledger's OB voucher) prefills the
-            // edit form; leaving the field untouched (blank) changes nothing.
+            // Current opening balance lives on the ledger; leaving the field
+            // untouched (blank) changes nothing.
             $existingOpening = null;
-            if ($editLedger) {
+            if ($editLedger && !array_key_exists('opening_side', $editLedger)) {
                 $obStmt = db()->prepare("
                     SELECT ve.entry_type, ve.amount FROM vouchers v
                     JOIN voucher_entries ve ON ve.voucher_id = v.id AND ve.ledger_id = :lid
@@ -233,12 +232,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 $obStmt->execute(['lid' => (int) $editLedger['id'], 'lid2' => (int) $editLedger['id'], 'cid' => $companyId]);
                 $existingOpening = $obStmt->fetch() ?: null;
             }
+            if ($editLedger && array_key_exists('opening_side', $editLedger)) {
+                $existingOpening = [
+                    'entry_type' => (string) ($editLedger['opening_side'] ?? 'debit'),
+                    'amount' => (float) ($editLedger['opening_balance'] ?? 0),
+                ];
+            }
             ?>
             <label>Opening balance
                 <input type="number" step="0.01" min="0" name="opening_balance"
                        value="<?= e($existingOpening !== null ? number_format((float) $existingOpening['amount'], 2, '.', '') : '') ?>"
                        placeholder="Assets, liabilities & equity only — 0 clears it"
-                       title="Journalled against Opening Balance Adjustments at the fiscal year start. Income and expense ledgers always open at zero.">
+                       title="Saved as the ledger's opening balance. Income and expense ledgers always open at zero.">
             </label>
             <label>Opening side
                 <select name="opening_side">

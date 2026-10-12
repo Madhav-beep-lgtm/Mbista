@@ -428,7 +428,7 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     $openingAt4 = "(d.vdate = :open4 AND {$openingSrc})";
 
     $sql = "
-        SELECT l.id, l.code, l.name, l.type, lg.name AS group_name, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank,
+        SELECT l.id, l.code, l.name, l.type, l.opening_balance, l.opening_side, lg.name AS group_name, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank,
                COALESCE(b.op_dr, 0) AS op_dr, COALESCE(b.op_cr, 0) AS op_cr,
                COALESCE(b.tx_dr, 0) AS tx_dr, COALESCE(b.tx_cr, 0) AS tx_cr,
                COALESCE(b.pre_fy_dr, 0) AS pre_fy_dr, COALESCE(b.pre_fy_cr, 0) AS pre_fy_cr
@@ -479,6 +479,16 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     foreach ($rows as &$row) {
         $opDr = (float) $row['op_dr'];
         $opCr = (float) $row['op_cr'];
+        // Direct openings pre-date the voucher register. They belong in the
+        // opening column for every reporting window, never in movement.
+        $directOpening = round((float) ($row['opening_balance'] ?? 0), 2);
+        if ($directOpening > 0.004) {
+            if ((string) ($row['opening_side'] ?? 'debit') === 'credit') {
+                $opCr += $directOpening;
+            } else {
+                $opDr += $directOpening;
+            }
+        }
         if ($useFyReset) {
             $nature = rc_ledger_nature($row);
             if ($nature === 'revenue' || $nature === 'expense') {

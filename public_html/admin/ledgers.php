@@ -36,7 +36,7 @@ if (!$validDate($toDate)) {
     $toDate = $fyEnd;
 }
 
-$ledgerListStmt = db()->prepare('SELECT l.id, l.code, l.name, l.type FROM ledgers l WHERE l.company_id = :cid ORDER BY l.code ASC');
+$ledgerListStmt = db()->prepare('SELECT l.id, l.code, l.name, l.type, l.opening_balance, l.opening_side FROM ledgers l WHERE l.company_id = :cid ORDER BY l.code ASC');
 $ledgerListStmt->execute(['cid' => $companyId]);
 $allLedgers = $ledgerListStmt->fetchAll();
 
@@ -73,6 +73,11 @@ if ($selectedLedger) {
     $openingStmt->execute(['lid' => $selectedLedgerId, 'cid' => $companyId,
         'from_date' => $fromDate, 'from_open' => $fromDate]);
     $openingBalance = round((float) $openingStmt->fetchColumn(), 2);
+    $directOpening = round((float) ($selectedLedger['opening_balance'] ?? 0), 2);
+    if ($directOpening > 0.004) {
+        $openingBalance += (string) ($selectedLedger['opening_side'] ?? 'debit') === 'credit'
+            ? -$directOpening : $directOpening;
+    }
 
     $stmtSql = "
         SELECT v.id AS voucher_id, v.voucher_no, v.voucher_type, v.reference_no, v.narration,

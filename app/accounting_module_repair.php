@@ -3919,5 +3919,72 @@ function accounting_module_repair_database(): array
             "`inventory_accounting` ENUM('perpetual', 'periodic') DEFAULT NULL AFTER `is_client_company`");
     });
 
+    $run('An opening balance belongs to the account, not to a journal (migration 134)', static function (): void {
+        // It was posted as a two-sided voucher on the fiscal year's first day:
+        // debit the ledger, credit "Opening Balance Adjustments". Nothing moved
+        // on day one -- the account simply started where it started -- so that
+        // made a non-event look like an event, put it in the voucher register
+        // and the day book, and handed it to an editable journal form that
+        // offered to re-point it at a different ledger.
+        //
+        // The counterpart of an opening balance is not an account; it is the
+        // rest of the opening balances. The figure now lives on the ledger, on
+        // one side only, and the imbalance is computed and reported.
+        accounting_repair_add_column('ledgers', 'opening_balance',
+            "`opening_balance` DECIMAL(18,2) NOT NULL DEFAULT 0.00 AFTER `status`");
+        accounting_repair_add_column('ledgers', 'opening_side',
+            "`opening_side` ENUM('debit', 'credit') DEFAULT NULL AFTER `opening_balance`");
+
+        if (!accounting_repair_column_exists('ledgers', 'opening_side')
+            || !accounting_repair_table_exists('vouchers')
+            || !accounting_repair_table_exists('voucher_entries')) {
+            return;
+        }
+
+        // Carry every opening already posted onto its ledger, then take the
+        // voucher away. Idempotent by construction: once a voucher is gone
+        // there is nothing left to read, and a second run finds no rows.
+        //
+        // The books do not move. The debit becomes the ledger's own opening;
+        // the credit to the plug account disappears and is replaced, exactly,
+        // by the computed difference. Same totals, one fewer fiction.
+        $posted = db()->query("
+            SELECT v.id AS voucher_id, v.company_id, v.source_id AS ledger_id,
+                   e.entry_type, e.amount
+            FROM vouchers v
+            INNER JOIN voucher_entries e ON e.voucher_id = v.id AND e.ledger_id = v.source_id
+            WHERE v.source_type = 'ledger_opening'")->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($posted as $row) {
+            $voucherId = (int) $row['voucher_id'];
+            $ledgerId = (int) $row['ledger_id'];
+            if ($ledgerId <= 0) {
+                continue;
+            }
+
+            // A reconciled leg is somebody's bank statement tie-up. Leave the
+            // whole voucher alone rather than breaking it, and leave the
+            // column unset so the figure is never counted twice.
+            $reconciled = db()->prepare('SELECT COUNT(*) FROM voucher_entries
+                WHERE voucher_id = :vid AND reconciled_at IS NOT NULL');
+            $reconciled->execute(['vid' => $voucherId]);
+            if ((int) $reconciled->fetchColumn() > 0) {
+                continue;
+            }
+
+            db()->prepare('UPDATE ledgers SET opening_balance = :amt, opening_side = :side
+                WHERE id = :id AND company_id = :cid')
+                ->execute([
+                    'amt' => round((float) $row['amount'], 2),
+                    'side' => (string) $row['entry_type'] === 'credit' ? 'credit' : 'debit',
+                    'id' => $ledgerId,
+                    'cid' => (int) $row['company_id'],
+                ]);
+
+            db()->prepare('DELETE FROM voucher_entries WHERE voucher_id = :vid')->execute(['vid' => $voucherId]);
+            db()->prepare('DELETE FROM vouchers WHERE id = :vid')->execute(['vid' => $voucherId]);
+        }
+    });
+
     return $errors;
 }

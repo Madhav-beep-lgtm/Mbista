@@ -3854,8 +3854,8 @@ function accounting_opening_source_sql(string $column): string
  */
 function post_ledger_opening_balance(int $companyId, int $ledgerId, float $amount, string $side, ?int $actorId = null): ?string
 {
-    if (!table_exists('vouchers') || !table_exists('voucher_entries')) {
-        return 'accounting tables are missing';
+    if (!column_exists('ledgers', 'opening_balance') || !column_exists('ledgers', 'opening_side')) {
+        return 'the ledger opening-balance migration has not run yet';
     }
     $amount = round($amount, 2);
     if ($amount < 0) {
@@ -3874,6 +3874,20 @@ function post_ledger_opening_balance(int $companyId, int $ledgerId, float $amoun
     if (!in_array((string) $ledger['type'], ['asset', 'liability', 'equity'], true)) {
         return 'opening balances apply to asset, liability and equity ledgers only — income and expense ledgers always open at zero';
     }
+
+    // An opening establishes the account's starting position; it does not
+    // create a transaction or a fictitious contra entry on day one.
+    db()->prepare('UPDATE ledgers
+        SET opening_balance = :amount, opening_side = :side
+        WHERE id = :id AND company_id = :cid')
+        ->execute([
+            'amount' => $amount > 0.004 ? $amount : 0.0,
+            'side' => $amount > 0.004 ? $side : null,
+            'id' => $ledgerId,
+            'cid' => $companyId,
+        ]);
+    log_activity('ledger', $ledgerId, 'opening_balance_set', 'Opening balance ' . ($amount > 0 ? number_format($amount, 2) . ' ' . strtoupper(substr($side, 0, 2)) : 'cleared') . ' for ledger ' . $ledger['name'] . '.', $actorId);
+    return null;
 
     $contraLedgerId = opening_balance_ledger_id($companyId);
     if ($contraLedgerId <= 0) {
