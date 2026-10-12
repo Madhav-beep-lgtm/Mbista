@@ -1096,6 +1096,13 @@ if ($view === 'sales-upload' && $salesReportExport !== '' && isset($_GET['report
     );
 }
 
+// Defined HERE, above the fragment handler, not beside the page markup below.
+// The fragment exits before that line ever runs, so it was passing an
+// undefined $fmt and falling back to the renderer's own formatter -- which
+// prints a null as 0.00 where the page prints N/A. A dialog that promises to
+// show what the page shows cannot quietly turn "not known" into nought.
+$fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
+
 // One section on its own, as a fragment, for the reader that opens it in a
 // dialog. Same builder and same renderer as the page -- a popup showing
 // something the page would not show is a second report nobody maintains.
@@ -1191,8 +1198,6 @@ $pageSubtitle = 'Recipe costing and estimated gross profit (reference-only), plu
 $pageHero = ['icon' => 'services'];
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
-
-$fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number_format($n, $p);
 ?>
 <?php if ($view === 'sales-upload'): ?>
     <div class="notice" style="margin-bottom:14px"><strong>Posts to accounting.</strong> Sheets posted here create daily sales vouchers in the Voucher Register.</div>
