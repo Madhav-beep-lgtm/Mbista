@@ -574,7 +574,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="search" id="rc2AcctSearch" class="rc2-acct-search rc2-hier-only" placeholder="Search account..." aria-label="Search accounts in this report">
             <button type="button" class="rc2-mini rc2-hier-only" id="rc2ExpandAll">Expand all</button>
             <button type="button" class="rc2-mini rc2-hier-only" id="rc2CollapseAll">Collapse all</button>
-            <button type="button" id="rc2Expand" aria-label="Expand preview" title="Expand preview"><?= icon('maximize') ?></button>
         </div>
     </div>
 <div class="rpt-fullwidth">
@@ -758,14 +757,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         }
     }
 
-    var expandBtn = document.getElementById('rc2Expand');
-    var preview = document.getElementById('rc2Preview');
-    if (expandBtn && preview) {
-        expandBtn.addEventListener('click', function () {
-            preview.classList.toggle('rc2-preview-full');
-            document.body.classList.toggle('rc2-noscroll', preview.classList.contains('rc2-preview-full'));
-        });
-    }
 })();
 </script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
