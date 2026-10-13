@@ -158,30 +158,30 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">All ledgers</a>
             <?php else: ?>
                 <a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
-                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?></a>
-                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?></a>
+                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?><span>PDF</span></a>
+                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?><span>Excel</span></a>
             <?php endif; ?>
         </div>
     </div>
     <form method="get" action="<?= e(url('admin/ledgers.php')) ?>" class="mbw-filter-bar">
-        <select name="ledger_id" class="field-compact" onchange="this.form.submit()" aria-label="Ledger">
+        <label class="ledger-filter"><span>Account</span><select name="ledger_id" class="field-compact" onchange="this.form.submit()" aria-label="Ledger">
             <option value="0">All ledgers (balances)</option>
             <?php foreach ($allLedgers as $ledgerRow): ?>
                 <option value="<?= (int) $ledgerRow['id'] ?>" <?= $selectedLedgerId === (int) $ledgerRow['id'] ? 'selected' : '' ?>><?= e($ledgerRow['code'] . ' — ' . $ledgerRow['name']) ?></option>
             <?php endforeach; ?>
-        </select>
+        </select></label>
         <?php if (!$selectedLedger): ?>
-            <select name="type" class="field-compact" aria-label="Type filter">
+            <label><span>Nature</span><select name="type" class="field-compact" aria-label="Type filter">
                 <option value="">All types</option>
                 <?php foreach (['asset' => 'Assets', 'liability' => 'Liabilities', 'equity' => 'Equity', 'revenue' => 'Income', 'expense' => 'Expenses'] as $typeValue => $typeLabel): ?>
                     <option value="<?= e($typeValue) ?>" <?= $typeFilter === $typeValue ? 'selected' : '' ?>><?= e($typeLabel) ?></option>
                 <?php endforeach; ?>
-            </select>
+            </select></label>
         <?php else: ?>
-            <input type="date" name="from" value="<?= e($fromDate) ?>" class="field-compact" aria-label="From date">
-            <input type="date" name="to" value="<?= e($toDate) ?>" class="field-compact" aria-label="To date">
+            <label><span>From date</span><input type="date" name="from" value="<?= e($fromDate) ?>" class="field-compact" aria-label="From date"></label>
+            <label><span>To date</span><input type="date" name="to" value="<?= e($toDate) ?>" class="field-compact" aria-label="To date"></label>
         <?php endif; ?>
-        <input type="search" name="q" value="<?= e($searchQuery) ?>" class="field-compact" style="min-width:230px" placeholder="<?= $selectedLedger ? 'Search narration, memo, voucher, party' : 'Search code or name' ?>">
+        <label class="search-filter"><span>Search accounts / entries</span><input type="search" name="q" value="<?= e($searchQuery) ?>" class="field-compact" placeholder="<?= $selectedLedger ? 'Search narration, memo, voucher, party' : 'Search code or name' ?>"></label>
         <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
         <?php if ($searchQuery !== '' || $typeFilter !== ''): ?><a class="button secondary" href="<?= e(url('admin/ledgers.php' . ($selectedLedgerId > 0 ? '?ledger_id=' . $selectedLedgerId : ''))) ?>">Clear</a><?php endif; ?>
     </form>
