@@ -14,21 +14,12 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
-    <meta name="theme-color" content="#064e3b">
+    <meta name="theme-color" content="#F6F9FC">
     <?php require __DIR__ . '/pwa_head.php'; ?>
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
-    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#064e3b">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/style.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/portal.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/theme-brown.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/theme-sahakari-green.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/text-contrast-only.css')) ?>">
-    <?php /* Last on purpose: the 2026 appearance layer restates the tokens the
-             four sheets above each define, so it must have the final word. */ ?>
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/design-system.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/mbworld-2026.css')) ?>">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#1676A3">
+    <?php require __DIR__ . '/app_styles.php'; ?>
 </head>
 <body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
 <?php require __DIR__ . '/sidebar_boot.php'; ?>

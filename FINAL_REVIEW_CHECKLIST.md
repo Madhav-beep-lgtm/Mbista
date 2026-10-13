@@ -109,12 +109,12 @@ Review basis: implemented workspace code and database schema in this repository.
 
 ## 15) Colours, fonts, icons, images and templates
 
-- [x] Existing design system preserved from `public_html/assets/css/style.css`
+- [x] Shared design system consolidated into `public_html/assets/css/app.css`
 - [x] Shared partial templates preserved
 
 ## 16) Mobile, tablet and desktop layouts
 
-- [x] Responsive breakpoints in main stylesheet
+- [x] Responsive breakpoints in the shared layout and component sources
 - [x] Users/contacts/orders/reports layouts include mobile fallbacks
 
 ## Gap summary for full parity

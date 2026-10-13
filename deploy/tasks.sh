@@ -28,6 +28,14 @@ die() {
     exit 1
 }
 
+# Compile the order-sensitive source styles into the bundle pages actually
+# request. The build script leaves an unchanged bundle untouched, preserving the
+# asset mtime used for browser cache busting.
+if [ -f "$REPO_DIR/deploy/build-css.php" ]; then
+    command -v php >/dev/null 2>&1 || die "PHP CLI is required to build the CSS bundles"
+    php "$REPO_DIR/deploy/build-css.php" --quiet || die "could not build the CSS bundles"
+fi
+
 # ---------------------------------------------------------------------------
 # Which directory is the document root
 # ---------------------------------------------------------------------------
@@ -48,7 +56,7 @@ CANDIDATES="$HOME/public_html
 $HOME/mbca.com.np
 $HOME/public_html/mbca.com.np"
 
-looks_deployed() { [ -f "$1/assets/css/style.css" ] || [ -f "$1/index.php" ]; }
+looks_deployed() { [ -f "$1/assets/css/app.css" ] || [ -f "$1/index.php" ]; }
 
 DOCROOT=""
 DOCROOT_WHY=""
@@ -177,7 +185,7 @@ echo "deploy: database schema is current"
 # stale NFS handle. Comparing one real file end to end is cheap and catches
 # all three, and it is the check that would have caught a fortnight of deploys
 # that changed nothing.
-SENTINEL="assets/css/portal.css"
+SENTINEL="assets/css/app.css"
 if [ -f "public_html/$SENTINEL" ]; then
     if ! cmp -s "public_html/$SENTINEL" "$DOCROOT/$SENTINEL"; then
         die "$DOCROOT/$SENTINEL does not match the repository copy after rsync — the deploy did not take effect"

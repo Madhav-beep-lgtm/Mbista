@@ -28,7 +28,7 @@
 // Bumping this deploys a new cache and drops the old one. deploy/tasks.sh does
 // not fingerprint asset filenames, so this is what makes a CSS change reach a
 // phone that already has the app installed.
-const VERSION = 'mbista-v1';
+const VERSION = 'mbista-v2-sky';
 const STATIC_CACHE = VERSION + '-static';
 const OFFLINE_URL = '/offline.html';
 

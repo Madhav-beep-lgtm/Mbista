@@ -80,8 +80,12 @@ make_repo() {
     cp "$REPO_SRC/deploy/tasks.sh" "$dir/deploy/tasks.sh"
     cp "$REPO_SRC/deploy/auto-deploy.sh" "$dir/deploy/auto-deploy.sh"
     cp "$REPO_SRC/deploy/backup-database.sh" "$dir/deploy/backup-database.sh" 2>/dev/null || true
+    # tasks.sh always runs schema repair after copying. This suite tests the
+    # deployment mechanics rather than a database, so give the throwaway repo
+    # a successful CLI repair command with the same path contract.
+    printf '%s\n' '#!/usr/bin/env php' '<?php exit(0);' > "$dir/deploy/repair-schema.php"
     echo '<?php echo "site";' > "$dir/public_html/index.php"
-    echo 'body { color: red }' > "$dir/public_html/assets/css/portal.css"
+    echo 'body { color: red }' > "$dir/public_html/assets/css/app.css"
     echo 'Deny from all' > "$dir/public_html/uploads/.htaccess"
     echo 'Deny from all' > "$dir/secure_uploads/kyc/.htaccess"
     echo '<?php // app' > "$dir/app/bootstrap.php"
@@ -97,12 +101,12 @@ R="$ROOT/r1"; make_repo "$R"
 out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"; rc=$?
 
 check "$([ $rc -eq 0 ] && echo 1 || echo 0)" "A normal deploy exits 0"
-check "$([ -f "$H/public_html/assets/css/portal.css" ] && echo 1 || echo 0)" "The stylesheet reaches the document root"
-check "$(cmp -s "$R/public_html/assets/css/portal.css" "$H/public_html/assets/css/portal.css" && echo 1 || echo 0)" "and it is byte-for-byte the repository copy"
+check "$([ -f "$H/public_html/assets/css/app.css" ] && echo 1 || echo 0)" "The stylesheet reaches the document root"
+check "$(cmp -s "$R/public_html/assets/css/app.css" "$H/public_html/assets/css/app.css" && echo 1 || echo 0)" "and it is byte-for-byte the repository copy"
 check "$([ -f "$H/app/bootstrap.php" ] && echo 1 || echo 0)" "app/ lands one level ABOVE the document root"
 check "$([ ! -f "$H/public_html/app/bootstrap.php" ] && echo 1 || echo 0)" "and never inside it, where Apache would serve it"
 check "$([ -f "$H/public_html/uploads/.htaccess" ] && echo 1 || echo 0)" "uploads/.htaccess is installed"
-check "$(printf '%s' "$out" | grep -q 'verified assets/css/portal.css' && echo 1 || echo 0)" "The deploy states that it verified the copy"
+check "$(printf '%s' "$out" | grep -q 'verified assets/css/app.css' && echo 1 || echo 0)" "The deploy states that it verified the copy"
 check "$(grep -q 'backup-database.sh' "$FAKE_CRONTAB" 2>/dev/null && echo 1 || echo 0)" "The nightly backup cron is armed"
 
 # Re-running must not duplicate the cron line.
@@ -131,8 +135,8 @@ H="$ROOT/h3"; mkdir -p "$H/public_html" "$H/mbca.com.np"
 echo '<?php // the site Apache actually serves' > "$H/public_html/index.php"
 R="$ROOT/r3"; make_repo "$R"
 out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"
-check "$([ -f "$H/public_html/assets/css/portal.css" ] && echo 1 || echo 0)" "The directory that already HOLDS the site wins over one that merely exists"
-check "$([ ! -f "$H/mbca.com.np/assets/css/portal.css" ] && echo 1 || echo 0)" "and the empty candidate is left alone"
+check "$([ -f "$H/public_html/assets/css/app.css" ] && echo 1 || echo 0)" "The directory that already HOLDS the site wins over one that merely exists"
+check "$([ ! -f "$H/mbca.com.np/assets/css/app.css" ] && echo 1 || echo 0)" "and the empty candidate is left alone"
 check "$(printf '%s' "$out" | grep -q "already holds the site" && echo 1 || echo 0)" "The deploy says which root it chose and why"
 
 # An addon domain that really is the site still wins — the fix must not
@@ -141,7 +145,7 @@ H="$ROOT/h3b"; mkdir -p "$H/public_html" "$H/mbca.com.np"
 echo '<?php // addon domain is the real site here' > "$H/mbca.com.np/index.php"
 R="$ROOT/r3b"; make_repo "$R"
 out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"
-check "$([ -f "$H/mbca.com.np/assets/css/portal.css" ] && echo 1 || echo 0)" "An addon-domain root that holds the site is still chosen"
+check "$([ -f "$H/mbca.com.np/assets/css/app.css" ] && echo 1 || echo 0)" "An addon-domain root that holds the site is still chosen"
 
 # Both hold a site: one is picked, the other is REPORTED rather than ignored.
 H="$ROOT/h3c"; mkdir -p "$H/public_html" "$H/mbca.com.np"
@@ -156,8 +160,8 @@ echo '<?php' > "$H/public_html/index.php"
 echo "$H/webroot" > "$H/.deploy-docroot"
 R="$ROOT/r3d"; make_repo "$R"
 out="$(HOME="$H" bash "$R/deploy/tasks.sh" 2>&1)"
-check "$([ -f "$H/webroot/assets/css/portal.css" ] && echo 1 || echo 0)" "~/.deploy-docroot is obeyed over anything the detection would pick"
-check "$([ ! -f "$H/public_html/assets/css/portal.css" ] && echo 1 || echo 0)" "and the guessed root is then left untouched"
+check "$([ -f "$H/webroot/assets/css/app.css" ] && echo 1 || echo 0)" "~/.deploy-docroot is obeyed over anything the detection would pick"
+check "$([ ! -f "$H/public_html/assets/css/app.css" ] && echo 1 || echo 0)" "and the guessed root is then left untouched"
 
 echo
 echo "== auto-deploy.sh =="
@@ -196,7 +200,7 @@ else
 
     out="$(HOME="$H" bash "$S/deploy/auto-deploy.sh" 2>&1)"; rc=$?
     check "$([ $rc -eq 0 ] && echo 1 || echo 0)" "The first run deploys and exits 0"
-    check "$([ -f "$H/public_html/assets/css/portal.css" ] && echo 1 || echo 0)" "and the files reach the document root"
+    check "$([ -f "$H/public_html/assets/css/app.css" ] && echo 1 || echo 0)" "and the files reach the document root"
     check "$([ "$(cat "$H/.auto-deploy.last" 2>/dev/null)" = "$HASH" ] && echo 1 || echo 0)" "and the commit is recorded as deployed"
 
     # Quiet, and genuinely idle: the cron fires every five minutes and must not
@@ -240,9 +244,9 @@ else
 
     # ---- --force redeploys a commit already recorded ----
     HOME="$H" bash "$S/deploy/auto-deploy.sh" >/dev/null 2>&1
-    rm -f "$H/public_html/assets/css/portal.css"
+    rm -f "$H/public_html/assets/css/app.css"
     HOME="$H" bash "$S/deploy/auto-deploy.sh" --force >/dev/null 2>&1
-    check "$([ -f "$H/public_html/assets/css/portal.css" ] && echo 1 || echo 0)" "--force copies the files again even when the hash matches"
+    check "$([ -f "$H/public_html/assets/css/app.css" ] && echo 1 || echo 0)" "--force copies the files again even when the hash matches"
 fi
 
 echo

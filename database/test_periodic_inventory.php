@@ -1151,7 +1151,7 @@ ok(str_contains($invPage, '<?php if ($editItem): ?>openItemDialog();'),
     '  ...and opened automatically when the table asks to edit a row, or Edit would do nothing');
 ok(!str_contains($invPage, '<details class="feature-disclosure" id="create-item"'),
     '  ...with the old panel gone rather than left behind beside it');
-$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/portal.css');
+$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/app.css');
 ok(str_contains($portalCss, '.mbw-item-dialog'), 'And it is styled');
 ok(str_contains($portalCss, '.mbw-item-dialog > form'),
     '  ...with the fields scrolling under a fixed head, so Save is never pushed off a short screen');
@@ -1242,43 +1242,44 @@ echo "\n22. A closed group stays closed, however deep it sits\n";
 // Accounting opened all five jewellery groups at once, every heading lit up as
 // though selected, and nothing would collapse. The server was marking exactly
 // one group open the whole time; the stylesheet was ignoring it.
-$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/portal.css');
+$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/app.css');
 ok(!preg_match('/\.mbw-nav-parent\.is-open\s+\.mbw-subnav\s*\{/', $portalCss),
     'No rule reveals a submenu by DESCENT — that opens every level at once');
-ok(substr_count($portalCss, '.mbw-nav-parent.is-open > .mbw-subnav') >= 2,
-    '  ...both the display and the animation reach exactly one level down');
+ok(substr_count($portalCss, '.mbw-nav-parent.is-open > .mbw-subnav') >= 1,
+    '  ...the display rule reaches exactly one level down');
 
 // And the same trap in reverse: the heading styling must not paint every
 // nested heading as open either.
-$designCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/design-system.css');
+$designCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/layout.css');
 ok(!preg_match('/\.mbw-nav-parent\.is-open\s+a\[data-nav-toggle\]/', $designCss),
     'And no rule lights a heading by descent, which would make every group look selected');
 
-echo "\n23. Green means you are here, and nothing else\n";
+echo "\n23. Sky blue marks the current page, and nothing else\n";
 // Open and current shared one style. That was fine while one group could be open
 // at a time; nested three deep it painted the whole PATH to a page in the same
 // colour as the page -- Client Accounting, Jewellery Accounting, Trade and the
 // link itself, four things looking selected when only one was.
-$designCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/design-system.css');
+$designCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/layout.css');
 
-// The solid green and the gold marker belong to the active link alone.
-ok(preg_match('/\.mbw-nav-parent>a\[data-nav-toggle\]\.is-active\s*\{[^}]*--ui-green-700[^}]*\}/s', $designCss) === 1,
-    'The ACTIVE link keeps the solid green');
-ok(preg_match('/\.mbw-nav-parent>a\[data-nav-toggle\]\.is-active\s*\{[^}]*--ui-gold[^}]*\}/s', $designCss) === 1,
-    '  ...and the gold marker');
+// The restrained blue selection belongs to the active link alone.
+ok(preg_match('/\.mbw-nav-parent > a\[data-nav-toggle\]\.is-active\s*\{[^}]*--color-primary-soft[^}]*--color-primary[^}]*\}/s', $designCss) === 1,
+    'The ACTIVE link keeps the sky-blue selection and blue text');
+ok(str_contains($designCss, '.admin-nav a.is-active::before')
+    && str_contains($designCss, 'background: var(--color-primary)'),
+    '  ...and the slim blue current-page marker');
 
 // An open group says so quietly.
-ok(preg_match('/\.mbw-nav-parent\.is-open>a\[data-nav-toggle\]\s*\{([^}]*)\}/s', $designCss, $openBlock) === 1,
+ok(preg_match('/\.mbw-nav-parent\.is-open > a\[data-nav-toggle\]\s*\{([^}]*)\}/s', $designCss, $openBlock) === 1,
     'An open group has a style of its own');
-ok(isset($openBlock[1]) && !str_contains($openBlock[1], '--ui-green-700'),
+ok(isset($openBlock[1]) && str_contains($openBlock[1], '--color-surface-muted'),
     '  ...which is NOT the solid green — that would mark the path as the destination');
-ok(isset($openBlock[1]) && !str_contains($openBlock[1], '--ui-gold'),
+ok(isset($openBlock[1]) && !str_contains($openBlock[1], '--color-primary-soft'),
     '  ...and carries no gold marker either');
-ok(isset($openBlock[1]) && str_contains($openBlock[1], 'box-shadow:none'),
+ok(isset($openBlock[1]) && str_contains($openBlock[1], 'box-shadow: none'),
     '  ...so nothing on the path competes with the page you are on');
 
 // The caret is what an open group is recognised by instead.
-$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/portal.css');
+$portalCss = (string) file_get_contents(dirname(__DIR__) . '/public_html/assets/css/app.css');
 ok(str_contains($portalCss, '.mbw-nav-parent.is-open > a .mbw-nav-caret')
     && str_contains($portalCss, 'rotate(180deg)'),
     'An open group turns its caret, which is how it reads as open');
@@ -1289,12 +1290,12 @@ ok(str_contains($portalCss, '.mbw-nav-parent.is-open > a .mbw-nav-caret')
 // taken away altogether rather than argued with.
 ok(preg_match('/\.mbw-subnav a\[data-nav-toggle\][^{]*\{([^}]*)\}/s', $designCss, $headBlock) === 1,
     'A heading that opens a submenu has a rule of its own');
-ok(isset($headBlock[1]) && str_contains($headBlock[1], 'background: none !important'),
+ok(isset($headBlock[1]) && str_contains($headBlock[1], 'background: none'),
     '  ...taking its background away outright, in every state');
-ok(isset($headBlock[1]) && str_contains($headBlock[1], 'box-shadow: none !important')
-    && str_contains($headBlock[1], 'border-radius: 0 !important'),
+ok(isset($headBlock[1]) && str_contains($headBlock[1], 'box-shadow: none')
+    && str_contains($headBlock[1], 'border-radius: 0'),
     '  ...along with the shadow and the rounding that made it look like a pill');
-ok(!preg_match('/\.mbw-subnav a\[data-nav-toggle\][^{]*\{[^}]*--ui-green/s', $designCss),
+ok(!preg_match('/\.mbw-subnav a\[data-nav-toggle\][^{]*\{[^}]*--color-primary-soft/s', $designCss),
     '  ...and it can never take the colour of the page you are on');
 
 // Every group on a page that has nothing to do with them must render closed.

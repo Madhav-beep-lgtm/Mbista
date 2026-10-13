@@ -566,7 +566,7 @@ ok(substr_count($toolbar, '<svg') >= 3, 'And each export button draws its icon (
 
 // The stylesheet has to state both halves. A rule that sets a background and
 // lets the text colour be inherited is how this broke in the first place.
-$skinCss = (string) file_get_contents($root . '/public_html/assets/css/jewellery.css');
+$skinCss = (string) file_get_contents($root . '/public_html/assets/css/modules/jewellery.css');
 ok(str_contains($skinCss, '.jw-report-exports .jw-export'), 'The skin styles them');
 $exportAt = strpos($skinCss, '.jw-report-exports .jw-export {');
 $exportRule = $exportAt === false ? '' : substr($skinCss, $exportAt, 700);

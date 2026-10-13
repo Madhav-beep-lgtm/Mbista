@@ -137,7 +137,7 @@ table.jw-lines td.c-del button:hover { background: var(--mbw-red-soft, #fdeaea);
     justify-content: flex-start;
     gap: 5px;
     min-width: 0;
-    /* portal.css lays this label out as a GRID, at a specificity this rule
+    /* layout.css lays this label out as a GRID, at a specificity this rule
        cannot beat, so display:flex above never takes effect and
        justify-content:flex-start stops meaning "pack to the top" and starts
        meaning "do not stretch the column". The track then shrank to the

@@ -36,7 +36,7 @@ if ($navSection === '') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($pageTitle) ?> | <?= e(app_name()) ?></title>
     <meta name="description" content="<?= e(setting('site_meta_description', 'M.Bista & Associates, Chartered Accountants — audit, taxation, accounting, and advisory services in Nepal with a secure client portal.')) ?>">
-    <meta name="theme-color" content="#064e3b">
+    <meta name="theme-color" content="#F6F9FC">
     <?php require __DIR__ . '/pwa_head.php'; ?>
     <meta property="og:site_name" content="<?= e(app_name()) ?>">
     <meta property="og:title" content="<?= e($pageTitle) ?> | <?= e(app_name()) ?>">
@@ -44,16 +44,8 @@ if ($navSection === '') {
     <meta property="og:type" content="website">
     <link rel="icon" type="image/svg+xml" href="/assets/img/favicon.svg">
     <link rel="apple-touch-icon" href="/assets/img/favicon.svg">
-    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#064e3b">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/style.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/theme-brown.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/theme-sahakari-green.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/text-contrast-only.css')) ?>">
-    <?php /* Last on purpose: the 2026 appearance layer restates the tokens the
-             sheets above each define, so it must have the final word. */ ?>
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/design-system.css')) ?>">
-    <link rel="stylesheet" href="<?= e(asset_url('assets/css/mbworld-2026.css')) ?>">
+    <link rel="mask-icon" href="/assets/img/favicon.svg" color="#1676A3">
+    <?php require __DIR__ . '/app_styles.php'; ?>
 </head>
 <body class="<?= e($bodyClass) ?>">
 <?php if ($headerSupportPhone !== '' || $headerSupportEmail !== ''): ?>

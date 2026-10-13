@@ -858,7 +858,7 @@ function url(string $path = ''): string
 /**
  * A stylesheet or script URL stamped with the file's own modified time.
  *
- * These used to carry a hand-typed date — portal.css?v=20260728 — which works
+ * These used to carry a hand-typed date — app.css?v=20260728 — which works
  * exactly as long as somebody remembers to change it. Nobody does, every time.
  * A stylesheet is edited, the stamp stays, and every browser that has been to
  * the site keeps the old copy: the change is live on the server, invisible in

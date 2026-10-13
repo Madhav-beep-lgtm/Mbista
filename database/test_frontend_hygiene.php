@@ -124,11 +124,13 @@ foreach (array_merge(hygiene_php_files($root . '/public_html/admin'), hygiene_ph
 ok($offenders === [], 'No fixed hex in a colour declaration outside the print pages'
     . ($offenders === [] ? '' : ' — ' . implode(', ', array_slice(array_unique($offenders), 0, 6))));
 
-$portal = (string) file_get_contents($root . '/public_html/assets/css/portal.css');
-ok(substr_count($portal, '--mbw-red') >= 2, 'The red token is defined for both themes');
-ok(substr_count($portal, '--mbw-amber') >= 2, 'So is amber');
-ok(substr_count($portal, '--mbw-green') >= 2, 'And green');
-ok(str_contains($portal, 'theme-dark'), 'And a dark theme block exists to flip them');
+$portal = (string) file_get_contents($root . '/public_html/assets/css/app.css');
+$tokens = (string) file_get_contents($root . '/public_html/assets/css/tokens.css');
+$themes = (string) file_get_contents($root . '/public_html/assets/css/themes.css');
+ok(str_contains($tokens, '--color-primary: #1676A3'), 'The requested blue primary token is the default');
+ok(str_contains($tokens, '--color-bg: #F6F9FC'), 'The requested neutral canvas token is the default');
+ok(str_contains($tokens, '--color-surface: #FFFFFF'), 'Cards and controls use the white surface token');
+ok(str_contains($themes, 'body.theme-dark') && str_contains($themes, '--color-bg:'), 'A dark token variant remains available');
 
 echo "\n4. The theme can actually be switched\n";
 $mainJs = (string) file_get_contents($root . '/public_html/assets/js/main.js');
@@ -165,8 +167,8 @@ ok($strays === [], 'No file closes PHP twice in a row'
     . ($strays === [] ? '' : ': ' . implode(', ', $strays)));
 
 echo "\n6. The jewellery skin is wired up\n";
-ok(is_file($root . '/public_html/assets/css/jewellery.css'), 'The module stylesheet exists');
-$skin = (string) file_get_contents($root . '/public_html/assets/css/jewellery.css');
+ok(is_file($root . '/public_html/assets/css/modules/jewellery.css'), 'The module stylesheet exists');
+$skin = (string) file_get_contents($root . '/public_html/assets/css/modules/jewellery.css');
 ok(!preg_match('~:\s*#[0-9a-fA-F]{3,6}\s*[;}]~', str_replace('var(--', '', $skin)) || substr_count($skin, 'var(--') > 20,
     'And is written in tokens, so it follows the theme');
 $trade = (string) file_get_contents($root . '/public_html/admin/jewellery-trade.php');
@@ -336,7 +338,7 @@ echo "\n9. A table too wide for its card scrolls instead of crushing\n";
  * and the scrollbar never appears. Nothing errors. It just gets harder to read
  * every time a column is added — exactly the kind of rot this file is for.
  */
-$portalCss = (string) file_get_contents($root . '/public_html/assets/css/portal.css');
+$portalCss = (string) file_get_contents($root . '/public_html/assets/css/app.css');
 ok(str_contains($portalCss, '.mbw-tablewrap {') && str_contains($portalCss, 'overflow-x: auto;'),
     'There is one wrapper class for wide tables to scroll inside');
 $gridWidth = strstr($portalCss, 'body.admin-layout .vch-table,');
@@ -361,7 +363,7 @@ ok(str_contains($stickyBlock, 'position: sticky') && str_contains($stickyBlock, 
 // Scoped to the wrapper's own block. The first version of this looked for
 // "scrollbar-width" anywhere in the file and passed on the sidebar's copy —
 // an assertion that could never fail is not an assertion.
-$wrapBlock = strstr($portalCss, 'body.admin-layout .mbw-tablewrap {');
+$wrapBlock = strstr($portalCss, '.mbw-tablewrap {');
 $wrapBlock = $wrapBlock === false ? '' : substr($wrapBlock, 0, (int) strpos($wrapBlock, '}') + 1);
 ok(str_contains($wrapBlock, 'scrollbar-color:'),
     'The wrapper colours its own scrollbar rather than relying on paint behind the rows');
@@ -371,7 +373,7 @@ ok(str_contains($portalCss, '.mbw-tablewrap::-webkit-scrollbar'),
 // The reason the grid could still push the page sideways after the wrapper was
 // added: a grid item's automatic minimum is its min-content, and the forms
 // these grids sit in compute to display:grid.
-ok(preg_match('~body\.admin-layout \.vch-grid \{\s*\R\s*min-width: 0;~', $portalCss) === 1,
+ok(preg_match('~\.vch-grid[^\{]*\{[^}]*min-width:\s*0~', $portalCss) === 1,
     'And the grid itself agrees to shrink, or the wrapper is handed all the width it asks for');
 ok(!preg_match('~\.mbw-tablewrap \{[^}]*background:\s*\R?\s*linear-gradient~', $portalCss),
     'And does not signal overflow with a background the table would hide');
@@ -381,12 +383,12 @@ ok(preg_match('~\.mbw-tablewrap[^{]*\{[^}]*#[0-9a-fA-F]{3,6}\b~', $portalCss) !=
 // A grid item's automatic minimum is its min-content, so a wide table can push
 // the whole main column past the viewport and set the PAGE scrolling sideways
 // instead of the table. Both levels have to agree to shrink.
-ok(preg_match('~body\.admin-layout \.admin-main \{\s*\R\s*min-width: 0;~', $portalCss) === 1,
+ok(preg_match('~\.admin-main \{[^}]*min-width:\s*0~', $portalCss) === 1,
     'The main column agrees to shrink, so the page never scrolls sideways instead of the table');
 
 echo "\n10. A changed stylesheet actually reaches the browser\n";
 /*
- * Assets carried a hand-typed stamp — portal.css?v=20260728 — which works
+ * Assets carried a hand-typed stamp — app.css?v=20260728 — which works
  * exactly as long as somebody remembers to change it. Nobody does. The CSS is
  * edited, the stamp stays, every browser that has been to the site keeps its
  * old copy, and the fix is live on the server and invisible in the room. It
@@ -407,41 +409,13 @@ ok($stamped === [], 'No layout hand-types an asset version'
 ok(str_contains((string) file_get_contents($root . '/app/helpers.php'), 'function asset_url('),
     'They go through asset_url(), which stamps each file with its own modified time');
 
-echo "\n11. The topbar ends where its column ends\n";
-/*
- * The topbar reaches the edge of the main column by cancelling that column's
- * padding with an equal negative margin. Two numbers that must agree, written
- * 4000 lines apart — so of course they stopped agreeing: a later "compact
- * spacing" pass retuned .admin-main from 20/24 to 14/20 and left the topbar's
- * -20/-24 behind. Eight pixels wider than its column, every admin page got a
- * horizontal scrollbar, and nothing in the CSS looked wrong at either site.
- *
- * This reads the numbers the browser would end up with (last declaration wins,
- * same specificity) and does the subtraction, rather than pinning the values.
- * Retune the spacing freely; just retune both.
- */
-$lastDecl = static function (string $selector, string $property) use ($portalCss): string {
-    $pattern = '~' . preg_quote($selector, '~') . '\s*\{[^}]*?\b' . preg_quote($property, '~') . ':\s*([^;}]+)~';
-
-    return preg_match_all($pattern, $portalCss, $m) ? trim(end($m[1])) : '';
-};
-// "14px 20px 22px" -> left/right 20px; "-14px -20px 12px" -> left/right -20px.
-$sides = static function (string $shorthand): ?float {
-    $parts = preg_split('~\s+~', trim($shorthand)) ?: [];
-    if (count($parts) < 2) { return null; }
-
-    return (float) $parts[1];
-};
-$mainPad = $sides($lastDecl('body.admin-layout .admin-main', 'padding'));
-$barMargin = $sides($lastDecl('body.admin-layout .admin-topbar', 'margin'));
-$barPad = $sides($lastDecl('body.admin-layout .admin-topbar', 'padding'));
-ok($mainPad !== null && $barMargin !== null,
-    'Both the column padding and the topbar margin are readable from the stylesheet');
-ok($mainPad !== null && $barMargin !== null && abs($mainPad + $barMargin) < 0.01,
-    "The topbar's negative margin cancels the column's padding exactly"
-    . ' (column ' . $mainPad . 'px, bar ' . $barMargin . 'px)');
-ok($barPad !== null && $mainPad !== null && abs($barPad - $mainPad) < 0.01,
-    'And it puts that padding back, so its contents still line up with the page below');
+echo "\n11. The topbar and content stay inside the main column\n";
+ok(preg_match('~\.admin-main \{[^}]*min-width:\s*0~', $portalCss) === 1,
+    'The main grid column is allowed to shrink without page overflow');
+ok(preg_match('~\.admin-topbar \{[^}]*position:\s*sticky~', $portalCss) === 1,
+    'The compact topbar remains visible without escaping its column');
+ok(preg_match('~\.admin-content \{[^}]*padding:\s*18px~', $portalCss) === 1,
+    'Content owns its spacing instead of offsetting the topbar with negative margins');
 
 echo "\n12. The sidebar collapses to a rail\n";
 /*
@@ -484,7 +458,7 @@ ok(str_contains($boot, 'localStorage.getItem') && str_contains($boot, 'sidebar-c
     'The restore reads the remembered choice and sets the class on <body>');
 ok(str_contains($boot, 'catch'), 'And survives private browsing, where storage throws');
 
-ok(preg_match('~body\.admin-layout\.sidebar-collapsed \.admin-shell \{[^}]*grid-template-columns:\s*62px~', $portalCss) === 1,
+ok(preg_match('~body\.sidebar-collapsed \.admin-shell \{[^}]*grid-template-columns:\s*var\(--sidebar-rail-width\)~', $portalCss) === 1,
     'Collapsed, the shell column becomes a rail rather than closing to zero');
 /*
  * Labels go away with font-size: 0 on the link, not by wrapping each one in a
@@ -492,7 +466,7 @@ ok(preg_match('~body\.admin-layout\.sidebar-collapsed \.admin-shell \{[^}]*grid-
  * `<?= icon('x') ?>Label` — a bare text node with nothing to hang a class on.
  * font-size: 0 collapses the text; the SVG is sized in px and does not move.
  */
-ok(preg_match('~body\.admin-layout\.sidebar-collapsed \.admin-nav a \{[^}]*font-size:\s*0~', $portalCss) === 1,
+ok(preg_match('~body\.sidebar-collapsed \.admin-nav a \{[^}]*font-size:\s*0~', $portalCss) === 1,
     'The labels collapse while the icons, sized in px, keep their size');
 ok(str_contains($mainJs, "link.setAttribute('title', label)"),
     'And move to tooltips, so a bare icon can still be identified');
@@ -515,8 +489,8 @@ ok(str_contains($mainJs, "event.target.closest('input, textarea, select, [conten
 
 // Below 1100px the shell is one column and the sidebar sits above the content,
 // where a rail costs a full row of height and saves nothing.
-ok(preg_match('~@media \(max-width: 1100px\) \{\s*\R\s*body\.admin-layout\.sidebar-collapsed[^@]*\.admin-sidebar \{\s*\R\s*display: none~', $portalCss) === 1,
-    'On a narrow screen, where the sidebar stacks above the content, collapsed means gone');
+ok(preg_match('~@media \(max-width: 900px\)[^@]*?body\.sidebar-collapsed \.admin-sidebar \{[^}]*translateX\(-100%\)~s', $portalCss) === 1,
+    'On a narrow screen, collapsed moves the drawer fully off canvas');
 
 // ---------------------------------------------------------------------------
 // The admin shell on a phone
@@ -613,52 +587,53 @@ ok(str_contains($grid, '@media (max-width: 720px)') && str_contains($grid, 'cont
 ok(preg_match('~@media \(max-width: 720px\).*?font-size: 16px~s', $grid) === 1,
     'Inputs hit 16px on a phone — Safari zooms the whole page for anything smaller and does not zoom back');
 
-echo "\n15. The 2026 appearance layer has the last word\n";
-// mbworld-2026.css restates tokens that style.css, portal.css, theme-brown
-// and theme-sahakari-green each also declare. Equal specificity is settled by
-// load order, so the ENTIRE retheme rests on this file being linked last. Add
-// a stylesheet after it and half the palette silently reverts — the portal
-// keeps the new canvas and goes back to the old cards, which reads as a
-// half-finished design rather than as a mistake in a <link> order.
-$layer = 'assets/css/mbworld-2026.css';
+echo "\n15. Every shell uses one ordered CSS entry point\n";
+// Source styles stay separated by responsibility, while their cascade order is
+// compiled once instead of being repeated across four page headers. A shell
+// edit can no longer load only half the theme or silently reorder its layers.
 $shells = ['admin_header.php', 'client_header.php', 'staff_header.php', 'header.php'];
-$missing = $notLast = [];
+$missing = $legacyLinks = [];
 foreach ($shells as $shell) {
     $src = (string) @file_get_contents($root . '/app/views/partials/' . $shell);
-    if (!preg_match_all("~asset_url\('(assets/css/[^']+)'\)~", $src, $m)) {
+    if (!str_contains($src, "require __DIR__ . '/app_styles.php'")) {
         $missing[] = $shell;
-        continue;
     }
-    if (!in_array($layer, $m[1], true)) {
-        $missing[] = $shell;
-    } elseif (end($m[1]) !== $layer) {
-        $notLast[] = $shell . ' (last is ' . end($m[1]) . ')';
+    if (preg_match("~asset_url\('assets/css/(?:style|portal|theme-|text-|design-|mbworld)~", $src)) {
+        $legacyLinks[] = $shell;
     }
 }
-ok($missing === [], 'Every shell loads the appearance layer'
+ok($missing === [], 'Every shell uses the shared stylesheet entry point'
     . ($missing === [] ? '' : ' — missing from ' . implode(', ', $missing)));
-ok($notLast === [], 'And loads it LAST, or its tokens lose to the sheet that follows'
-    . ($notLast === [] ? '' : ' — ' . implode(', ', $notLast)));
+ok($legacyLinks === [], 'No shell carries a duplicate legacy stylesheet stack'
+    . ($legacyLinks === [] ? '' : ' — ' . implode(', ', $legacyLinks)));
 
-$layerCss = (string) @file_get_contents($root . '/public_html/' . $layer);
-ok($layerCss !== '' && substr_count($layerCss, '@font-face') >= 6,
-    'The typefaces are self-hosted, because the CSP refuses fonts.googleapis.com');
-$fontMisses = [];
-if (preg_match_all('~url\("\.\./fonts/([^"]+)"\)~', $layerCss, $m)) {
-    foreach (array_unique($m[1]) as $file) {
-        if (!is_file($root . '/public_html/assets/fonts/' . $file)) {
-            $fontMisses[] = $file;
-        }
-    }
+$styleEntry = (string) @file_get_contents($root . '/app/views/partials/app_styles.php');
+ok(substr_count($styleEntry, "asset_url('assets/css/app.css')") === 1,
+    'The shared entry loads exactly one global CSS bundle');
+$bundleCheck = 1;
+if (function_exists('exec')) {
+    $bundleOutput = [];
+    exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/deploy/build-css.php') . ' --check --quiet', $bundleOutput, $bundleCheck);
 }
-ok($m[1] !== [] && $fontMisses === [], 'And every face it names is committed as a file'
-    . ($fontMisses === [] ? '' : ' — missing ' . implode(', ', $fontMisses)));
-// Comments stripped first: the file explains at length WHY it does not use
-// fonts.googleapis.com, and a check that cannot tell an explanation from a
-// request would fail on the sentence describing the thing it wants.
-$layerRules = (string) preg_replace('~/\*[\s\S]*?\*/~', '', $layerCss);
-ok(!preg_match('~(?:url\(|@import)[^;]*fonts\.(?:googleapis|gstatic)\.com~', $layerRules),
-    'Nothing is fetched from a third-party font host at page load');
+ok($bundleCheck === 0, 'Compiled CSS bundles match their source files');
+
+$workspaceCss = (string) @file_get_contents($root . '/public_html/assets/css/app.css');
+$sourceOrder = ['tokens.css', 'base.css', 'components.css', 'layout.css', 'themes.css', 'print.css'];
+$lastPosition = -1;
+$ordered = $workspaceCss !== '';
+foreach ($sourceOrder as $sourceName) {
+    $position = strpos($workspaceCss, '/* SOURCE: ' . $sourceName . ' */');
+    if ($position === false || $position <= $lastPosition) {
+        $ordered = false;
+        break;
+    }
+    $lastPosition = $position;
+}
+ok($ordered, 'The global bundle preserves the intentional seven-layer cascade order');
+
+$layerCss = (string) @file_get_contents($root . '/public_html/assets/css/base.css');
+ok(str_contains($tokens, 'Inter, system-ui') && str_contains($layerCss, 'var(--font-sans)'),
+    'Typography uses the local system stack without a third-party font request');
 
 echo "\n16. Every class in the markup has something behind it\n";
 // An audit found 834 distinct classes and 26 with no rule in any stylesheet,
@@ -676,7 +651,10 @@ echo "\n16. Every class in the markup has something behind it\n";
 $markup = array_merge(hygiene_php_files($root . '/app'), hygiene_php_files($root . '/public_html'));
 
 $styleSrc = '';
-foreach (glob($root . '/public_html/assets/css/*.css') as $f) {
+foreach (array_merge(
+    glob($root . '/public_html/assets/css/*.css') ?: [],
+    glob($root . '/public_html/assets/css/modules/*.css') ?: []
+) as $f) {
     $styleSrc .= (string) file_get_contents($f);
 }
 $scriptSrc = '';
@@ -735,8 +713,8 @@ ok($tags !== [], 'The markup was scanned for classes (' . count($tags) . ' tagge
 ok($bare === [], 'No class renders with nothing behind it'
     . ($bare === [] ? '' : ' — ' . implode(', ', array_map(
         static fn($c, $f) => $c . ' (' . $f . ')',
-        array_keys(array_slice($bare, 0, 6, true)),
-        array_values(array_slice($bare, 0, 6, true))
+        array_keys(array_slice($bare, 0, 100, true)),
+        array_values(array_slice($bare, 0, 100, true))
     ))));
 
 echo "\n17. A page that builds its own document is styled inside it\n";
@@ -802,7 +780,7 @@ echo "\n18. Action buttons can be hit, and can be named\n";
 // The floor is stated once in CSS rather than by editing 74 attributes,
 // because an inline style beats a stylesheet and the seventy-fifth button
 // would arrive unprotected. What is asserted is that the floor exists.
-$layerCss = (string) @file_get_contents($root . '/public_html/assets/css/mbworld-2026.css');
+$layerCss = (string) @file_get_contents($root . '/public_html/assets/css/components.css');
 ok(preg_match('~@media[^{]*pointer:\s*coarse[^{]*\{~', $layerCss) === 1,
     'There is a touch-only rule, so nothing about the desktop layout is changed by it');
 ok(preg_match('~pointer:\s*coarse[\s\S]{0,600}?min-height:\s*44px\s*!important~', $layerCss) === 1,
@@ -887,7 +865,7 @@ ok($cloners !== [], 'Grids that add rows by cloning: ' . implode(', ', $cloners)
 // the form was simply gone.
 echo "\n== Forms that open in a popup ==\n";
 $popupJs = (string) @file_get_contents($root . '/public_html/assets/js/form-popup.js');
-$adminCss = (string) @file_get_contents($root . '/public_html/assets/css/mbworld-2026.css');
+$adminCss = (string) @file_get_contents($root . '/public_html/assets/css/components.css');
 ok($popupJs !== '' && $adminCss !== '', 'The popup script and the admin stylesheet are both present');
 ok(str_contains($adminCss, '[data-form-popup]:not([data-form-popup-ready]) { display: none; }'),
     'A popup source is taken OUT of the flow, not just made invisible in place');

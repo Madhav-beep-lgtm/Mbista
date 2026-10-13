@@ -72,7 +72,7 @@ Chart data is injected from PHP arrays via `json_encode()` into an inline script
 
 ## Styling Layer
 
-Analytics styling lives in `public_html/assets/css/style.css`.
+Analytics styling lives in the shared `public_html/assets/css/components.css` source and is compiled into `public_html/assets/css/app.css`.
 
 Primary classes:
 
@@ -89,7 +89,7 @@ Dark mode variants:
 
 Responsive behavior:
 
-- Under `@media (max-width: 980px)`, grid collapses to one column.
+- At the shared responsive breakpoints, the grid collapses for narrow screens.
 - Chart canvas height is reduced for smaller screens.
 
 ## Safe Extension Checklist
@@ -113,4 +113,4 @@ Run these checks after dashboard changes:
 
 Use editor diagnostics for CSS:
 
-- `public_html/assets/css/style.css` should show no errors.
+- `public_html/assets/css/app.css` should match the generated source bundle and show no errors.

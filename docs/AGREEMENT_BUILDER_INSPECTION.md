@@ -5,10 +5,11 @@ onto Work Portal → Contracts → Service Agreements.
 
 ## 1. Working Procedures / Sahakari ERP source
 
-**Not present in this repository or workspace.** The only "sahakari" artefact is
-`public_html/assets/css/theme-sahakari-green.css` (a colour theme). Per the
-specification's fallback rule, the drafting method is reconstructed from the
-specification, following MBCA's own architecture throughout.
+**Not present in this repository or workspace.** At the time of the original
+inspection, the only "sahakari" artefact was a legacy colour theme. That theme
+has since been retired in favour of the shared token-driven blue design system.
+The drafting method remains reconstructed from the specification, following
+MBCA's own architecture throughout.
 
 ## 2. Existing related files
 
