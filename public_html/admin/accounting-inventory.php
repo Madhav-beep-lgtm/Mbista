@@ -1,6 +1,16 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+require_once __DIR__ . '/../../app/inventory_pages.php';
+if (defined('INVENTORY_PAGE')) {
+    $inventoryPage = inventory_pages()[INVENTORY_PAGE];
+    $_GET['view'] = $inventoryPage['view'];
+    $_GET['task'] = INVENTORY_PAGE;
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $_POST['view'] = $inventoryPage['view'];
+        $_POST['task'] = INVENTORY_PAGE;
+    }
+}
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/manufacturing_engine.php';
 // The item master is shared with the Jewellery module, so this page has to be
@@ -36,6 +46,10 @@ $fiscalYearId = (int) ($fiscalYear['id'] ?? 0);
 $userId = (int) ($currentUser['id'] ?? 0);
 $inventoryBusinessType = company_accounting_business_type($companyId);
 $inventoryProfile = accounting_business_profile($inventoryBusinessType);
+if (defined('INVENTORY_PAGE') && $inventoryPage['view'] === 'manufacturing' && empty($inventoryProfile['show_manufacturing'])) {
+    flash('error', 'Manufacturing is not enabled for this company.');
+    redirect('admin/items.php');
+}
 
 if (!($inventoryProfile['show_inventory'] ?? false)) {
     flash('error', 'Inventory and manufacturing tools are available only for trading and manufacturing companies.');
@@ -57,6 +71,10 @@ $itemTypes = $inventoryProfile['show_manufacturing']
  */
 function inv_back_url(string $extra = ''): string
 {
+    if (defined('INVENTORY_PAGE')) {
+        return 'admin/' . inventory_pages()[INVENTORY_PAGE]['file']
+            . ($extra === '' ? '' : (str_starts_with($extra, '#') ? $extra : '?' . ltrim($extra, '&?')));
+    }
     if (defined('ITEMS_WORKSPACE')) {
         return 'admin/items.php';
     }
@@ -263,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 : 'Back on the PERPETUAL system. New purchases will debit Inventory and each sale will post'
                     . ' its own cost of sales.');
         }
-        redirect('admin/accounting-inventory.php?view=valuation#inventory-method');
+        redirect('admin/inventory-valuation.php#inventory-method');
     }
 
     if ($action === 'purge_sample_inventory') {
@@ -1896,15 +1914,32 @@ $items = $itemStmt->fetchAll();
 // Discard retry data from the retired purchase grid without changing saved records.
 unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_bills'], $_SESSION['inv_purchase_grid_errors']);
 
+$pageMovementTypes = defined('INVENTORY_PAGE') ? (match (INVENTORY_PAGE) {
+    'opening' => ['opening'],
+    'sale' => ['sale', 'sales_return'],
+    'adjust' => ['adjustment', 'write_off', 'damage', 'expiry'],
+    'transfer' => ['warehouse_transfer', 'departmental_transfer'],
+    default => [],
+}) : null;
+$movementParams = ['company_id' => $companyId];
+$movementFilter = '';
+if ($pageMovementTypes !== null) {
+    $placeholders = [];
+    foreach ($pageMovementTypes as $index => $type) {
+        $placeholders[] = ':movement_type_' . $index;
+        $movementParams['movement_type_' . $index] = $type;
+    }
+    $movementFilter = $placeholders === [] ? ' AND 1 = 0' : ' AND t.transaction_type IN (' . implode(',', $placeholders) . ')';
+}
 $movementStmt = db()->prepare('
     SELECT t.*, i.sku, i.name AS item_name, i.unit
     FROM inventory_transactions t
     INNER JOIN inventory_items i ON i.id = t.item_id
-    WHERE t.company_id = :company_id
+    WHERE t.company_id = :company_id' . $movementFilter . '
     ORDER BY t.transaction_date DESC, t.id DESC
     LIMIT 80
 ');
-$movementStmt->execute(['company_id' => $companyId]);
+$movementStmt->execute($movementParams);
 $movements = $movementStmt->fetchAll();
 
 $orderStmt = db()->prepare('
@@ -2223,15 +2258,11 @@ if (($_GET['export'] ?? '') !== '' && $invShows('item-stock-summary')) {
         ] + ($exportFilters === [] ? ['Filter' => 'All items'] : $exportFilters));
 }
 
+if (defined('INVENTORY_PAGE')) $pageTitle = $inventoryPage['title'];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<nav class="mbw-tabbar inventory-module-tabs" aria-label="Inventory modules">
-    <a class="mbw-tab <?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?> Inventory</a>
-    <?php if (($inventoryProfile['show_manufacturing'] ?? false)): ?>
-        <a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('services') ?> Manufacturing</a>
-    <?php endif; ?>
-</nav>
 
+<?php if (!defined('INVENTORY_PAGE')): ?>
 <section class="mbw-kpi-grid" aria-label="Inventory overview">
     <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php#item-stock-summary')) ?>" title="Jump to the item stock summary">
         <div>
@@ -2285,17 +2316,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 </section>
 
-<nav class="mbw-tabbar inventory-workspace-tabs" aria-label="Inventory workspace">
-    <a class="mbw-tab <?= $invView === 'inventory' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('cart') ?>Items &amp; Transactions</a>
-    <a class="mbw-tab <?= $invView === 'valuation' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>"><?= icon('reports') ?>Valuation &amp; NRV</a>
-    <?php if ($inventoryProfile['show_manufacturing']): ?><a class="mbw-tab <?= $invView === 'manufacturing' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('layers') ?>Manufacturing</a><?php endif; ?>
-    <a class="mbw-tab" href="<?= e(url('admin/stock-summary-report.php')) ?>" title="Item-wise movement and valuation, wired to the GL ledgers"><?= icon('reports') ?>Stock Summary Report</a>
-</nav>
 <?php
+endif;
 $sampleCountStmt = db()->prepare("SELECT COUNT(*) FROM inventory_items WHERE company_id = :cid AND sku LIKE 'SMP-%'");
 $sampleCountStmt->execute(['cid' => $companyId]);
 $sampleCount = (int) $sampleCountStmt->fetchColumn();
-if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && user_can_do('accounting', 'post')): ?>
+if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && user_can_do('accounting', 'post')): ?>
 <div class="notice" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
     <span><strong><?= $sampleCount ?> sample item(s)</strong> (SMP-…) from the demo seed are mixed into your inventory and its reports.</span>
     <form method="post" style="margin:0" data-confirm="Remove ALL sample inventory data (SMP-… items, their movements, cost layers, stock vouchers, and sample manufacturing orders)? Real data is not touched. This cannot be undone.">
@@ -2489,7 +2515,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
 <section class="mbw-card" data-collapsible aria-label="Inventory workbench">
     <div class="mbw-card-head inventory-workbench-head">
     <div>
-        <h2><?= $invView === 'manufacturing' ? 'Manufacturing Workspace' : 'Inventory Workspace' ?></h2>
+        <h2><?= e(defined('INVENTORY_PAGE') ? $inventoryPage['title'] : ($invView === 'manufacturing' ? 'Manufacturing Workspace' : 'Inventory Workspace')) ?></h2>
     </div>
 </div>
 
@@ -2511,21 +2537,6 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     return $html;
 }; ?>
 
-<nav class="inventory-action-tabs" aria-label="Inventory tasks">
-    <?php
-    // Links, not buttons: each task is its own page, so it can be bookmarked,
-    // opened in a tab, and reached with the back button.
-    $invTaskLabels = $invView === 'inventory'
-        ? ['item' => ['Item Master', 'services'], 'opening' => ['Opening Stock', 'box'], 'warehouses' => ['Warehouses', 'companies'],
-           'purchase' => ['Purchase Stock', 'cart'], 'sale' => ['Sales & Returns', 'invoices'],
-           'adjust' => ['Adjustments', 'settings'], 'transfer' => ['Transfers', 'services']]
-        : ['manufacturing' => ['Production Order', 'settings'], 'bom' => ['Bill of Materials', 'documents']];
-    ?>
-    <?php foreach ($invTaskLabels as $taskKey => [$taskLabel, $taskIcon]): ?>
-        <a class="inventory-action-tab <?= $invTask === $taskKey ? 'is-active' : '' ?>"
-           href="<?= e(url('admin/accounting-inventory.php?view=' . $invView . '&task=' . $taskKey)) ?>"><?= icon($taskIcon) ?><span><?= e($taskLabel) ?></span></a>
-    <?php endforeach; ?>
-</nav>
 <div class="workspace-feature-stack">
     <?php if ($invView === 'inventory'): ?>
     <?php if ($invShows('opening-import')): ?>
@@ -3113,7 +3124,7 @@ $invMoveItemOptions = static function () use ($items): string {
 </section>
 <?php endif; ?>
 
-<?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
+<?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing' && $invTask === 'manufacturing'): ?>
     <?php
     $flowSteps = [
         ['Create Production Order', url('admin/accounting-inventory.php?view=manufacturing#manufacturing'), 'Open the production order form'],
@@ -3290,6 +3301,7 @@ $invMoveItemOptions = static function () use ($items): string {
 </section>
 <?php endif; ?>
 
+<?php if ($pageMovementTypes === null || $pageMovementTypes !== []): ?>
 <section class="mbw-card" data-collapsible>
     <div class="mbw-card-head">
         <h2>Recent Stock Movements</h2>
@@ -3303,7 +3315,7 @@ $invMoveItemOptions = static function () use ($items): string {
             <?php foreach ($movements as $movement): ?>
                 <?php $movementIn = (float) $movement['qty_in'] > 0; ?>
                 <tr>
-                    <td><?= e($movement['transaction_date']) ?></td><td><?= e($movement['sku'] . ' - ' . $movement['item_name']) ?></td>
+                    <td><?= e(app_date($movement['transaction_date'])) ?></td><td><?= e($movement['sku'] . ' - ' . $movement['item_name']) ?></td>
                     <td><span class="mbw-pill <?= $movementIn ? 'tone-blue' : 'tone-gray' ?>"><?= e(str_replace('_', ' ', ucfirst($movement['transaction_type']))) ?><?= $movement['transaction_type'] === 'adjustment' ? ($movementIn ? ' +' : ' −') : '' ?></span>
                         <?php
                         // A MOVEMENT WITH NO VOUCHER NEVER REACHED THE LEDGER.
@@ -3351,7 +3363,8 @@ $invMoveItemOptions = static function () use ($items): string {
 </section>
 
 <?php endif; ?>
-<?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
+<?php endif; ?>
+<?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing' && $invTask === 'manufacturing'): ?>
     <section class="mbw-card" data-collapsible id="manufacturing-orders">
         <div class="mbw-card-head">
             <h2>Manufacturing Orders<?= $openOrderCount > 0 ? ' — ' . $openOrderCount . ' in progress' : '' ?></h2>

@@ -13,6 +13,7 @@ $currentUser = current_user();
 $headerCompany = current_company();
 $headerFiscalYear = current_fiscal_year();
 $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+if (defined('INVENTORY_PAGE')) $headerScript = 'accounting-inventory.php';
 $headerScript = $headerScript === 'create-account.php' ? 'chart-ledgers.php' : $headerScript;
 $headerTab = (string) ($_GET['tab'] ?? '');
 $headerView = (string) ($_GET['view'] ?? '');
