@@ -117,3 +117,130 @@ function inv_hs_code_error(string $hsCode): ?string
 
     return null;
 }
+
+/**
+ * The company's unit master, smallest-first within each chain.
+ *
+ * @return array<int, array{id:int,name:string,base_unit_id:int,factor:float,active:int}>
+ */
+function inv_units_list(int $companyId, bool $activeOnly = true): array
+{
+    if ($companyId <= 0 || !table_exists('inventory_units')) {
+        return [];
+    }
+    $sql = 'SELECT id, name, base_unit_id, factor, active FROM inventory_units WHERE company_id = :cid';
+    if ($activeOnly) {
+        $sql .= ' AND active = 1';
+    }
+    $sql .= ' ORDER BY COALESCE(base_unit_id, id) ASC, factor ASC, name ASC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute(['cid' => $companyId]);
+
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $out[(int) $row['id']] = [
+            'id' => (int) $row['id'],
+            'name' => (string) $row['name'],
+            'base_unit_id' => (int) ($row['base_unit_id'] ?: $row['id']),
+            'factor' => (float) $row['factor'],
+            'active' => (int) $row['active'],
+        ];
+    }
+
+    return $out;
+}
+
+/** The company's purchase-category master. */
+function inv_categories_list(int $companyId, bool $activeOnly = true): array
+{
+    if ($companyId <= 0 || !table_exists('inventory_categories')) {
+        return [];
+    }
+    $sql = 'SELECT id, name, active FROM inventory_categories WHERE company_id = :cid';
+    if ($activeOnly) {
+        $sql .= ' AND active = 1';
+    }
+    $stmt = db()->prepare($sql . ' ORDER BY name ASC');
+    $stmt->execute(['cid' => $companyId]);
+
+    $out = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $out[(int) $row['id']] = ['id' => (int) $row['id'], 'name' => (string) $row['name'], 'active' => (int) $row['active']];
+    }
+
+    return $out;
+}
+
+/**
+ * The smallest unit of this unit's chain — the one stock is counted in.
+ *
+ * A unit that names no other IS the base of its own chain, so it answers with
+ * itself rather than with nothing; a caller asking "what do I count this in"
+ * always gets a unit back.
+ */
+function inv_unit_base_id(int $companyId, int $unitId): int
+{
+    $units = inv_units_list($companyId, false);
+
+    return $units[$unitId]['base_unit_id'] ?? $unitId;
+}
+
+/**
+ * How many of the chain's smallest unit one of this unit is worth.
+ *
+ * Zero or a negative factor would make a box worth no pieces at all, and every
+ * quantity converted through it would vanish. Treated as one — the unit stands
+ * alone — rather than silently multiplying stock by nothing.
+ */
+function inv_unit_factor(int $companyId, int $unitId): float
+{
+    $units = inv_units_list($companyId, false);
+    $factor = (float) ($units[$unitId]['factor'] ?? 1.0);
+
+    return $factor > 0 ? $factor : 1.0;
+}
+
+/** A quantity in the chosen unit, expressed in the chain's smallest unit. */
+function inv_qty_to_base(int $companyId, int $unitId, float $qty): float
+{
+    return round($qty * inv_unit_factor($companyId, $unitId), 3);
+}
+
+/** A quantity in the chain's smallest unit, expressed in the chosen unit. */
+function inv_qty_from_base(int $companyId, int $unitId, float $baseQty): float
+{
+    return round($baseQty / inv_unit_factor($companyId, $unitId), 3);
+}
+
+/**
+ * Why this unit cannot be chosen for an item of this company, or null.
+ *
+ * The id is checked against the company's own active master rather than
+ * trusted: a posted form carries whatever id it was sent with, and an item
+ * pointed at another company's unit would convert its stock by that company's
+ * factor.
+ */
+function inv_unit_choice_error(int $companyId, int $unitId): ?string
+{
+    if ($unitId <= 0) {
+        return 'A unit is required.';
+    }
+    if (!isset(inv_units_list($companyId, true)[$unitId])) {
+        return 'Choose a unit from the list.';
+    }
+
+    return null;
+}
+
+/** Why this purchase category cannot be chosen, or null. */
+function inv_category_choice_error(int $companyId, int $categoryId): ?string
+{
+    if ($categoryId <= 0) {
+        return 'A purchase category is required.';
+    }
+    if (!isset(inv_categories_list($companyId, true)[$categoryId])) {
+        return 'Choose a purchase category from the list.';
+    }
+
+    return null;
+}

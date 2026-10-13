@@ -3986,5 +3986,69 @@ function accounting_module_repair_database(): array
         }
     });
 
+    $run('Units and purchase categories are chosen from a list (migration 135)', static function (): void {
+        // Free text on a field that groups a report invites a second spelling,
+        // and every misspelling is a report line that does not add up with the
+        // one above it.
+        if (!accounting_repair_table_exists('inventory_units')) {
+            db()->exec("CREATE TABLE `inventory_units` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(40) NOT NULL,
+                `base_unit_id` INT UNSIGNED DEFAULT NULL,
+                `factor` DECIMAL(18,6) NOT NULL DEFAULT 1.000000,
+                `active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_inventory_units_company_name` (`company_id`, `name`),
+                KEY `idx_inventory_units_base` (`base_unit_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        if (!accounting_repair_table_exists('inventory_categories')) {
+            db()->exec("CREATE TABLE `inventory_categories` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+                `company_id` INT UNSIGNED NOT NULL,
+                `name` VARCHAR(120) NOT NULL,
+                `active` TINYINT(1) NOT NULL DEFAULT 1,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (`id`),
+                UNIQUE KEY `uniq_inventory_categories_company_name` (`company_id`, `name`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+        accounting_repair_add_column('inventory_items', 'unit_id',
+            '`unit_id` INT UNSIGNED DEFAULT NULL AFTER `unit`');
+        accounting_repair_add_column('inventory_items', 'category_id',
+            '`category_id` INT UNSIGNED DEFAULT NULL AFTER `category`');
+
+        if (!accounting_repair_column_exists('inventory_items', 'category_id')) {
+            return;
+        }
+
+        // Seed each company's lists from what its items already say, and point
+        // the items at what they were seeded from. Nothing is renamed and
+        // nothing is discarded -- including the typos, because a typo is still
+        // the category 98 items are filed under, and silently merging it into
+        // its neighbour would move stock between report lines. They surface as
+        // entries somebody can rename or deactivate deliberately.
+        //
+        // Idempotent: INSERT IGNORE against the unique key, and the UPDATE
+        // only touches rows whose id is still NULL.
+        db()->exec("INSERT IGNORE INTO inventory_units (company_id, name)
+            SELECT DISTINCT company_id, TRIM(unit) FROM inventory_items
+            WHERE TRIM(COALESCE(unit, '')) <> ''");
+        db()->exec("UPDATE inventory_items i
+            INNER JOIN inventory_units u ON u.company_id = i.company_id AND u.name = TRIM(i.unit)
+            SET i.unit_id = u.id
+            WHERE i.unit_id IS NULL");
+
+        db()->exec("INSERT IGNORE INTO inventory_categories (company_id, name)
+            SELECT DISTINCT company_id, TRIM(category) FROM inventory_items
+            WHERE TRIM(COALESCE(category, '')) <> ''");
+        db()->exec("UPDATE inventory_items i
+            INNER JOIN inventory_categories c ON c.company_id = i.company_id AND c.name = TRIM(i.category)
+            SET i.category_id = c.id
+            WHERE i.category_id IS NULL");
+    });
+
     return $errors;
 }
