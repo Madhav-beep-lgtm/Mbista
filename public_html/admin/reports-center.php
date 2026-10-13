@@ -510,7 +510,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
         <?php if ($reportId === 'ledger-report'): ?>
         <label>Ledger
-            <select name="ledger_id">
+            <select name="ledger_id" class="js-searchable" aria-label="Search ledger by name or code">
                 <option value="0">Default cash ledger</option>
                 <?php foreach ($allLedgers as $ledger): ?>
                     <option value="<?= e((int) $ledger['id']) ?>" <?= $ledgerFilterId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
