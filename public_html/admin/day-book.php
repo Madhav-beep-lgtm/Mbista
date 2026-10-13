@@ -46,16 +46,16 @@ $ledgerListStmt = db()->prepare('SELECT id, code, name FROM ledgers WHERE compan
 $ledgerListStmt->execute(['cid' => $companyId]);
 $allLedgers = $ledgerListStmt->fetchAll();
 
+// Match vouchers first; ledger/memo filters must not reduce their totals.
 $sql = "
     SELECT v.id AS voucher_id, v.voucher_no, v.voucher_type, v.status,
-           v.voucher_date AS entry_date,
-           v.reference_no, v.narration, p.name AS party_name,
-           l.code AS ledger_code, l.name AS ledger_name,
-           ve.entry_type, ve.amount, ve.memo
+           v.voucher_date AS entry_date, v.narration,
+           (SELECT COALESCE(SUM(e.amount), 0) FROM voucher_entries e
+            WHERE e.voucher_id = v.id AND e.entry_type = 'debit') AS debit_total,
+           (SELECT COALESCE(SUM(e.amount), 0) FROM voucher_entries e
+            WHERE e.voucher_id = v.id AND e.entry_type = 'credit') AS credit_total
     FROM vouchers v
-    INNER JOIN voucher_entries ve ON ve.voucher_id = v.id
-    INNER JOIN ledgers l ON l.id = ve.ledger_id
-    LEFT JOIN accounting_parties p ON p.id = v.party_id
+    LEFT JOIN accounting_parties p ON p.id = v.party_id AND p.company_id = v.company_id
     WHERE v.company_id = :cid
       AND v.voucher_date BETWEEN :from_date AND :to_date
 ";
@@ -69,28 +69,38 @@ if ($typeFilter !== '' && in_array($typeFilter, $voucherTypes, true)) {
     $params['vtype'] = $typeFilter;
 }
 if ($ledgerFilter > 0) {
-    $sql .= ' AND ve.ledger_id = :lid';
+    $sql .= ' AND EXISTS (SELECT 1 FROM voucher_entries le WHERE le.voucher_id = v.id AND le.ledger_id = :lid)';
     $params['lid'] = $ledgerFilter;
 }
 if ($searchQuery !== '') {
-    $sql .= ' AND (v.voucher_no LIKE :q1 OR v.reference_no LIKE :q2 OR v.narration LIKE :q3 OR ve.memo LIKE :q4 OR p.name LIKE :q5 OR l.name LIKE :q6)';
+    $sql .= ' AND (v.voucher_no LIKE :q1 OR v.reference_no LIKE :q2 OR v.narration LIKE :q3 OR p.name LIKE :q5 OR EXISTS (SELECT 1 FROM voucher_entries se INNER JOIN ledgers sl ON sl.id = se.ledger_id AND sl.company_id = v.company_id WHERE se.voucher_id = v.id AND (se.memo LIKE :q4 OR sl.name LIKE :q6)))';
     $like = '%' . $searchQuery . '%';
     $params += ['q1' => $like, 'q2' => $like, 'q3' => $like, 'q4' => $like, 'q5' => $like, 'q6' => $like];
 }
-$sql .= ' ORDER BY v.voucher_date DESC, v.id DESC, ve.id ASC LIMIT 1500';
+$sql .= ' ORDER BY v.voucher_date DESC, v.id DESC LIMIT 1500';
 $entriesStmt = db()->prepare($sql);
 $entriesStmt->execute($params);
 $entries = $entriesStmt->fetchAll();
 
 $totalDebit = 0.0;
 $totalCredit = 0.0;
-foreach ($entries as $entry) {
-    if ((string) $entry['entry_type'] === 'debit') {
-        $totalDebit += (float) $entry['amount'];
-    } else {
-        $totalCredit += (float) $entry['amount'];
+$totalAmount = 0.0;
+// Fetch memo fallbacks separately so long memos are not truncated by GROUP_CONCAT.
+$memoStmt = db()->prepare('SELECT memo FROM voucher_entries WHERE voucher_id = :vid ORDER BY id');
+foreach ($entries as &$entry) {
+    $totalDebit += (float) $entry['debit_total'];
+    $totalCredit += (float) $entry['credit_total'];
+    $entry['total'] = max((float) $entry['debit_total'], (float) $entry['credit_total']);
+    $totalAmount += $entry['total'];
+    if (trim((string) $entry['narration']) === '') {
+        $memoStmt->execute(['vid' => (int) $entry['voucher_id']]);
+        $entry['narration'] = implode(' / ', array_unique(array_filter(array_map(
+            static fn ($memo): string => trim((string) $memo),
+            $memoStmt->fetchAll(PDO::FETCH_COLUMN)
+        ), static fn (string $memo): bool => $memo !== '')));
     }
 }
+unset($entry);
 
 $fmtMoney = static fn (float $amount): string => $currency . number_format($amount, 2);
 $pageTitle = 'Day Book';
@@ -100,7 +110,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 
 <section class="mbw-kpi-grid" aria-label="Day book totals">
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Entries shown</span><div class="mbw-kpi-value"><?= e((string) count($entries)) ?></div></div><span class="mbw-chip tone-blue"><?= icon('calendar') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Vouchers shown</span><div class="mbw-kpi-value"><?= e((string) count($entries)) ?></div></div><span class="mbw-chip tone-blue"><?= icon('calendar') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Debits</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalDebit)) ?></div></div><span class="mbw-chip tone-green"><?= icon('trend-up') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Credits</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalCredit)) ?></div></div><span class="mbw-chip tone-red"><?= icon('trend-down') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Dr − Cr</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalDebit - $totalCredit)) ?></div></div><span class="mbw-chip tone-purple"><?= icon('reconcile') ?></span></article>
@@ -134,25 +144,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
     <div style="overflow-x:auto">
     <table class="reference-table">
-        <thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Party</th><th>Ledger</th><th>Narration / Memo</th><th class="is-numeric">Debit</th><th class="is-numeric">Credit</th></tr></thead>
+        <thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Narration / Memo</th><th class="is-numeric">Total</th></tr></thead>
         <tbody>
-            <?php if ($entries === []): ?><tr><td colspan="8">No entries match the current filters.</td></tr><?php endif; ?>
-            <?php $previousVoucherId = 0; ?>
+            <?php if ($entries === []): ?><tr><td colspan="5">No vouchers match the current filters.</td></tr><?php endif; ?>
             <?php foreach ($entries as $entry): ?>
-                <?php $firstOfVoucher = (int) $entry['voucher_id'] !== $previousVoucherId; $previousVoucherId = (int) $entry['voucher_id']; ?>
-                <tr<?= $firstOfVoucher ? ' style="border-top:2px solid var(--mbw-border,#dcebf5)"' : '' ?>>
-                    <td><?= $firstOfVoucher ? e(app_date((string) $entry['entry_date'])) : '' ?></td>
-                    <td><?= $firstOfVoucher ? '<a class="reference-link" data-voucher-preview href="' . e(url('admin/voucher-view.php?id=' . (int) $entry['voucher_id'])) . '">' . e($entry['voucher_no']) . '</a>' : '' ?></td>
-                    <td><?= $firstOfVoucher ? e($entry['voucher_type']) : '' ?></td>
-                    <td><?= $firstOfVoucher ? e($entry['party_name'] ?? '—') : '' ?></td>
-                    <td><?= e($entry['ledger_code'] . ' — ' . $entry['ledger_name']) ?></td>
-                    <td><?= e((string) ($entry['memo'] ?: $entry['narration'] ?: $entry['reference_no'] ?: '')) ?></td>
-                    <td class="is-numeric"><?= (string) $entry['entry_type'] === 'debit' ? e($fmtMoney((float) $entry['amount'])) : '' ?></td>
-                    <td class="is-numeric"><?= (string) $entry['entry_type'] === 'credit' ? e($fmtMoney((float) $entry['amount'])) : '' ?></td>
+                <tr>
+                    <td><?= e(app_date((string) $entry['entry_date'])) ?></td>
+                    <td><a class="reference-link" data-voucher-preview href="<?= e(url('admin/voucher-view.php?id=' . (int) $entry['voucher_id'])) ?>"><?= e($entry['voucher_no']) ?></a></td>
+                    <td><?= e($entry['voucher_type']) ?></td>
+                    <td><?= e((string) $entry['narration']) ?></td>
+                    <td class="is-numeric"><?= e($fmtMoney((float) $entry['total'])) ?></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>
-        <tfoot><tr><td colspan="6"><strong>Totals</strong></td><td class="is-numeric"><strong><?= e($fmtMoney($totalDebit)) ?></strong></td><td class="is-numeric"><strong><?= e($fmtMoney($totalCredit)) ?></strong></td></tr></tfoot>
+        <tfoot><tr><td colspan="4"><strong>Total</strong></td><td class="is-numeric"><strong><?= e($fmtMoney($totalAmount)) ?></strong></td></tr></tfoot>
     </table>
     </div>
 </section>
