@@ -10,6 +10,9 @@ $company = current_company();
 $fiscalYear = current_fiscal_year();
 $companyId = (int) ($company['id'] ?? 0);
 $companyCode = (string) ($company['code'] ?? '');
+if ((int) ($company['is_client_company'] ?? 0) === 1) {
+    redirect('admin/accounting-dashboard.php');
+}
 $mbistaCompany = company_by_code('MBAACA');
 $altioraCompany = company_by_code('AGHPL');
 $isMbistaSuperadminPortal = $companyCode === 'MBAACA';

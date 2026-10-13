@@ -55,6 +55,11 @@ $ok(str_contains($platformWork, "define('PLATFORM_WORK_PAGE', true)")
 $ok(str_contains($platformInsights, "define('PLATFORM_INSIGHTS_PAGE', true)")
     && str_contains($helpers, "'platform/insights.php' . substr"),
     'Website Insights links and redirects retain the platform URL');
+$ok(str_contains($header, 'user_is_super_admin() && !$headerIsClientBooks')
+    && str_contains($header, 'if (!$headerIsClientBooks):')
+    && str_contains($header, "<?= icon('accounting') ?>Accounting")
+    && !str_contains($header, "<?= icon('accounting') ?>Client Accounting"),
+    'Client books render as an independent company shell');
 
 echo PHP_EOL . ($failures === 0 ? 'PASS' : 'FAIL') . ": platform navigation\n";
 exit($failures === 0 ? 0 : 1);

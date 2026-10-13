@@ -16,6 +16,7 @@ $headerView = (string) ($_GET['view'] ?? '');
 $headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php', 'day-book.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php', 'opening-balances.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
+$headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
 $headerBusinessType = company_accounting_business_type($headerCompanyId);
 $headerBusinessProfile = accounting_business_profile($headerBusinessType);
 $headerAltioraCompany = $headerCompanyCode === 'MBAACA' ? company_by_code('AGHPL') : null;
@@ -92,7 +93,7 @@ $headerPageIcons = [
 $headerPayrollScripts = ['payroll.php', 'payroll-employees.php', 'payroll-settings.php', 'payroll-overtime.php', 'payroll-service-charge.php'];
 $headerPayrollActive = in_array($headerScript, $headerPayrollScripts, true);
 if ($pageBreadcrumb === null) {
-    $headerTrailHome = [['Home', 'admin/index.php']];
+    $headerTrailHome = [['Home', $headerIsClientBooks ? 'admin/accounting-dashboard.php' : 'admin/index.php']];
     $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
     $headerTrailAccounting = [['Home', 'admin/index.php'], ['Accounting', 'admin/accounting-dashboard.php']];
     $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'opening-balances.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'payment-gateways.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
@@ -109,7 +110,6 @@ if ($pageBreadcrumb === null) {
 
 // Client-books awareness: when the portal IS a client books space, the
 // Accounting Workspace points back home and the client submenu takes over.
-$headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
 // Hospitality Accounting appears ONLY inside a client's books, only when the
 // Super Admin activated it for that client, and only with the view permission.
 // It can never appear in the firm's own workspaces (they are not client books).
@@ -290,12 +290,21 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
 <div class="admin-shell">
     <aside class="admin-sidebar" id="adminSidebar">
         <a class="brand brand-admin" href="<?= e(url(!empty($platformShell) ? 'platform/index.php' : 'admin/accounting-dashboard.php')) ?>">
-            <?= brand_logo('dark', 'mbw-logo mbw-logo-sidebar') ?>
+            <?php if ($headerIsClientBooks): ?>
+                <?php if (!empty($headerCompany['logo_path'])): ?>
+                    <img class="company-shell-logo" src="<?= e(url((string) $headerCompany['logo_path'])) ?>" alt="<?= e($headerCompany['name'] ?? 'Company') ?> logo">
+                <?php else: ?>
+                    <span class="company-shell-mark" aria-hidden="true"><?= e(mb_strtoupper(mb_substr((string) ($headerCompany['name'] ?? 'C'), 0, 1))) ?></span>
+                <?php endif; ?>
+                <span class="company-shell-name"><?= e($headerCompany['name'] ?? 'Company') ?></span>
+            <?php else: ?>
+                <?= brand_logo('dark', 'mbw-logo mbw-logo-sidebar') ?>
+            <?php endif; ?>
         </a>
         <?php // The platform is above any one company, so naming a "current
               // portal" there is wrong twice over: it is not where you are, and
               // it is whichever books happened to be open last. ?>
-        <?php if ($headerCompany && empty($platformShell)): ?>
+        <?php if ($headerCompany && empty($platformShell) && !$headerIsClientBooks): ?>
             <div class="admin-sidebar-context">
                 <?php if (!empty($headerCompany['logo_path'])): ?>
                     <img class="admin-portal-logo" src="<?= e(url((string) $headerCompany['logo_path'])) ?>" alt="<?= e($headerCompany['name'] ?? 'Company') ?> logo" loading="lazy">
@@ -374,7 +383,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php else: ?>
-            <?php if (user_is_super_admin()): ?>
+            <?php if (user_is_super_admin() && !$headerIsClientBooks): ?>
                 <a class="admin-nav-priority" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>All companies</a>
             <?php endif; ?>
             <?php if ($headerCompanyCode === 'MBAACA'): ?>
@@ -383,7 +392,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <a class="<?= $headerScript === 'consolidated-report.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/consolidated-report.php')) ?>"><?= icon('layers') ?>Consolidated Report</a>
                 <?php endif; ?>
             <?php endif; ?>
-            <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
+            <?php if (!$headerIsClientBooks): ?>
+                <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
+            <?php endif; ?>
 
             <span class="admin-nav-group">Accounting</span>
             <?php if ($headerIsClientBooks): ?>
@@ -421,7 +432,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 ?>
                 <div class="mbw-nav-parent<?= $headerClientAccountingOpen ? ' is-open' : '' ?>" data-nav-parent="client-accounting">
                     <a href="#" data-nav-toggle aria-expanded="<?= $headerClientAccountingOpen ? 'true' : 'false' ?>">
-                        <?= icon('accounting') ?>Client Accounting
+                        <?= icon('accounting') ?>Accounting
                         <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
                     </a>
                     <div class="mbw-subnav">
@@ -440,7 +451,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
 
             <span class="admin-nav-group">Operations</span>
-            <a class="<?= in_array($headerScript, ['service-agreements.php', 'export-agreement.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><?= icon('handshake') ?>Contracts &amp; Agreements</a>
+            <?php if (!$headerIsClientBooks): ?>
+                <a class="<?= in_array($headerScript, ['service-agreements.php', 'export-agreement.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><?= icon('handshake') ?>Contracts &amp; Agreements</a>
+            <?php endif; ?>
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
             <a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a>

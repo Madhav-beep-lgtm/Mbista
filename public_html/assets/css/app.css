@@ -845,6 +845,9 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .admin-sidebar { position: sticky; top: 0; z-index: 70; display: flex; height: 100vh; min-width: 0; padding: 14px 10px; overflow: hidden auto; flex-direction: column; border-right: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
 .brand-admin { display: flex; min-height: 66px; padding: 5px 8px 14px; align-items: center; border-bottom: 1px solid var(--color-border); }
 .brand-admin img, .mbw-logo-sidebar { display: block; width: 174px; max-width: 100%; height: auto; max-height: 42px; object-fit: contain; object-position: left center; }
+.company-shell-logo { width: 42px !important; height: 42px !important; flex: 0 0 42px; border-radius: 8px; object-fit: contain !important; }
+.company-shell-mark { display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; border: 1px solid var(--color-primary); border-radius: 8px; color: var(--color-primary); font-size: 17px; font-weight: 700; }
+.company-shell-name { min-width: 0; color: var(--color-text); font-size: 14px; font-weight: 700; line-height: 1.25; }
 .admin-portal-logo { display: block; max-width: 100%; max-height: 38px; margin-bottom: 7px; object-fit: contain; object-position: left center; }
 .brand-admin-sub { display: block; color: var(--color-text-muted); font-size: 10px; }
 .admin-sidebar-context, .admin-portal-card { margin: 12px 4px; padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-muted); }
