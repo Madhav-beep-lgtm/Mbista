@@ -9,6 +9,15 @@ if ($companyId <= 0) {
     redirect('portal.php');
 }
 
+// Where to go once the PIN is accepted. Only an internal path of this
+// application is honoured: a return address taken from the query string is
+// an open redirect waiting to happen, and this one is handed out on a page
+// whose whole job is proving who you are.
+$pinReturn = trim((string) ($_REQUEST['return'] ?? ''));
+if ($pinReturn !== '' && preg_match('~^(platform|admin)/[A-Za-z0-9._/-]+[.]php([?][A-Za-z0-9._=&%-]*)?$~', $pinReturn) !== 1) {
+    $pinReturn = '';
+}
+
 $company = company_by_id($companyId);
 if (!$company || (int) ($company['is_active'] ?? 0) !== 1) {
     flash('error', 'Selected company is not available.');
@@ -56,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     flash('success', 'Company portal unlocked.');
-    redirect('admin/index.php');
+    redirect($pinReturn !== '' ? $pinReturn : 'admin/index.php');
 }
 
 $pageTitle = 'Company PIN';
@@ -70,6 +79,7 @@ include __DIR__ . '/../../app/views/partials/header.php';
             <h2><?= e($company['name']) ?></h2>
             <p>Enter the 4-digit admin PIN to open this management portal.</p>
             <form method="post">
+                <input type="hidden" name="return" value="<?= e($pinReturn) ?>">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <label>4-digit PIN<input type="password" name="pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" required autofocus></label>
                 <button type="submit"><?= icon('login') ?>Unlock portal</button>

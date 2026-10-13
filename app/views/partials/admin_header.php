@@ -299,7 +299,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 default => 'Admin Portal',
             }) ?></span>
         </a>
-        <?php if ($headerCompany): ?>
+        <?php // The platform is above any one company, so naming a "current
+              // portal" there is wrong twice over: it is not where you are, and
+              // it is whichever books happened to be open last. ?>
+        <?php if ($headerCompany && empty($platformShell)): ?>
             <div class="admin-sidebar-context">
                 <?php if (!empty($headerCompany['logo_path'])): ?>
                     <img class="admin-portal-logo" src="<?= e(url((string) $headerCompany['logo_path'])) ?>" alt="<?= e($headerCompany['name'] ?? 'Company') ?> logo" loading="lazy">
@@ -319,12 +322,19 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             // application, and a menu entry that opens nothing reads as a
             // feature that has been built.
             ?>
+            <?php
+            // Every one of these is a /platform/ URL. They used to point at
+            // admin/*.php, which renders the COMPANY shell -- so one click left
+            // the platform, and the sidebar came back as whichever client's
+            // books were open last.
+            ?>
             <span class="admin-nav-group">Platform</span>
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>Companies</a>
             <a class="<?= $headerScript === 'staff.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/staff.php')) ?>"><?= icon('users') ?>Staff</a>
+            <a class="<?= $headerScript === 'work.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/work.php')) ?>"><?= icon('tasks') ?>Work Portal</a>
             <span class="admin-nav-group">System</span>
-            <a href="<?= e(url('admin/report-schedules.php')) ?>"><?= icon('calendar') ?>Report Emails</a>
-            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
+            <a class="<?= $headerScript === 'report-emails.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/report-emails.php')) ?>"><?= icon('calendar') ?>Report Emails</a>
+            <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Sign out</a>
             <?php elseif ($headerIsCustomer): ?>
             <?php // Client login: books-only navigation — no admin surfaces. ?>
