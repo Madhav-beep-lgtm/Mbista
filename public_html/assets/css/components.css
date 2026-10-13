@@ -311,7 +311,7 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .auth2-row { justify-content: space-between; }
 .auth2-foot { grid-column: 1 / -1; display: flex; min-height: 58px; padding: 12px clamp(20px, 5vw, 72px); align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); border-top: 1px solid var(--color-border); background: var(--color-surface); font-size: var(--font-size-xs); }
 .auth2-foot > span:first-child { display: none; }
-.rc-group-head { background: var(--color-surface-muted); font-weight: 700; }
+.rc-group-head { background: var(--color-primary-soft); font-weight: 700; }
 .rpt-note-body { color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .rpt-foot-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); }
 

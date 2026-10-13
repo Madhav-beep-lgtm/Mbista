@@ -739,7 +739,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 'columns' => [
                     ['Code', 'left', ''], ['Particulars', 'left', ''],
                     ['Dr.', 'right', 'Opening Balance'], ['Cr.', 'right', 'Opening Balance'],
-                    ['Dr.', 'right', 'Period Activity'], ['Cr.', 'right', 'Period Activity'],
+                    ['Dr.', 'right', 'Transactions'], ['Cr.', 'right', 'Transactions'],
                     ['Dr.', 'right', 'Closing Balance'], ['Cr.', 'right', 'Closing Balance'],
                 ],
                 'rows' => $rows,
