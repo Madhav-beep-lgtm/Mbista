@@ -312,7 +312,21 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             </div>
         <?php endif; ?>
         <nav class="admin-nav">
-            <?php if ($headerIsCustomer): ?>
+            <?php if (!empty($platformShell)): ?>
+            <?php
+            // The Platform Admin's own navigation. It carries only screens that
+            // exist: there is no package, licence or billing module in this
+            // application, and a menu entry that opens nothing reads as a
+            // feature that has been built.
+            ?>
+            <span class="admin-nav-group">Platform</span>
+            <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>Companies</a>
+            <a class="<?= $headerScript === 'staff.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/staff.php')) ?>"><?= icon('users') ?>Staff</a>
+            <span class="admin-nav-group">System</span>
+            <a href="<?= e(url('admin/report-schedules.php')) ?>"><?= icon('calendar') ?>Report Emails</a>
+            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
+            <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Sign out</a>
+            <?php elseif ($headerIsCustomer): ?>
             <?php // Client login: books-only navigation — no admin surfaces. ?>
             <span class="admin-nav-group">My Portal</span>
             <a href="<?= e(url('dashboard.php')) ?>"><?= icon('home') ?>Client Portal</a>
@@ -364,14 +378,13 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
 
             <span class="admin-nav-group">Accounting Workspace</span>
             <?php if ($headerIsClientBooks): ?>
-                <?php $headerHomeCompany = company_by_code('MBAACA'); ?>
-                <?php if ($headerHomeCompany): ?>
-                    <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin:0">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                        <input type="hidden" name="company_id" value="<?= (int) $headerHomeCompany['id'] ?>">
-                        <button type="submit" style="all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;min-height:38px;padding:8px 12px;border-radius:8px;color:var(--mbw-sidebar-text);font-size:13.5px;font-weight:500;cursor:pointer;width:100%"><?= icon('login') ?>My Company Accounting</button>
-                    </form>
-                <?php endif; ?>
+                <?php
+                // "My Company Accounting" used to sit here, jumping out of the
+                // client's books and into the firm's own. It is gone: which
+                // books you are in is chosen once, on the Companies list, and a
+                // button that silently changes it from inside a client's ledger
+                // is how somebody posts an entry to the wrong company.
+                ?>
             <?php else: ?>
             <div class="mbw-nav-parent<?= $headerAccountingActive ? ' is-open' : '' ?>" data-nav-parent="accounting">
                 <a href="#" data-nav-toggle aria-expanded="<?= $headerAccountingActive ? 'true' : 'false' ?>">
@@ -388,17 +401,14 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
 
             <span class="admin-nav-group">Manage Clients</span>
             <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('handshake') ?>Client Directory</a>
-            <?php if ($headerClientBooksOptions !== []): ?>
-                <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" style="margin:2px 12px 4px; display:flex; gap:6px">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <label class="sr-only" for="sidebar-client-books">Open client accounting</label>
-                    <select id="sidebar-client-books" name="company_id" style="flex:1;min-height:32px;font-size:12px;border-radius:8px;border:1px solid var(--mbw-sidebar-line);background:rgba(186,230,253,0.10);color:var(--mbw-sidebar-text,#dbeffd);padding:4px 8px" onchange="if(this.value){this.form.submit();}">
-                        <option value="">Select client...</option>
-                        <?php foreach ($headerClientBooksOptions as $headerClientOption): ?>
-                            <option value="<?= (int) $headerClientOption['books_company_id'] ?>" <?= $headerIsClientBooks && (int) $headerClientOption['books_company_id'] === $headerCompanyId ? 'selected' : '' ?>><?= e($headerClientOption['organization_name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </form>
+            <?php if (user_is_super_admin()): ?>
+                <?php
+                // A "Select client..." dropdown used to sit here, switching the
+                // open books on change. It was a second answer to a question
+                // the Companies list already answers, and it answered it from
+                // inside whatever ledger you were reading at the time.
+                ?>
+                <a href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>All companies</a>
             <?php endif; ?>
             <?php if ($headerIsClientBooks): ?>
                 <?php
@@ -650,6 +660,12 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <div>
                         <h2><?= e(is_array($pageHero) && !empty($pageHero['title']) ? $pageHero['title'] : $pageTitle) ?></h2>
                     </div>
+                    <?php // The page's own actions, to the right of its title. Set
+                          // $pageHeadActions to ready-made markup before including
+                          // this partial. ?>
+                    <?php if (!empty($pageHeadActions)): ?>
+                        <div class="page-head-actions"><?= $pageHeadActions ?></div>
+                    <?php endif; ?>
                 </div>
             <?php endif; ?>
             <?php // A backup that silently stopped surfaces HERE, where staff look

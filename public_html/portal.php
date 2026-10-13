@@ -4,6 +4,16 @@ require_once __DIR__ . '/../app/bootstrap.php';
 
 require_admin();
 
+// The Platform Admin chooses from the Companies list now, which says what each
+// company IS and carries the clients under it. Forwarded here rather than
+// rewired at every caller: role_home_path(), the PIN pages and half a dozen
+// redirects all point at this file, and they should all keep working.
+//
+// Every other admin keeps this screen — for them it is still the only way in.
+if (user_is_super_admin()) {
+    redirect('platform/index.php');
+}
+
 if (company_pin_verified(current_company_id()) && current_company()) {
     redirect('admin/index.php');
 }
