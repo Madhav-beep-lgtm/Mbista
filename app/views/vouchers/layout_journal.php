@@ -12,12 +12,6 @@ declare(strict_types=1);
  */
 ?>
 <section class="mbw-card frm-section vch-focus vch-entry-panel">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-blue"><?= icon('journal') ?></span>
-        <h2>Debits and credits</h2>
-        <span class="frm-optional">At least one of each, and the two totals must agree</span>
-    </div>
-
     <div class="vch-grid" data-grid data-min-rows="2" data-prefill="<?= e(json_encode($prefill['journal'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">
@@ -26,11 +20,8 @@ declare(strict_types=1);
                         <th style="width:36px">SN</th>
                         <th style="width:220px">Ledger <em>*</em></th>
                         <th>Description</th>
-                        <th style="width:140px">Cost centre</th>
-                        <th style="width:120px">Tax code</th>
                         <th class="is-numeric" style="width:140px">Debit (<?= e(trim($currency)) ?>)</th>
                         <th class="is-numeric" style="width:140px">Credit (<?= e(trim($currency)) ?>)</th>
-                        <th style="width:130px">Reference</th>
                         <th style="width:40px"></th>
                     </tr>
                 </thead>
@@ -55,22 +46,12 @@ declare(strict_types=1);
                     </select>
                 </td>
                 <td><input type="text" name="memo[]" data-field="memo" maxlength="255" placeholder="What this line is for"></td>
-                <td>
-                    <select name="line_cost_centre[]" data-field="cost_centre">
-                        <option value="">—</option>
-                        <?php foreach ($costCentres as $costCentre): ?><option value="<?= e($costCentre) ?>"><?= e($costCentre) ?></option><?php endforeach; ?>
-                    </select>
-                </td>
-                <td>
-                    <select name="line_tax[]" data-field="tax_code">
-                        <option value="">—</option>
-                        <?php foreach (['VAT 13%', 'Exempt', 'Zero Rated'] as $taxCode): ?><option value="<?= e($taxCode) ?>"><?= e($taxCode) ?></option><?php endforeach; ?>
-                    </select>
-                </td>
                 <td class="is-numeric"><input type="number" data-field="debit" class="frm-num vch-dr" step="0.01" min="0" placeholder="0.00"></td>
                 <td class="is-numeric"><input type="number" data-field="credit" class="frm-num vch-cr" step="0.01" min="0" placeholder="0.00"></td>
-                <td>
-                    <input type="text" name="line_reference[]" data-field="reference" maxlength="120" placeholder="Reference">
+                <td hidden>
+                    <input type="hidden" name="line_reference[]" data-field="reference">
+                    <input type="hidden" name="line_tax[]" data-field="tax_code">
+                    <input type="hidden" name="line_cost_centre[]" data-field="cost_centre">
                     <input type="hidden" name="entry_type[]" data-field="entry_type" value="debit">
                     <input type="hidden" name="amount[]" data-field="amount" value="0">
                 </td>

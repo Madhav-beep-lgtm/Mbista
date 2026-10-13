@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/voucher_types.php';
+require_once __DIR__ . '/../../app/voucher_bills.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -168,6 +169,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $composed = voucher_compose($voucherType, $composeInput, $ledgerDirectory, $isDraft);
     $problems = array_merge($problems, $composed['errors']);
     $entries = $composed['entries'];
+    $billResult = voucher_validate_bill_details($entries, $ledgerDirectory, $_POST['bill_details'] ?? []);
+    $problems = array_merge($problems, $billResult['errors']);
+    if ($billResult['details'] !== [] && !column_exists('vouchers', 'bill_details_json')) {
+        $problems[] = 'Run the deployment database upgrade before saving bill-by-bill vouchers.';
+    }
+    $billDetailsJson = json_encode($billResult['details'], JSON_THROW_ON_ERROR);
 
     // Stock is checked BEFORE anything is written. A voucher whose ledger
     // entries are in the books and whose goods quietly are not is the one
@@ -267,6 +274,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (column_exists('vouchers', 'requires_client_approval')) {
                 $updateSql .= ', requires_client_approval = 0, client_approved_by = NULL, client_approved_at = NULL';
             }
+            if (column_exists('vouchers', 'bill_details_json')) {
+                $updateSql .= ', bill_details_json = :bill_details_json';
+                $updateParams['bill_details_json'] = $billDetailsJson;
+            }
             $updateSql .= ' WHERE id = :id AND company_id = :company_id';
             $updateParams['id'] = $editVoucherId;
             $updateParams['company_id'] = $companyId;
@@ -299,6 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'voucher_no' => $voucherNo,
                         'voucher_type' => $voucherType,
                         'source_type' => 'voucher_form',
+                        'bill_details_json' => $billDetailsJson,
                         'source_id' => null,
                         'party_id' => $partyId > 0 ? $partyId : null,
                         'reference_no' => $referenceNo !== '' ? $referenceNo : null,
@@ -866,18 +878,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </label>
                 <?php endif; ?>
                 <?php if (in_array((string) $spec['layout'], ['journal', 'transfer'], true)): ?>
-                    <label>Reference
-                        <input type="text" name="reference_no" maxlength="120" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
-                    </label>
+                    <input type="hidden" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
                 <?php endif; ?>
-                <label>Cost centre
-                    <select name="cost_centre">
-                        <option value="">Not assigned</option>
-                        <?php foreach ($costCentres as $costCentreOption): ?>
-                            <option value="<?= e($costCentreOption) ?>" <?= (string) ($prefill['cost_centre'] ?? '') === $costCentreOption ? 'selected' : '' ?>><?= e($costCentreOption) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
+                <input type="hidden" name="cost_centre" value="<?= e((string) ($prefill['cost_centre'] ?? '')) ?>">
             </div>
         </section>
 
@@ -906,6 +909,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </form>
 
 <?php include __DIR__ . '/../../app/views/vouchers/grid_script.php'; ?>
+<?php include __DIR__ . '/../../app/views/vouchers/bill_dialog.php'; ?>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     var attach = document.getElementById('frm-attachments');

@@ -27,6 +27,11 @@ function accounting_repair_account_creation_schema(): void
 
 }
 
+function accounting_repair_voucher_bill_schema(): void
+{
+    accounting_repair_add_column('vouchers', 'bill_details_json', '`bill_details_json` MEDIUMTEXT DEFAULT NULL');
+}
+
 function accounting_repair_table_exists(string $tableName): bool
 {
     $stmt = db()->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :db_name AND table_name = :table_name');
@@ -525,6 +530,7 @@ function accounting_module_repair_database(): array
     });
 
     $run('Unified account creation metadata', 'accounting_repair_account_creation_schema');
+    $run('Voucher bill details', 'accounting_repair_voucher_bill_schema');
 
     $run('Create accounting parties', static function (): void {
         db()->exec("

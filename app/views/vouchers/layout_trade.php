@@ -184,7 +184,6 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                         <th>Description</th>
                         <th class="is-numeric" style="width:100px">Qty</th>
                         <th class="is-numeric" style="width:120px">Rate</th>
-                        <th style="width:130px">Cost centre</th>
                         <th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
                     </tr>
@@ -224,12 +223,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                 <td><input type="text" name="value_description[]" data-field="description" maxlength="255" placeholder="Item or service"></td>
                 <td class="is-numeric"><input type="number" name="value_qty[]" data-field="qty" class="frm-num vch-qty" step="0.001" min="0" placeholder="0"></td>
                 <td class="is-numeric"><input type="number" name="value_rate[]" data-field="rate" class="frm-num vch-rate" step="0.01" min="0" placeholder="0.00"></td>
-                <td>
-                    <select name="value_cost_centre[]" data-field="cost_centre">
-                        <option value="">—</option>
-                        <?php foreach ($costCentres as $costCentre): ?><option value="<?= e($costCentre) ?>"><?= e($costCentre) ?></option><?php endforeach; ?>
-                    </select>
-                </td>
+                <td hidden><input type="hidden" name="value_cost_centre[]" data-field="cost_centre"></td>
                 <td class="is-numeric"><input type="number" name="value_amount[]" data-field="amount" class="frm-num vch-value-amount" step="0.01" min="0" placeholder="0.00"></td>
                 <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this line">&#128465;</button></td>
             </tr>

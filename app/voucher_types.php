@@ -297,7 +297,8 @@ function voucher_ledger_directory(int $companyId): array
     if ($companyId <= 0 || !table_exists('ledgers')) {
         return [];
     }
-    $stmt = db()->prepare("SELECT l.id, l.code, l.name, l.group_id, l.bank_name, l.bank_account_no,
+    $billFlag = column_exists('ledgers', 'maintain_bill_by_bill') ? 'l.maintain_bill_by_bill' : '0';
+    $stmt = db()->prepare("SELECT l.id, l.code, l.name, l.group_id, l.bank_name, l.bank_account_no, {$billFlag} AS maintain_bill_by_bill,
             COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank,
             COALESCE(g.master_key, '') AS master_key,
             COALESCE(g.name, '') AS group_name,

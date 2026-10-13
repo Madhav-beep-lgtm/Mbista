@@ -3772,7 +3772,7 @@ function create_voucher_with_entries(array $voucher, array $entries): int
         $extraValues .= ', :reference_no';
         $params['reference_no'] = $voucher['reference_no'] ?? null;
     }
-    foreach (['approval_state', 'submitted_by', 'approved_by', 'approved_at', 'rejection_reason'] as $approvalColumn) {
+    foreach (['approval_state', 'submitted_by', 'approved_by', 'approved_at', 'rejection_reason', 'bill_details_json'] as $approvalColumn) {
         if (column_exists('vouchers', $approvalColumn)) {
             $extraColumns .= ', ' . $approvalColumn;
             $extraValues .= ', :' . $approvalColumn;

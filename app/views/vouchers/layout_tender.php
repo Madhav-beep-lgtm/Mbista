@@ -73,7 +73,6 @@ $isMoneyIn = $bankSide === 'debit';
                         <th style="width:36px">SN</th>
                         <th style="width:220px">Ledger <em>*</em></th>
                         <th>Description</th>
-                        <th style="width:140px">Bill / reference</th>
                         <th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
                     </tr>
@@ -98,7 +97,7 @@ $isMoneyIn = $bankSide === 'debit';
                     </select>
                 </td>
                 <td><input type="text" name="line_memo[]" data-field="memo" maxlength="255" placeholder="What this line is for"></td>
-                <td><input type="text" name="line_reference[]" data-field="reference" maxlength="120" placeholder="Invoice / bill"></td>
+                <td hidden><input type="hidden" name="line_reference[]" data-field="reference"></td>
                 <td class="is-numeric"><input type="number" name="line_amount[]" data-field="amount" class="frm-num vch-amount" step="0.01" min="0" placeholder="0.00"></td>
                 <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this line">&#128465;</button></td>
             </tr>
