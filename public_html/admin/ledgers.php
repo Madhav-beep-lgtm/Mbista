@@ -19,7 +19,7 @@ $currency = site_currency_symbol();
 // Filters. All optional; dates clamp inside the selected fiscal year.
 // ---------------------------------------------------------------------------
 $selectedLedgerId = (int) ($_GET['ledger_id'] ?? 0);
-$searchQuery = trim((string) ($_GET['q'] ?? ''));
+$searchQuery = ''; // Account selection replaces the separate free-text search.
 $typeFilter = (string) ($_GET['type'] ?? '');
 if (!in_array($typeFilter, ['asset', 'liability', 'equity', 'revenue', 'expense'], true)) {
     $typeFilter = '';
@@ -143,6 +143,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 
 <section class="mbw-card">
+    <?php if ($selectedLedger): ?>
     <div class="mbw-card-head">
         <?php if ($selectedLedger): ?><span class="muted"><?= e($selectedLedger['code'] . ' · ' . $selectedLedger['name']) ?></span><?php endif; ?>
         <div class="mbw-card-tools" style="margin-left:auto">
@@ -157,12 +158,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . $selectedLedgerId)) ?>">Edit / Reclassify</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . $selectedLedgerId . '&fy=' . $fiscalYearId)) ?>">Reports Center view</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">All ledgers</a>
-            <?php else: ?>
-                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?><span>PDF</span></a>
-                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?><span>Excel</span></a>
             <?php endif; ?>
         </div>
     </div>
+    <?php endif; ?>
     <form method="get" action="<?= e(url('admin/ledgers.php')) ?>" class="mbw-filter-bar">
         <label class="ledger-filter"><span>Account</span><select name="ledger_id" class="field-compact js-searchable" onchange="this.form.submit()" aria-label="Ledger">
             <option value="0">All ledgers (balances)</option>
@@ -181,9 +180,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label><span>From date</span><input type="date" name="from" value="<?= e($fromDate) ?>" class="field-compact" aria-label="From date"></label>
             <label><span>To date</span><input type="date" name="to" value="<?= e($toDate) ?>" class="field-compact" aria-label="To date"></label>
         <?php endif; ?>
-        <label class="search-filter"><span>Search accounts / entries</span><input type="search" name="q" value="<?= e($searchQuery) ?>" class="field-compact" placeholder="<?= $selectedLedger ? 'Search narration, memo, voucher, party' : 'Search code or name' ?>"></label>
         <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
         <?php if ($searchQuery !== '' || $typeFilter !== ''): ?><a class="button secondary" href="<?= e(url('admin/ledgers.php' . ($selectedLedgerId > 0 ? '?ledger_id=' . $selectedLedgerId : ''))) ?>">Clear</a><?php endif; ?>
+        <?php if (!$selectedLedger): ?>
+        <div class="actions" style="margin-left:auto">
+                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?><span>PDF</span></a>
+                <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?><span>Excel</span></a>
+        </div>
+        <?php endif; ?>
     </form>
 
     <?php if ($selectedLedger): ?>

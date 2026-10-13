@@ -392,21 +392,43 @@ function voucher_series_code(?array $fiscalYear): string
 function voucher_next_number(int $companyId, int $fiscalYearId, string $type, int $attempt = 0): string
 {
     $spec = voucher_type_spec($type);
-    $prefix = (string) $spec['prefix'];
+    $prefix = ['contra' => 'CO', 'payment' => 'PM', 'receipt' => 'RC', 'journal' => 'JV', 'sales' => 'SL', 'purchase' => 'PU', 'debit_note' => 'DN', 'credit_note' => 'CN'][$type] ?? (string) $spec['prefix'];
     $fiscalYear = $fiscalYearId > 0 && function_exists('fiscal_year_by_id') ? fiscal_year_by_id($fiscalYearId) : null;
-    $series = voucher_series_code($fiscalYear);
+    if (!$fiscalYear || (int) ($fiscalYear['company_id'] ?? 0) !== $companyId) {
+        throw new RuntimeException('Select a valid company financial year before numbering a voucher.');
+    }
+    $series = voucher_short_series($fiscalYear, function_exists('date_mode') ? date_mode() : 'ad');
     $stem = $prefix . '/' . $series . '/';
 
     $next = 1;
     if (table_exists('vouchers')) {
         $stmt = db()->prepare("SELECT COALESCE(MAX(CAST(SUBSTRING_INDEX(voucher_no, '/', -1) AS UNSIGNED)), 0)
-            FROM vouchers WHERE company_id = :company_id AND voucher_no LIKE :stem");
-        $stmt->execute(['company_id' => $companyId, 'stem' => $stem . '%']);
+            FROM vouchers WHERE company_id = :company_id AND fiscal_year_id = :fiscal_year_id
+            AND voucher_type = :voucher_type AND voucher_no REGEXP '/[0-9]+$'");
+        $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId, 'voucher_type' => $type]);
         $next = ((int) $stmt->fetchColumn()) + 1;
     }
     $next += max(0, $attempt);
 
-    return $stem . str_pad((string) $next, 4, '0', STR_PAD_LEFT);
+    return $stem . $next;
+}
+
+/** Derive the fiscal-year label from its dates, not its free-text name. */
+function voucher_short_series(array $fiscalYear, string $mode): string
+{
+    $start = (string) ($fiscalYear['start_date'] ?? '');
+    $end = (string) ($fiscalYear['end_date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $start) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $end)) {
+        throw new RuntimeException('Financial year dates are required for voucher numbering.');
+    }
+    if ($mode === 'bs') {
+        require_once __DIR__ . '/nepali_date.php';
+        $startBs = ad_to_bs($start);
+        $endBs = ad_to_bs($end);
+        if (!$startBs || !$endBs) { throw new RuntimeException('Financial year is outside the supported BS calendar.'); }
+        return sprintf('%02d-%02d', $startBs[0] % 100, $endBs[0] % 100);
+    }
+    return substr($start, 2, 2) . '-' . substr($end, 2, 2);
 }
 
 // ---------------------------------------------------------------------------
