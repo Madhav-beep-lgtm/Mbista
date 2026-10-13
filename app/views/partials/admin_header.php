@@ -48,15 +48,6 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
-    // These shared accounting links are identical for admin, staff and client books.
-    ['Inventory & Manufacturing', 'admin/accounting-inventory.php', 'box', $headerScript === 'accounting-inventory.php'],
-    ['Stock Summary', 'admin/stock-summary-report.php', 'reports', in_array($headerScript, ['stock-summary-report.php', 'stock-ledger.php'], true)],
-    // Models / revaluation / categories live on the Fixed Assets page's own
-    // tab bar — the sidebar keeps only the two entry points.
-    ['Fixed Asset Register', 'admin/fixed-assets.php', 'tag',
-        $headerScript === 'fixed-assets.php' && $headerView !== 'leases'],
-    ['Lease', 'admin/fixed-assets.php?view=leases', 'key',
-        $headerScript === 'fixed-assets.php' && $headerView === 'leases'],
 ]);
 $headerAccountingActive = false;
 foreach ($headerAccountingChildren as $headerChild) {
@@ -104,6 +95,12 @@ if ($pageBreadcrumb === null) {
         $pageBreadcrumb = $headerTrailReports;
     } elseif (in_array($headerScript, $headerPayrollScripts, true)) {
         $pageBreadcrumb = [['Home', 'admin/index.php'], ['Payroll', 'admin/payroll.php']];
+    } elseif (in_array($headerScript, ['accounting-inventory.php', 'stock-summary-report.php', 'stock-ledger.php'], true)) {
+        $pageBreadcrumb = array_merge($headerTrailHome, [['Inventory Management', 'admin/accounting-inventory.php']]);
+    } elseif ($headerScript === 'fixed-assets.php') {
+        $pageBreadcrumb = $headerView === 'leases'
+            ? array_merge($headerTrailHome, [['NFRS Compliance', '']])
+            : $headerTrailHome;
     } elseif (in_array($headerScript, $headerAccountingScripts, true)) {
         $pageBreadcrumb = $headerTrailAccounting;
     } elseif ($headerScript !== 'index.php') {
@@ -362,6 +359,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <?php endforeach; ?>
                 </div>
             </div>
+            <?php include __DIR__ . '/books_management_nav.php'; ?>
             <span class="admin-nav-group">Payroll</span>
             <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('card') ?>Payroll Processing</a>
             <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
@@ -447,6 +445,8 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             <?php endif; ?>
 
+            <?php include __DIR__ . '/books_management_nav.php'; ?>
+            <span class="admin-nav-group">Reports</span>
             <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>

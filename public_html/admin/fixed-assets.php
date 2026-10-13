@@ -2257,7 +2257,7 @@ if (($_GET['export'] ?? '') !== '' && $faView === 'register') {
     );
 }
 
-$pageTitle = 'Fixed Assets';
+$pageTitle = (string) ($_GET['view'] ?? '') === 'leases' ? 'Lease' : 'Fixed Asset Management';
 $pageSubtitle = 'Asset register, depreciation, and IFRS accounting integration';
 $bodyClass = 'admin-layout accounting-module-page fixed-assets-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';

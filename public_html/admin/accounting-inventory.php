@@ -23,7 +23,7 @@ require_staff_admin_or_client_books();
 require_company_context();
 
 $repairErrors = accounting_module_repair_database();
-$pageTitle = 'Inventory & Manufacturing';
+$pageTitle = 'Inventory Management';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $currentUser = current_user();

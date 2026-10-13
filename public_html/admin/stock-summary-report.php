@@ -454,7 +454,7 @@ $allItemsStmt = db()->prepare("SELECT id, sku, name FROM inventory_items WHERE c
 $allItemsStmt->execute(['cid' => $companyId]);
 $allItems = $allItemsStmt->fetchAll();
 
-$pageTitle = 'Stock Summary Report';
+$pageTitle = 'Inventory Summary';
 $pageSubtitle = 'Item-wise stock movement and valuation — opening, inward, outward, damage, and closing for the selected period and locations.';
 $pageHero = ['icon' => 'inventory'];
 $bodyClass = 'admin-layout accounting-module-page';
