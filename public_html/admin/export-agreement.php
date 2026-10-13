@@ -208,7 +208,7 @@ function agreement_builder_render(array $sa, array $flat, string $lang, string $
         .draft-mark { text-align: center; color: var(--mbw-red, #b91c1c); font-weight: 700; letter-spacing: 4px; }
         .page-break { page-break-before: always; }
         @media print { body { background: #fff; } .toolbar { display: none; } .sheet { max-width: none; padding: 0; } @page { size: A4; margin: 19mm 16mm; } }
-    </style></head><body>';
+    </style>' . report_print_styles() . '</head><body>';
 
     if ($format !== 'doc') {
         echo '<div class="toolbar"><span>' . e((string) $sa['agreement_no']) . ($versionNo > 0 ? ' · v' . $versionNo : '') . ' · ' . e($statusLabel) . '</span>'
@@ -456,6 +456,7 @@ $docTitle = $showNp ? $titleNp : $titleEn;
         table.grid tr { page-break-inside: avoid; }
     }
 </style>
+<?= report_print_styles() ?>
 </head>
 <body>
 <div class="toolbar">

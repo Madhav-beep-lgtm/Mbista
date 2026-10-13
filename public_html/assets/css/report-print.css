@@ -1,0 +1,16 @@
+/* Shared monochrome export presentation; preserve each report's paper size. */
+html, body { background:#fff !important; color:#000 !important; }
+body * { color:#000 !important; border-color:#000 !important; box-shadow:none !important; text-shadow:none !important; }
+body :is(div,section,header,footer,main,article,aside,p,h1,h2,h3,span,table,thead,tbody,tfoot,tr,th,td,button,a) { background-color:#fff !important; background-image:none !important; }
+body table { width:100%; border-collapse:collapse !important; border:1px solid #000 !important; }
+body table th, body table td { border:1px solid #000 !important; }
+body th, body .total-row, body .rpt-total { font-weight:700; }
+thead { display:table-header-group; }
+tr { break-inside:avoid; }
+button { border:1px solid #000 !important; }
+img, svg, canvas { filter:grayscale(1); }
+@media print {
+    body { background:#fff !important; }
+    .actions, .bar, .print-button, .print-toolbar, .no-print { display:none !important; }
+    a { text-decoration:none; }
+}

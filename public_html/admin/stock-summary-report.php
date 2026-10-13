@@ -383,7 +383,7 @@ if ($export !== '') {
         tr.tot td { font-weight: 700; background: #eef2f9; }
         .neg { color: #b3261e; }
         button { margin-bottom: 8px; padding: 6px 12px; } @media print { button { display: none; } }
-    </style></head><body>';
+    </style>' . report_print_styles() . '</head><body>';
     echo '<button onclick="window.print()">Print / Save as PDF</button>';
     echo '<h1>' . e((string) $company['name']) . ' — Stock Summary Report</h1>';
     echo '<div class="meta">Fiscal year ' . e((string) $fiscalYear['label']) . ' · ' . e($from) . ' to ' . e($to)

@@ -62,6 +62,7 @@ $fmt = static fn (float $n): string => number_format($n, 2);
     .print-button { margin-top: 16px; padding: 10px 18px; background: #16325d; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
     @media print { .print-button { display: none; } body { margin: 8mm; } }
 </style>
+<?= report_print_styles() ?>
 </head>
 <body>
 <div class="ps-head">

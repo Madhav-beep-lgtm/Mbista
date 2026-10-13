@@ -1114,6 +1114,9 @@ body.sidebar-collapsed .admin-nav a .ui-icon { width: 18px; height: 18px; }
 @media print {
   @page { size: A4 landscape; margin: 12mm; }
   body { background: #fff !important; color: #000 !important; font-size: 10pt; }
+  body * { color:#000 !important; border-color:#000 !important; box-shadow:none !important; text-shadow:none !important; }
+  body :is(.card,.mbw-card,.form-card,.panel,header,thead,tbody,tfoot,tr,th,td) { background:#fff !important; }
+  img, svg, canvas { filter:grayscale(1); }
   .utility-bar, .site-header, .site-footer, .admin-sidebar, .admin-topbar,
   .admin-breadcrumb, .actions, .button, button, .no-print, .frm-del,
   .mbw-tabbar, .inventory-action-tabs, .reference-tabs, .filter-card, .filters-card,

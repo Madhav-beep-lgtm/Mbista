@@ -399,7 +399,8 @@ if (isset($_GET['view']) && $_GET['view'] === 'print') {
             .print-button { margin-top: 20px; padding: 10px 18px; background: #16325d; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
             @media print { .print-button { display: none; } body { margin: 8mm; } }
         </style>
-    </head>
+    <?= report_print_styles() ?>
+</head>
     <body>
         <?php // No title bar. The letterhead below prints the statement title
               // already, and a heavy coloured band repeating it is the first thing

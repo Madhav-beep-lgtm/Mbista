@@ -59,6 +59,12 @@ function app_date(?string $adDate, string $adFormat = 'd M Y'): string
     return $ad . ' (' . $bs . ' BS)';
 }
 
+/** Consistent browser preview and PDF-print styling for standalone reports. */
+function report_print_styles(): string
+{
+    return '<link rel="stylesheet" href="' . e(asset_url('assets/css/report-print.css')) . '">';
+}
+
 /** Numeric date matching filter controls; the surrounding heading identifies AD/BS. */
 function app_date_short(?string $adDate): string
 {
@@ -6602,7 +6608,7 @@ function export_invoice_html(array $invoice): string
             .sheet { margin: 0; padding: 8mm 6mm; box-shadow: none; max-width: none; }
             .print-button { display: none; }
         }
-    </style>
+    </style>' . report_print_styles() . '
 </head>
 <body>
     <div class="sheet">
@@ -6856,7 +6862,7 @@ function export_contract_html(array $contract): string
         .signbox { border-top: 1px solid #9ca3af; padding-top: 8px; font-size: 13px; }
         .legal { margin-top: 22px; background: #f9fafb; border: 1px solid #e5e7eb; padding: 12px; }
         @media print { body { background: #fff; } .sheet { margin: 0; border: 0; } }
-    </style>
+    </style>' . report_print_styles() . '
 </head>
 <body>
     <div class="sheet">
@@ -7701,6 +7707,7 @@ function accounting_companies_for_group(int $companyId): array
         HTML;
     }
     
+    $printStyle = report_print_styles();
     $html = <<<HTML
 <!DOCTYPE html>
 <html lang="en">
@@ -7724,7 +7731,7 @@ function accounting_companies_for_group(int $companyId): array
         .total-row td { padding: 12px; }
         .footer { text-align: center; color: #7f8c8d; font-size: 12px; margin-top: 40px; }
         @media print { body { padding: 0; } }
-    </style>
+    </style>{$printStyle}
 </head>
 <body>
     <div class="report">
@@ -7891,6 +7898,7 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
     $totalDebitText = e(format_currency($totalDebit));
     $totalCreditText = e(format_currency($totalCredit));
 
+    $printStyle = report_print_styles();
     return <<<HTML
 <!doctype html>
 <html lang="en">
@@ -7915,7 +7923,7 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
             .report { border: 0; max-width: none; padding: 0; }
             .actions { display: none; }
         }
-    </style>
+    </style>{$printStyle}
 </head>
 <body>
     <div class="report">
@@ -8332,7 +8340,7 @@ function export_payment_receipt_html(array $receipt): string
         .amount { font-size: 28px; font-weight: 700; color: #0f766e; margin: 10px 0; }
         .legal { margin-top: 16px; font-size: 12px; color: #4b5563; background: #f9fafb; border: 1px solid #e5e7eb; padding: 10px; }
         @media print { body { background: #fff; } .sheet { margin: 0; border: 0; } }
-    </style>
+    </style>' . report_print_styles() . '
 </head>
 <body>
     <div class="sheet">

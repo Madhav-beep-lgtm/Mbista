@@ -136,6 +136,7 @@ if (!$selectedLedger) {
 
 $fmtMoney = static fn (float $amount): string => $currency . number_format($amount, 2);
 $pageTitle = 'Ledgers';
+$pageHero = false;
 $pageSubtitle = 'Ledger balances and account statements with running balance';
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
@@ -143,8 +144,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-card">
     <div class="mbw-card-head">
-        <h2><?= $selectedLedger ? 'Ledger Statement — ' . e($selectedLedger['code'] . ' · ' . $selectedLedger['name']) : 'Ledger Balances' ?></h2>
-        <div class="mbw-card-tools">
+        <?php if ($selectedLedger): ?><span class="muted"><?= e($selectedLedger['code'] . ' · ' . $selectedLedger['name']) ?></span><?php endif; ?>
+        <div class="mbw-card-tools" style="margin-left:auto">
             <?php if ($selectedLedger): ?>
                 <?php
                 // An inventory-designated ledger's balance is made of ITEMS —
@@ -157,14 +158,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . $selectedLedgerId . '&fy=' . $fiscalYearId)) ?>">Reports Center view</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">All ledgers</a>
             <?php else: ?>
-                <a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=pdf')) ?>" target="_blank" aria-label="Export PDF" title="Export PDF"><?= icon('documents') ?><span>PDF</span></a>
                 <a class="mbw-view-all" href="<?= e(url('admin/export-ledger.php?format=excel')) ?>" aria-label="Export Excel" title="Export Excel"><?= icon('analytics') ?><span>Excel</span></a>
             <?php endif; ?>
         </div>
     </div>
     <form method="get" action="<?= e(url('admin/ledgers.php')) ?>" class="mbw-filter-bar">
-        <label class="ledger-filter"><span>Account</span><select name="ledger_id" class="field-compact" onchange="this.form.submit()" aria-label="Ledger">
+        <label class="ledger-filter"><span>Account</span><select name="ledger_id" class="field-compact js-searchable" onchange="this.form.submit()" aria-label="Ledger">
             <option value="0">All ledgers (balances)</option>
             <?php foreach ($allLedgers as $ledgerRow): ?>
                 <option value="<?= (int) $ledgerRow['id'] ?>" <?= $selectedLedgerId === (int) $ledgerRow['id'] ? 'selected' : '' ?>><?= e($ledgerRow['code'] . ' — ' . $ledgerRow['name']) ?></option>

@@ -1404,6 +1404,7 @@ if (isset($_GET['statement']) && $selectedParty) {
             .print-button { margin-top: 24px; padding: 10px 18px; background: #1c2434; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
             @media print { .print-button { display: none; } body { margin: 12mm; } }
         </style>
+        <?= report_print_styles() ?>
     </head>
     <body>
         <div class="statement-head">

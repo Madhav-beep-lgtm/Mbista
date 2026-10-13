@@ -180,6 +180,7 @@ header('Content-Type: text/html; charset=utf-8');
     @page { size: A4 landscape; margin: 8mm; }
   }
 </style>
+<?= report_print_styles() ?>
 </head>
 <body>
 <div class="sheet">

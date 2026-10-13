@@ -198,12 +198,12 @@ function pdf_indent_width(int $spaces, float $size): float
 function pdf_palette(): array
 {
     return [
-        'navy'  => [0.086, 0.196, 0.365],  // #16325D, the heading colour
-        'muted' => [0.400, 0.439, 0.522],  // #667085, notes and the footer
-        'ink'   => [0.122, 0.161, 0.216],  // #1F2937, body text
-        'head'  => [0.933, 0.953, 0.980],  // #EEF3FA, the heading band
-        'total' => [0.945, 0.961, 0.984],  // #F1F5FB, a totals row
-        'rule'  => [0.796, 0.839, 0.898],  // the grid
+        'navy'  => [0, 0, 0],
+        'muted' => [0, 0, 0],
+        'ink'   => [0, 0, 0],
+        'head'  => [1, 1, 1],
+        'total' => [1, 1, 1],
+        'rule'  => [0, 0, 0],
     ];
 }
 

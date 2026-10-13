@@ -597,7 +597,7 @@ function export_print(string $title, array $rows, array $meta = [], array $optio
     echo '.bar{margin:0 0 16px}.bar button{font:inherit;padding:7px 14px;margin-right:8px;cursor:pointer}';
     echo ($landscape ? '@page{size:A3 landscape;margin:8mm}' : '');
     echo '@media print{.bar{display:none}body{margin:0}thead{display:table-header-group}tr{break-inside:avoid}th{background:#eee!important;-webkit-print-color-adjust:exact}}';
-    echo '</style></head><body>';
+    echo '</style>' . report_print_styles() . '</head><body>';
 
     echo '<div class="bar"><button onclick="window.print()">Print / Save as PDF</button>';
     echo '<button onclick="window.close()">Close</button></div>';
