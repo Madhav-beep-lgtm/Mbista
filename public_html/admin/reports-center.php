@@ -443,17 +443,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-filter-card rc2-filters" id="rc2FilterForm" data-fy-start="<?= e((string) ($selectedFiscalYear['start_date'] ?? '')) ?>" data-fy-end="<?= e((string) ($selectedFiscalYear['end_date'] ?? '')) ?>">
     <input type="hidden" name="report" value="<?= e($reportId) ?>">
     <?php if ($compareEnabled): ?><input type="hidden" name="compare" value="1"><?php endif; ?>
-    <div class="rc2-filters-head">
-        <span class="rc2-filters-title">
-            <?= icon('filter') ?>
-            <strong>Filters</strong>
-
-        </span>
-        <button type="button" class="rc2-collapse" data-rc2-collapse aria-expanded="true">
-            <?= icon('chevron') ?><span>Collapse</span>
-        </button>
-    </div>
-    <div class="rc2-filters-body" data-rc2-body>
+    <div class="rc2-filters-body">
     <div class="rc-filter-grid">
         <label>From Date<input type="date" name="from" value="<?= e($fromDate) ?>"></label>
         <label>To Date<input type="date" name="to" value="<?= e($toDate) ?>"></label>
@@ -568,13 +558,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="rc2-preview mbw-card" id="rc2Preview" aria-label="Report preview">
     <div class="rc2-preview-head">
-        <span class="rc2-preview-title">
-            <?= icon('documents') ?>
-            <span>
-                <strong>Report Preview</strong>
-                
-            </span>
-        </span>
         <div class="rc2-preview-tools">
             <input type="search" id="rc2AcctSearch" class="rc2-acct-search rc2-hier-only" placeholder="Search account..." aria-label="Search accounts in this report">
             <button type="button" class="rc2-mini rc2-hier-only" id="rc2ExpandAll">Expand all</button>
@@ -594,7 +577,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 <div class="rpt-fullwidth">
     <main class="rc-report-view rpt-statement" id="rc2Statement">
-        <?php rc_render_letterhead($report, $reportMeta); ?>
         <div class="rc-table-scroll">
             <?php rc_render_table($report, $hasGroups); ?>
         </div>
@@ -676,19 +658,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <script>
 (function () {
     var form = document.getElementById('rc2FilterForm');
-
-    // Collapse / expand the filter card body.
-    var collapseBtn = document.querySelector('[data-rc2-collapse]');
-    var filtersBody = document.querySelector('[data-rc2-body]');
-    if (collapseBtn && filtersBody) {
-        collapseBtn.addEventListener('click', function () {
-            var wasHidden = filtersBody.hasAttribute('hidden');
-            if (wasHidden) { filtersBody.removeAttribute('hidden'); } else { filtersBody.setAttribute('hidden', ''); }
-            collapseBtn.classList.toggle('is-collapsed', !wasHidden);
-            collapseBtn.querySelector('span').textContent = wasHidden ? 'Collapse' : 'Expand';
-            collapseBtn.setAttribute('aria-expanded', wasHidden ? 'true' : 'false');
-        });
-    }
 
     // Export dropdown menu.
     var exportWrap = document.querySelector('[data-rc2-export]');
