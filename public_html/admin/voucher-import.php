@@ -301,44 +301,54 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 .vimp-lines table { margin-top: 6px; }
 .vimp-summary { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
 .vimp-summary strong { font-size: 1.25rem; display: block; }
+.vimp-upload-heading, .vimp-upload-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+.vimp-upload-heading { margin-bottom:16px; }
+.vimp-upload-heading h2 { margin:0; font-size:18px; }
+.vimp-upload-heading button { margin-left:auto; }
+#vimp-upload-menu .action-menu-options { left:0; right:auto; min-width:220px; }
+#vimp-upload-menu .action-menu-options button { width:100%; padding:12px; border:0; background:transparent; color:var(--color-text); font:inherit; text-align:left; cursor:pointer; }
+#vimp-upload-menu .action-menu-options button:hover { background:var(--color-primary-soft); }
+#vimp-instructions { width:min(960px, calc(100vw - 32px)); max-height:85vh; padding:20px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface); color:var(--color-text); overflow:auto; }
+#vimp-instructions::backdrop { background:rgba(15,23,42,.5); }
+#vimp-instructions:not([open]) { display:none; }
+#vimp-instructions .vimp-help-heading { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px; }
+#vimp-instructions .frm-section-head { justify-content:flex-start; gap:10px; }
+#vimp-instructions table { width:100%; min-width:0; table-layout:fixed; }
+#vimp-instructions th, #vimp-instructions td { white-space:normal; overflow-wrap:anywhere; border:1px solid var(--color-border); }
 </style>
 
 <?php if ($preview === null): ?>
 <div class="frm-main">
     <section class="mbw-card frm-section">
-        <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('upload') ?></span><h2>Upload Voucher Sheet</h2></div>
+        <div class="vimp-upload-heading"><h2>Upload voucher sheet</h2><button type="button" class="button secondary" id="vimp-open-instructions" aria-haspopup="dialog" aria-controls="vimp-instructions">Instructions</button></div>
         <?php if (!$canCreate): ?>
             <div class="notice error">You do not have permission to create vouchers, so importing is disabled.</div>
         <?php else: ?>
-        <form method="post" action="<?= e(url('admin/voucher-import.php')) ?>" enctype="multipart/form-data">
+        <div class="vimp-upload-toolbar">
+            <details class="action-menu" id="vimp-upload-menu">
+                <summary class="button secondary is-square" aria-label="Upload and template actions" title="Upload and templates"><?= icon('upload') ?></summary>
+                <div class="action-menu-options">
+                    <button type="button" id="vimp-choose-file">Upload spreadsheet</button>
+                    <?php if ($hasXlsx): ?><a href="<?= e(url('admin/voucher-import.php?template=xlsx')) ?>">Download Excel template</a><?php endif; ?>
+                    <a href="<?= e(url('admin/voucher-import.php?template=csv')) ?>">Download CSV template</a>
+                    <a href="<?= e(url('admin/voucher-import.php?template=ledgers')) ?>">Download ledger list</a>
+                </div>
+            </details>
+            <span class="frm-optional">Excel or CSV · max 10 MB · <?= number_format(VOUCHER_IMPORT_MAX_ROWS) ?> rows</span>
+            <span id="vimp-upload-status" role="status"></span>
+        </div>
+        <form method="post" id="vimp-upload-form" action="<?= e(url('admin/voucher-import.php')) ?>" enctype="multipart/form-data" hidden>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="stage" value="upload">
-            <div class="frm-grid frm-grid-2">
-                <label>Spreadsheet file <em>*</em>
-                    <span class="frm-dropzone">
-                        <?= icon('documents') ?>
-                        <strong>Drag &amp; drop the sheet here <u>or click to choose</u></strong>
-                        <small>Excel (.xlsx) or CSV — max 10 MB, up to <?= number_format(VOUCHER_IMPORT_MAX_ROWS) ?> rows</small>
-                        <input type="file" name="import_file" accept=".xlsx,.csv" required>
-                    </span>
-                </label>
-                <div>
-                    <p><strong>Get started</strong></p>
-                    <p>
-                        <?php if ($hasXlsx): ?><a class="button soft" href="<?= e(url('admin/voucher-import.php?template=xlsx')) ?>"><?= icon('documents') ?>Download Excel template</a><?php endif; ?>
-                        <a class="button soft" href="<?= e(url('admin/voucher-import.php?template=csv')) ?>"><?= icon('documents') ?>Download CSV template</a>
-                        <a class="button soft" href="<?= e(url('admin/voucher-import.php?template=ledgers')) ?>"><?= icon('tree') ?>Download ledger list</a>
-                    </p>
-                    
-                    <p><button type="submit" class="button frm-submit"><?= icon('chevron-right') ?>Upload &amp; Preview</button></p>
-                </div>
-            </div>
+            <input type="file" id="vimp-upload-file" name="import_file" accept=".xlsx,.csv" required aria-label="Voucher spreadsheet">
         </form>
         <?php endif; ?>
     </section>
 
+    <dialog id="vimp-instructions" aria-labelledby="vimp-help-title">
+        <div class="vimp-help-heading"><h2 id="vimp-help-title">Import instructions</h2><button type="button" class="button secondary" id="vimp-close-instructions" autofocus>Close</button></div>
     <section class="mbw-card frm-section">
-        <div class="frm-section-head"><span class="mbw-chip is-square tone-purple"><?= icon('layers') ?></span><h2>How the Sheet Works</h2></div>
+        <div class="frm-section-head"><h3>How the Sheet Works</h3></div>
         <p>One row per ledger line. Rows are grouped into vouchers by the <strong>Voucher No</strong> column, set on the first line of each voucher or repeated on every line. Voucher Type, Date and Title are read from the first line. Your Voucher No is kept as the reference; voucher numbers are assigned on import.</p>
         <div style="overflow-x:auto">
         <table class="frm-entries vimp-columns-table">
@@ -357,7 +367,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 
     <section class="mbw-card frm-section">
-        <div class="frm-section-head"><span class="mbw-chip is-square tone-teal"><?= icon('tasks') ?></span><h2>Voucher Rules Checked on Import</h2></div>
+        <div class="frm-section-head"><h3>Voucher Rules Checked on Import</h3></div>
         <p>Validated with the same rules as the New Voucher form before anything is saved:</p>
         <ul>
             <li>At least two ledger lines, and total debit must equal total credit.</li>
@@ -377,7 +387,37 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
         
     </section>
+    </dialog>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const dialog = document.getElementById('vimp-instructions');
+    const open = document.getElementById('vimp-open-instructions');
+    open.addEventListener('click', () => dialog.showModal());
+    document.getElementById('vimp-close-instructions').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => open.focus());
+    dialog.addEventListener('click', function (event) {
+        const box = dialog.getBoundingClientRect();
+        if (event.target === dialog && (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom)) dialog.close();
+    });
+    const input = document.getElementById('vimp-upload-file');
+    if (!input) return;
+    const menu = document.getElementById('vimp-upload-menu');
+    document.getElementById('vimp-choose-file').addEventListener('click', function () {
+        menu.open = false;
+        input.click();
+    });
+    input.addEventListener('change', function () {
+        if (!input.files.length) return;
+        document.getElementById('vimp-upload-status').textContent = 'Uploading for preview…';
+        document.getElementById('vimp-upload-form').requestSubmit();
+    });
+    document.addEventListener('click', event => { if (!menu.contains(event.target)) menu.open = false; });
+    menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { menu.open = false; menu.querySelector('summary').focus(); }
+    });
+});
+</script>
 
 <?php else: ?>
 <div class="frm-main">
