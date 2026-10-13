@@ -2373,48 +2373,6 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
         ], $overrides))) . '#valuation-nrv';
     };
     ?>
-    <?php
-    require_once __DIR__ . '/../../app/inventory_valuation.php';
-    $invMethod = inv_accounting_method($companyId);
-    $methodMapped = [];
-    foreach (['purchases' => 'Purchases', 'inventory_change' => 'Change in Inventory',
-        'inventory_asset' => 'Inventory Asset'] as $methodPurpose => $methodLabel) {
-        if (!inv_resolve_mapping($companyId, $methodPurpose)) {
-            $methodMapped[] = $methodLabel;
-        }
-    }
-    ?>
-    <section class="mbw-card" id="inventory-method" data-collapsible aria-label="Inventory accounting system">
-        <div class="mbw-card-head">
-            <h2>Inventory accounting system</h2>
-            <div class="mbw-card-tools"><span class="mbw-pill <?= $invMethod === 'periodic' ? 'tone-amber' : 'tone-green' ?>"><?= $invMethod === 'periodic' ? 'Periodic' : 'Perpetual' ?></span></div>
-        </div>
-        <form method="post" class="workspace-form-grid" style="grid-template-columns:1fr;gap:14px">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="save_inventory_method">
-            <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
-                <input type="radio" name="inventory_accounting" value="perpetual" <?= $invMethod === 'perpetual' ? 'checked' : '' ?> style="margin-top:4px">
-                <span>
-                    <strong>Perpetual</strong><br>
-                    
-                </span>
-            </label>
-            <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
-                <input type="radio" name="inventory_accounting" value="periodic" <?= $invMethod === 'periodic' ? 'checked' : '' ?> style="margin-top:4px">
-                <span>
-                    <strong>Periodic</strong><br>
-                    
-                </span>
-            </label>
-            <?php if ($methodMapped !== []): ?>
-                <div class="notice">Unmapped for periodic: <?= e(implode(', ', $methodMapped)) ?>.</div>
-            <?php endif; ?>
-            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-                
-                <button type="submit" class="button" data-confirm="Change the inventory accounting system for this company?">Save</button>
-            </div>
-        </form>
-    </section>
 
     <section class="mbw-card" id="valuation-nrv" data-collapsible aria-label="Valuation and NRV">
         <div class="mbw-card-head">
@@ -2519,12 +2477,14 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
 <?php endif; ?>
 
 <?php if (in_array($invView, ['inventory', 'manufacturing'], true)): ?>
-<section class="mbw-card" data-collapsible aria-label="Inventory workbench">
+<section class="mbw-card" <?= $invShows('warehouses') ? '' : 'data-collapsible' ?> aria-label="Inventory workbench">
+    <?php if (!$invShows('warehouses')): ?>
     <div class="mbw-card-head inventory-workbench-head">
     <div>
         <h2><?= e(defined('INVENTORY_PAGE') ? $inventoryPage['title'] : ($invView === 'manufacturing' ? 'Manufacturing Workspace' : 'Inventory Workspace')) ?></h2>
     </div>
 </div>
+    <?php endif; ?>
 
 <?php // The input-item list, shared by Production Order and Bill of
       // Materials. Defined out here because those are separate pages now
@@ -2727,8 +2687,7 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
     <?php endif; ?>
 
     <?php if ($invShows('warehouses')): ?>
-    <details class="feature-disclosure" id="warehouses">
-        <summary><span><strong><?= icon('services') ?>Warehouses / Locations</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+    <div id="warehouses">
         <div class="rc-table-scroll">
             <table class="rc-table">
                 <thead><tr><th>Name</th><th>Code</th><th>Status</th><th></th></tr></thead>
@@ -2760,7 +2719,7 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
             <label>Code<input type="text" name="code" maxlength="40" placeholder="Optional"></label>
             <div class="workspace-span-2"><button type="submit"><?= icon('services') ?>Add warehouse</button></div>
         </form>
-    </details>
+    </div>
     <?php endif; ?>
 
 <?php
