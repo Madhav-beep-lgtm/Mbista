@@ -247,6 +247,7 @@ if ($rangeSince !== null) {
     }
 }
 $invoiceChartTotal = array_sum($invoiceChartCounts);
+$taskChartTotal = array_sum($taskChartCounts);
 
 // 30-day movement for each KPI card.
 $trends = [
@@ -324,7 +325,11 @@ $ovTrend = static function (array $trend): string {
                 </select>
             </form>
         </div>
-        <div class="mbw-chart-wrap" style="height:220px"><canvas id="taskStatusChart"></canvas></div>
+        <?php if ($taskChartTotal > 0): ?>
+            <div class="mbw-chart-wrap ov-chart-stage"><canvas id="taskStatusChart"></canvas></div>
+        <?php else: ?>
+            <div class="ov-empty-state"><?= icon('tasks') ?><strong>No task activity</strong></div>
+        <?php endif; ?>
     </div>
 
     <div class="card admin-chart-card">
@@ -338,13 +343,17 @@ $ovTrend = static function (array $trend): string {
                 </select>
             </form>
         </div>
-        <div class="mbw-donut-row">
-            <div class="mbw-donut-box" style="width:150px;height:150px;position:relative">
-                <canvas id="invoiceStatusChart"></canvas>
-                <span class="ov-donut-center"><b>Total <?= e($invoiceChartTotal) ?></b><small>Invoices</small></span>
+        <?php if ($invoiceChartTotal > 0): ?>
+            <div class="mbw-donut-row ov-donut-stage">
+                <div class="mbw-donut-box ov-donut-chart">
+                    <canvas id="invoiceStatusChart"></canvas>
+                    <span class="ov-donut-center"><b><?= e($invoiceChartTotal) ?></b><small>Invoices</small></span>
+                </div>
+                <div class="mbw-chart-legend ov-donut-legend" id="invoiceStatusLegend"></div>
             </div>
-            <div class="mbw-chart-legend ov-donut-legend" id="invoiceStatusLegend"></div>
-        </div>
+        <?php else: ?>
+            <div class="ov-empty-state"><?= icon('invoices') ?><strong>No invoice activity</strong></div>
+        <?php endif; ?>
     </div>
 
     <div class="card admin-analysis-card">
@@ -352,7 +361,7 @@ $ovTrend = static function (array $trend): string {
             <h3><?= icon('users') ?>Staff performance snapshot</h3>
         </div>
         <?php if ($staffPerformance === []): ?>
-            <p>No staff task performance data yet. Start assigning and completing tasks to populate this panel.</p>
+            <div class="ov-empty-state is-compact"><?= icon('users') ?><strong>No staff activity</strong></div>
         <?php else: ?>
             <table>
                 <thead>
@@ -392,7 +401,7 @@ $ovTrend = static function (array $trend): string {
             <h3><?= icon('invoices') ?>Pending invoices (draft + issued)</h3>
         </div>
         <?php if ($pendingInvoices === []): ?>
-            <p>No pending invoices at the moment.</p>
+            <div class="ov-empty-state is-compact"><?= icon('invoices') ?><strong>No pending invoices</strong></div>
         <?php else: ?>
             <table>
                 <thead>
@@ -429,7 +438,7 @@ $ovTrend = static function (array $trend): string {
         <a class="mbw-view-all" href="<?= e(url('admin/workspace.php?view=tasks')) ?>">View all tasks &#8594;</a>
     </div>
     <?php if ($recentTasks === []): ?>
-        <p>No service tasks are available yet. Use Work Portal > Tasks to add the first task.</p>
+        <div class="ov-empty-state is-compact"><?= icon('tasks') ?><strong>No service tasks</strong></div>
     <?php else: ?>
         <table>
             <thead>

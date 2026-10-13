@@ -61,11 +61,12 @@
   }
 
   function shortNum(v) {
+    if (Math.abs(v) < 1e-9) { return '0'; }
     var a = Math.abs(v);
     if (a >= 1e7) { return (v / 1e6).toFixed(0) + 'M'; }
     if (a >= 1e6) { return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M'; }
     if (a >= 1e3) { return (v / 1e3).toFixed(0) + 'K'; }
-    return String(v);
+    return Number(v.toFixed(2)).toLocaleString();
   }
 
   function makeTooltip() {

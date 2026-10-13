@@ -14,5 +14,5 @@
 <button type="button" class="admin-icon-button admin-sidebar-toggle" data-sidebar-toggle
         aria-controls="adminSidebar" aria-expanded="true"
         aria-label="Collapse sidebar" title="Collapse sidebar (Ctrl + B)">
-    <?= icon('menu') ?><span class="admin-sidebar-toggle-label">Collapse sidebar</span>
+    <?= icon('menu') ?><span class="sr-only admin-sidebar-toggle-label">Collapse sidebar</span>
 </button>

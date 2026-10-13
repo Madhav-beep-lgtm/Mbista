@@ -71,3 +71,5 @@ NRV-Implementation-Audit.txt
 
 # Passenger's restart marker, written by deploy/tasks.sh on the server.
 tmp/
+# Separate cooperative-accounting checkout; never track it as a gitlink here.
+/sahakari-accounting/

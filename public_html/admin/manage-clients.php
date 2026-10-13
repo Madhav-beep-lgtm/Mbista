@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_or_admin();
 require_permission('clients', 'view');
+$clientDirectoryPath = !empty($platformShell) ? 'platform/clients.php' : 'admin/manage-clients.php';
 if ((string) (current_user()['role'] ?? '') === 'admin') {
     require_company_context();
 }
@@ -24,21 +25,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $profile = $profileStmt->fetch();
     if (!$profile || client_books_access_level($profile) === '') {
         flash('error', 'You do not have access to that client.');
-        redirect('admin/manage-clients.php');
+        redirect($clientDirectoryPath);
     }
     if ($action === 'provision_books' && $role === 'admin') {
         $booksId = provision_client_books($clientId);
         $booksId > 0
             ? flash('success', 'Accounting books provisioned for ' . $profile['organization_name'] . '.')
             : flash('error', 'Could not provision books.');
-        redirect('admin/manage-clients.php');
+        redirect($clientDirectoryPath);
     }
     if ($action === 'toggle_hospitality') {
         // Hospitality Accounting activation is a SUPER ADMIN decision only —
         // client admins and staff can never flip it (server-side enforced).
         if (current_access_level() !== 'super_admin') {
             flash('error', 'Only the Super Admin can activate or deactivate Hospitality Accounting.');
-            redirect('admin/manage-clients.php');
+            redirect($clientDirectoryPath);
         }
         $newValue = (string) ($_POST['enabled'] ?? '0') === '1' ? 1 : 0;
         $oldValue = (int) ($profile['hospitality_accounting_enabled'] ?? 0);
@@ -59,14 +60,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         flash('success', 'Hospitality Accounting is now ' . ($newValue === 1 ? 'ACTIVE' : 'inactive') . ' for ' . $profile['organization_name']
             . ($newValue === 0 ? '. All hospitality data is preserved and reappears on reactivation.' : '.'));
-        redirect('admin/manage-clients.php');
+        redirect($clientDirectoryPath);
     }
     if ($action === 'toggle_jewellery') {
         // Same rule as Hospitality: activating a vertical is a SUPER ADMIN
         // decision only — client admins and staff can never flip it.
         if (current_access_level() !== 'super_admin') {
             flash('error', 'Only the Super Admin can activate or deactivate Jewellery Accounting.');
-            redirect('admin/manage-clients.php');
+            redirect($clientDirectoryPath);
         }
         $newValue = (string) ($_POST['enabled'] ?? '0') === '1' ? 1 : 0;
         $oldValue = (int) ($profile['jewellery_accounting_enabled'] ?? 0);
@@ -87,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         flash('success', 'Jewellery Accounting is now ' . ($newValue === 1 ? 'ACTIVE' : 'inactive') . ' for ' . $profile['organization_name']
             . ($newValue === 0 ? '. All jewellery data is preserved and reappears on reactivation.' : '.'));
-        redirect('admin/manage-clients.php');
+        redirect($clientDirectoryPath);
     }
     if ($action === 'assign_staff' && $role === 'admin') {
         $staffId = (int) ($_POST['staff_user_id'] ?? 0);
@@ -102,15 +103,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $staffCheck->execute(['id' => $staffId]);
             if (!$staffCheck->fetch()) {
                 flash('error', 'Select a staff member from your own company.');
-                redirect('admin/manage-clients.php');
+                redirect($clientDirectoryPath);
             }
         }
         db()->prepare('UPDATE client_profiles SET assigned_staff_user_id = :sid WHERE id = :id')
             ->execute(['sid' => $staffId > 0 ? $staffId : null, 'id' => $clientId]);
         flash('success', 'Staff assignment updated.');
-        redirect('admin/manage-clients.php');
+        redirect($clientDirectoryPath);
     }
-    redirect('admin/manage-clients.php');
+    redirect($clientDirectoryPath);
 }
 
 $clients = client_books_clients_for_scope();
@@ -150,9 +151,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if ($repairErrors !== []): ?><div class="notice error">Repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
 <nav class="mbw-tabbar" aria-label="Client management">
-    <a class="mbw-tab is-active" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('clients') ?>Client Accounting</a>
-    <a class="mbw-tab" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><?= icon('portal') ?>Client Records</a>
-    <a class="mbw-tab" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><?= icon('tasks') ?>Service Tasks</a>
+    <a class="mbw-tab is-active" href="<?= e(url($clientDirectoryPath)) ?>"><?= icon('clients') ?>Clients</a>
+    <a class="mbw-tab" href="<?= e(url(!empty($platformShell) ? 'platform/work.php?view=clients' : 'admin/workspace.php?view=clients')) ?>"><?= icon('portal') ?>Client records</a>
+    <a class="mbw-tab" href="<?= e(url(!empty($platformShell) ? 'platform/work.php?view=tasks' : 'admin/workspace.php?view=tasks')) ?>"><?= icon('tasks') ?>Service tasks</a>
 </nav>
 
 <section class="mbw-kpi-grid" aria-label="Client overview">

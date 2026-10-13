@@ -410,7 +410,8 @@ ok(preg_match('~\.admin-main \{[^}]*min-width:\s*0~', $portalCss) === 1,
     'The main grid column is allowed to shrink without page overflow');
 ok(preg_match('~\.admin-topbar \{[^}]*position:\s*sticky~', $portalCss) === 1,
     'The compact topbar remains visible without escaping its column');
-ok(preg_match('~\.admin-content \{[^}]*padding:\s*18px~', $portalCss) === 1,
+ok(preg_match('~\.admin-content \{[^}]*padding:\s*(?!0)[^;}]+~', $portalCss) === 1
+    && preg_match('~\.admin-content \{[^}]*margin-(?:top|block-start):\s*-~', $portalCss) !== 1,
     'Content owns its spacing instead of offsetting the topbar with negative margins');
 
 echo "\n12. The sidebar collapses to a rail\n";

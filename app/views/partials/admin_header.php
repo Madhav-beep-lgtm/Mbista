@@ -19,7 +19,6 @@ $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
 $headerBusinessType = company_accounting_business_type($headerCompanyId);
 $headerBusinessProfile = accounting_business_profile($headerBusinessType);
 $headerAltioraCompany = $headerCompanyCode === 'MBAACA' ? company_by_code('AGHPL') : null;
-$headerMbistaCompany = $headerCompanyCode !== 'MBAACA' ? company_by_code('MBAACA') : null;
 $headerSubsidiaryCompanies = $headerCompanyCode === 'AGHPL' && $headerCompanyId > 0 ? child_companies_for_company($headerCompanyId) : [];
 $headerPortalLabel = match (true) {
     $headerCompanyCode === 'MBAACA' => 'M.Bista superadmin portal',
@@ -329,6 +328,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             ?>
             <span class="admin-nav-group">Platform</span>
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>Companies</a>
+            <a class="<?= $headerScript === 'clients.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/clients.php')) ?>"><?= icon('clients') ?>Clients</a>
             <a class="<?= $headerScript === 'staff.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/staff.php')) ?>"><?= icon('users') ?>Staff</a>
             <a class="<?= $headerScript === 'work.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/work.php')) ?>"><?= icon('tasks') ?>Work Portal</a>
             <?php // Report emails are not a platform matter. A schedule belongs
@@ -378,6 +378,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php else: ?>
+            <?php if (user_is_super_admin()): ?>
+                <a class="admin-nav-priority" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>All companies</a>
+            <?php endif; ?>
             <?php if ($headerCompanyCode === 'MBAACA'): ?>
                 <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
                 <?php if (($currentUser['role'] ?? '') === 'admin'): ?>
@@ -441,17 +444,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
 
             <span class="admin-nav-group">Operations</span>
-            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('handshake') ?>Client Directory</a>
-            <?php if (user_is_super_admin()): ?>
-                <?php
-                // A "Select client..." dropdown used to sit here, switching the
-                // open books on change. It was a second answer to a question
-                // the Companies list already answers, and it answered it from
-                // inside whatever ledger you were reading at the time.
-                ?>
-                <a href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>All companies</a>
-            <?php endif; ?>
-            <a class="<?= $headerScript === 'workspace.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
             <a class="<?= in_array($headerScript, ['service-agreements.php', 'export-agreement.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><?= icon('handshake') ?>Contracts &amp; Agreements</a>
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
@@ -601,16 +593,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                         </button>
                     </form>
                 <?php endif; ?>
-                <?php if ($headerMbistaCompany): ?>
-                    <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="topbar-icon-form">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                        <input type="hidden" name="company_id" value="<?= e((int) $headerMbistaCompany['id']) ?>">
-                        <button class="admin-icon-button" type="submit" aria-label="Open M.Bista superadmin" title="Open M.Bista superadmin">
-                            <?= icon('admin') ?>
-                            <span class="sr-only">Open M.Bista superadmin</span>
-                        </button>
-                    </form>
-                <?php endif; ?>
                 <?php if ($headerSubsidiaryCompanies !== []): ?>
                     <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="topbar-company-form">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -643,8 +625,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     <details class="admin-profile-menu">
                         <summary aria-label="Open user menu" title="<?= e($headerUserName) ?>">
                             <span class="admin-profile-avatar"><?= e($headerUserInitials) ?></span>
-                            <span class="admin-profile-identity"><strong><?= e($headerUserName) ?></strong><small><?= e($headerUserRole) ?></small></span>
-                            <span class="admin-profile-chevron"><?= icon('chevron') ?></span>
                         </summary>
                         <div class="admin-profile-dropdown">
                             <div class="admin-profile-dropdown-head">

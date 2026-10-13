@@ -365,6 +365,7 @@ while ($monthCursor <= $monthEnd && count($monthlyData) < 18) {
     $monthCursor = $monthCursor->modify('+1 month');
 }
 $monthlyMax = max(1.0, ...array_map(static fn (array $row): float => max(abs($row['income']), abs($row['expense']), abs($row['net'])), $monthlyData));
+$hasMonthlyActivity = array_sum(array_map(static fn (array $row): float => abs($row['income']) + abs($row['expense']), $monthlyData)) > 0;
 
 $expenseGroupStmt = db()->prepare('
     SELECT COALESCE(g.name, \'Ungrouped Expenses\') AS group_name,
@@ -907,14 +908,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <a class="mbw-view-all" href="<?= e(accounting_dashboard_report_url('profit-loss', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>">Report</a>
             </div>
         </div>
-        <div class="mbw-chart-legend" aria-hidden="true">
-            <span><i class="mbw-legend-dot" style="background:var(--mbw-green)"></i> Income</span>
-            <span><i class="mbw-legend-dot" style="background:var(--mbw-red)"></i> Expense</span>
-            <span><i class="mbw-legend-dot is-line" style="background:var(--mbw-primary)"></i> Net Profit</span>
-        </div>
-        <div class="mbw-chart-wrap">
-            <canvas id="mbw-pl-chart" role="img" aria-label="Monthly income, expense and net profit chart"></canvas>
-        </div>
+        <?php if ($hasMonthlyActivity): ?>
+            <div class="mbw-chart-legend" aria-hidden="true">
+                <span><i class="mbw-legend-dot" style="background:var(--mbw-green)"></i> Income</span>
+                <span><i class="mbw-legend-dot" style="background:var(--mbw-red)"></i> Expense</span>
+                <span><i class="mbw-legend-dot is-line" style="background:var(--mbw-primary)"></i> Net profit</span>
+            </div>
+            <div class="mbw-chart-wrap">
+                <canvas id="mbw-pl-chart" role="img" aria-label="Monthly income, expense and net profit chart"></canvas>
+            </div>
+        <?php else: ?>
+            <div class="ov-empty-state"><?= icon('analytics') ?><strong>No financial activity</strong></div>
+        <?php endif; ?>
     </section>
 
     <section class="mbw-card" data-collapsible aria-label="Cash flow summary">
@@ -926,7 +931,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         </div>
         <?php if ($cashFlowTotalAbs <= 0): ?>
-            <p class="mbw-kpi-vs" style="color:var(--mbw-muted)">No cash movements posted in this fiscal year.</p>
+            <div class="ov-empty-state"><?= icon('bank') ?><strong>No cash activity</strong></div>
         <?php else: ?>
             <div class="mbw-donut-row">
                 <div class="mbw-donut-box">
