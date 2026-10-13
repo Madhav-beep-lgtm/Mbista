@@ -755,45 +755,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="ad-company-title">
         <span class="ad-company-icon"><?= icon('companies') ?></span>
         <div>
-            <h2><?= e($company['name']) ?></h2>
-            <p><?= e($fiscalYear['label']) ?> / As of <?= e(app_date($asOfDate)) ?></p>
+            <h2><?= e((string) preg_replace('/\s*\((?:Client\s+)?Books\)\s*$/i', '', (string) $company['name'])) ?></h2>
         </div>
-    </div>
-    <div class="ad-context-controls">
-        <form method="get" class="ad-fiscal-form">
-            <label for="dashboard-fiscal-year">Fiscal Year</label>
-            <select id="dashboard-fiscal-year" name="fiscal_year_id" onchange="this.form.submit()">
-                <?php foreach ($fiscalYears as $year): ?>
-                    <option value="<?= (int) $year['id'] ?>" <?= (int) $year['id'] === $fiscalYearId ? 'selected' : '' ?>>
-                        <?= e($year['label']) ?> (<?= e(date('d M Y', strtotime((string) $year['start_date']))) ?> - <?= e(date('d M Y', strtotime((string) $year['end_date']))) ?>)
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </form>
-        <?php if (!$isGroupDashboard): ?>
-        <form method="post" class="ad-business-form">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="set_business_type">
-            <span>Business Type</span>
-            <div role="group" aria-label="Business type">
-                <?php foreach (['service' => 'Service', 'trading' => 'Trading', 'manufacturing' => 'Manufacturing'] as $value => $label): ?>
-                    <button type="submit" name="business_type" value="<?= e($value) ?>" class="<?= $businessType === $value ? 'is-active' : '' ?>"><?= e($label) ?></button>
-                <?php endforeach; ?>
-            </div>
-        </form>
-        <?php if ($showManufacturingFeatures): ?>
-            <form method="post" class="ad-excise-form">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="set_excise_rate">
-                <span>Excise Duty</span>
-                <div>
-                    <label for="default_excise_rate">Default excise rate (%)</label>
-                    <input id="default_excise_rate" type="number" name="default_excise_rate" min="0" max="100" step="0.01" value="<?= e(number_format(company_accounting_default_excise_rate($companyId), 2, '.', '')) ?>">
-                    <button type="submit">Save</button>
-                </div>
-            </form>
-        <?php endif; ?>
-        <?php endif; ?>
     </div>
 </div>
 

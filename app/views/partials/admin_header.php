@@ -17,6 +17,9 @@ $headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php'
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
 $headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
+$headerCompanyDisplayName = $headerIsClientBooks
+    ? (string) preg_replace('/\s*\((?:Client\s+)?Books\)\s*$/i', '', (string) ($headerCompany['name'] ?? 'Company'))
+    : (string) ($headerCompany['name'] ?? 'Company');
 $headerBusinessType = company_accounting_business_type($headerCompanyId);
 $headerBusinessProfile = accounting_business_profile($headerBusinessType);
 $headerAltioraCompany = $headerCompanyCode === 'MBAACA' ? company_by_code('AGHPL') : null;
@@ -292,11 +295,11 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
         <a class="brand brand-admin" href="<?= e(url(!empty($platformShell) ? 'platform/index.php' : 'admin/accounting-dashboard.php')) ?>">
             <?php if ($headerIsClientBooks): ?>
                 <?php if (!empty($headerCompany['logo_path'])): ?>
-                    <img class="company-shell-logo" src="<?= e(url((string) $headerCompany['logo_path'])) ?>" alt="<?= e($headerCompany['name'] ?? 'Company') ?> logo">
+                    <img class="company-shell-logo" src="<?= e(url((string) $headerCompany['logo_path'])) ?>" alt="<?= e($headerCompanyDisplayName) ?> logo">
                 <?php else: ?>
                     <span class="company-shell-mark" aria-hidden="true"><?= e(mb_strtoupper(mb_substr((string) ($headerCompany['name'] ?? 'C'), 0, 1))) ?></span>
                 <?php endif; ?>
-                <span class="company-shell-name"><?= e($headerCompany['name'] ?? 'Company') ?></span>
+                <span class="company-shell-name"><?= e($headerCompanyDisplayName) ?></span>
             <?php else: ?>
                 <?= brand_logo('dark', 'mbw-logo mbw-logo-sidebar') ?>
             <?php endif; ?>
