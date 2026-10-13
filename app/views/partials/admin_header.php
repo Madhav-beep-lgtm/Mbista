@@ -344,7 +344,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <span class="admin-nav-group">My Portal</span>
             <a href="<?= e(url('dashboard.php')) ?>"><?= icon('home') ?>Client Portal</a>
             <a href="<?= e(url('my-profile.php')) ?>"><?= icon('profile') ?>My Profile &amp; Users</a>
-            <span class="admin-nav-group">Accounting Workspace</span>
             <div class="mbw-nav-parent is-open" data-nav-parent="accounting">
                 <a href="#" data-nav-toggle aria-expanded="true">
                     <?= icon('accounting') ?>Accounting
@@ -380,7 +379,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php else: ?>
-            <span class="admin-nav-group">Core Admin</span>
             <?php if ($headerCompanyCode === 'MBAACA'): ?>
                 <a class="<?= $headerScript === 'accounting-dashboard.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-dashboard.php')) ?>"><?= icon('dashboard') ?>Dashboard</a>
                 <?php if (($currentUser['role'] ?? '') === 'admin'): ?>
@@ -389,7 +387,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php endif; ?>
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/index.php')) ?>"><?= icon('home') ?>Admin Overview</a>
 
-            <span class="admin-nav-group">Accounting Workspace</span>
+            <span class="admin-nav-group">Accounting</span>
             <?php if ($headerIsClientBooks): ?>
                 <?php
                 // "My Company Accounting" used to sit here, jumping out of the
@@ -412,17 +410,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             </div>
             <?php endif; ?>
 
-            <span class="admin-nav-group">Manage Clients</span>
-            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('handshake') ?>Client Directory</a>
-            <?php if (user_is_super_admin()): ?>
-                <?php
-                // A "Select client..." dropdown used to sit here, switching the
-                // open books on change. It was a second answer to a question
-                // the Companies list already answers, and it answered it from
-                // inside whatever ledger you were reading at the time.
-                ?>
-                <a href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>All companies</a>
-            <?php endif; ?>
             <?php if ($headerIsClientBooks): ?>
                 <?php
                 // Jewellery and Hospitality ARE client accounting -- they are the
@@ -449,15 +436,23 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             <?php endif; ?>
 
-            <span class="admin-nav-group">Reports &amp; Controls</span>
             <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
             <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
 
             <span class="admin-nav-group">Operations</span>
+            <a class="<?= in_array($headerScript, ['manage-clients.php', 'client-books.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/manage-clients.php')) ?>"><?= icon('handshake') ?>Client Directory</a>
+            <?php if (user_is_super_admin()): ?>
+                <?php
+                // A "Select client..." dropdown used to sit here, switching the
+                // open books on change. It was a second answer to a question
+                // the Companies list already answers, and it answered it from
+                // inside whatever ledger you were reading at the time.
+                ?>
+                <a href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>All companies</a>
+            <?php endif; ?>
             <a class="<?= $headerScript === 'workspace.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('portal') ?>Work Portal</a>
-            <a class="<?= $headerScript === 'companies.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/companies.php')) ?>"><?= icon('companies') ?>Companies</a>
             <a class="<?= in_array($headerScript, ['service-agreements.php', 'export-agreement.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><?= icon('handshake') ?>Contracts &amp; Agreements</a>
             <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
             <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
