@@ -3904,7 +3904,9 @@ function accounting_opening_source_sql(string $column): string
         accounting_opening_source_types()
     );
 
-    return $column . ' IN (' . implode(', ', $quoted) . ')';
+    // Manual vouchers have NULL source_type; they are ordinary movements,
+    // not an unknown SQL truth value that disappears under NOT.
+    return 'COALESCE(' . $column . ' IN (' . implode(', ', $quoted) . '), 0)';
 }
 
 /**
@@ -7778,6 +7780,29 @@ HTML;
 /**
  * Export accounting ledger data to Excel/CSV format
  */
+/** Shared FY balances for the ledger overview and exports. */
+function ledger_report_balances(int $companyId, int $fiscalYearId): array
+{
+    $fy = fiscal_year_by_id($fiscalYearId);
+    if (!$fy || (int) $fy['company_id'] !== $companyId) {
+        return [];
+    }
+    require_once __DIR__ . '/reports_engine.php';
+    $rows = rc_ledger_balances($companyId, (string) $fy['start_date'], (string) $fy['end_date'], '', 0, 0, [], (string) $fy['start_date']);
+    foreach ($rows as &$row) {
+        $row['debit_total'] = (float) $row['tx_dr'];
+        $row['credit_total'] = (float) $row['tx_cr'];
+    }
+    unset($row);
+    return $rows;
+}
+
+function ledger_closing_balance_text(float $balance): string
+{
+    $balance = round($balance, 2);
+    return format_currency(abs($balance)) . ($balance > 0 ? ' Dr' : ($balance < 0 ? ' Cr' : ''));
+}
+
 function export_ledger_to_excel(int $companyId, int $fiscalYearId): array
 {
     $company = company_by_id($companyId);
@@ -7787,39 +7812,27 @@ function export_ledger_to_excel(int $companyId, int $fiscalYearId): array
         return [];
     }
     
-    // Get ledger balances
-    $balanceStmt = db()->prepare("
-        SELECT l.id, l.code, l.name, l.type, 
-               COALESCE(SUM(CASE WHEN ve.entry_type='debit' THEN ve.amount ELSE 0 END),0) AS debit_total,
-               COALESCE(SUM(CASE WHEN ve.entry_type='credit' THEN ve.amount ELSE 0 END),0) AS credit_total
-        FROM ledgers l
-        LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
-        LEFT JOIN vouchers v ON v.id = ve.voucher_id AND v.company_id = l.company_id
-            AND v.fiscal_year_id = :fiscal_year_id AND v.status = 'posted'
-        WHERE l.company_id = :company_id
-        GROUP BY l.id, l.code, l.name, l.type
-        ORDER BY l.code ASC
-    ");
-    $balanceStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
-    $ledgers = $balanceStmt->fetchAll();
-    
+    $ledgers = ledger_report_balances($companyId, $fiscalYearId);
+
     $rows = [
         ['General Ledger Report'],
         ['Company', $company['name']],
         ['Fiscal Year', $fiscalYear['label']],
         ['Generated', date('Y-m-d H:i:s')],
         [],
-        ['Code', 'Account Name', 'Type', 'Debit Total', 'Credit Total'],
+        ['Code', 'Account Name', 'Type', 'Debit (FY)', 'Credit (FY)', 'Closing Balance'],
     ];
     
     $totalDebit = 0;
     $totalCredit = 0;
+    $totalClosing = 0.0;
     
     foreach ($ledgers as $ledger) {
         $debit = (float) ($ledger['debit_total'] ?? 0);
         $credit = (float) ($ledger['credit_total'] ?? 0);
         $totalDebit += $debit;
         $totalCredit += $credit;
+        $totalClosing += (float) $ledger['closing_net'];
         
         $rows[] = [
             $ledger['code'],
@@ -7827,10 +7840,11 @@ function export_ledger_to_excel(int $companyId, int $fiscalYearId): array
             $ledger['type'],
             number_format($debit, 2),
             number_format($credit, 2),
+            ledger_closing_balance_text((float) $ledger['closing_net']),
         ];
     }
     
-    $rows[] = ['', '', 'TOTAL', number_format($totalDebit, 2), number_format($totalCredit, 2)];
+    $rows[] = ['', '', 'TOTAL', number_format($totalDebit, 2), number_format($totalCredit, 2), ledger_closing_balance_text($totalClosing)];
     
     return [
         'filename' => 'Ledger-' . $company['code'] . '-' . date('YmdHis') . '.csv',
@@ -7850,29 +7864,11 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
         return '<!doctype html><html><body><p>Missing company or fiscal year context.</p></body></html>';
     }
 
-    $stmt = db()->prepare("
-        SELECT l.id, l.code, l.name, l.type,
-               COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = 'debit' THEN ve.amount ELSE 0 END), 0) AS debit_total,
-               COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = 'credit' THEN ve.amount ELSE 0 END), 0) AS credit_total
-        FROM ledgers l
-        LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
-        LEFT JOIN vouchers v
-            ON v.id = ve.voucher_id
-           AND v.company_id = l.company_id
-           AND v.fiscal_year_id = :fiscal_year_id
-           AND v.status = 'posted'
-        WHERE l.company_id = :company_id
-        GROUP BY l.id, l.code, l.name, l.type
-        ORDER BY l.code ASC
-    ");
-    $stmt->execute([
-        'company_id' => $companyId,
-        'fiscal_year_id' => $fiscalYearId,
-    ]);
-    $ledgers = $stmt->fetchAll();
+    $ledgers = ledger_report_balances($companyId, $fiscalYearId);
 
     $totalDebit = 0.0;
     $totalCredit = 0.0;
+    $totalClosing = 0.0;
     $rows = '';
 
     foreach ($ledgers as $ledger) {
@@ -7880,6 +7876,7 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
         $credit = (float) ($ledger['credit_total'] ?? 0);
         $totalDebit += $debit;
         $totalCredit += $credit;
+        $totalClosing += (float) $ledger['closing_net'];
 
         $rows .= '<tr>'
             . '<td>' . e((string) $ledger['code']) . '</td>'
@@ -7887,11 +7884,12 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
             . '<td>' . e(ucfirst((string) $ledger['type'])) . '</td>'
             . '<td class="amount">' . e(format_currency($debit)) . '</td>'
             . '<td class="amount">' . e(format_currency($credit)) . '</td>'
+            . '<td class="amount">' . e(ledger_closing_balance_text((float) $ledger['closing_net'])) . '</td>'
             . '</tr>';
     }
 
     if ($rows === '') {
-        $rows = '<tr><td colspan="5" class="empty">No ledger rows found.</td></tr>';
+        $rows = '<tr><td colspan="6" class="empty">No ledger rows found.</td></tr>';
     }
 
     $companyName = e((string) $company['name']);
@@ -7900,6 +7898,7 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
     $generatedAt = e(date('Y-m-d H:i:s'));
     $totalDebitText = e(format_currency($totalDebit));
     $totalCreditText = e(format_currency($totalCredit));
+    $totalClosingText = e(ledger_closing_balance_text($totalClosing));
 
     $printStyle = report_print_styles();
     return <<<HTML
@@ -7943,8 +7942,9 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
                     <th>Code</th>
                     <th>Account</th>
                     <th>Type</th>
-                    <th class="amount">Debit</th>
-                    <th class="amount">Credit</th>
+                    <th class="amount">Debit (FY)</th>
+                    <th class="amount">Credit (FY)</th>
+                    <th class="amount">Closing Balance</th>
                 </tr>
             </thead>
             <tbody>
@@ -7953,6 +7953,7 @@ function export_ledger_html(int $companyId, int $fiscalYearId): string
                     <td colspan="3">Total</td>
                     <td class="amount">{$totalDebitText}</td>
                     <td class="amount">{$totalCreditText}</td>
+                    <td class="amount">{$totalClosingText}</td>
                 </tr>
             </tbody>
         </table>

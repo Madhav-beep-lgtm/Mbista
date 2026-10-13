@@ -54,30 +54,10 @@ foreach ($allLedgers as $ledgerRow) {
 $statementRows = [];
 $openingBalance = 0.0;
 if ($selectedLedger) {
-    // Everything posted before the window (any fiscal year) carries forward --
-    // AND the opening journals dated on the window's own first day. Those are
-    // dated on the fiscal year's start because that is when the balance is
-    // true from, so a statement for "this year" used to find them inside the
-    // window and list them as transactions of day one, under an opening
-    // balance of nought. An opening is where the period started, not something
-    // that happened in it.
+    require_once __DIR__ . '/../../app/reports_engine.php';
     $openingSourceSql = accounting_opening_source_sql('v.source_type');
-    $openingStmt = db()->prepare("
-        SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
-        FROM voucher_entries ve
-        INNER JOIN vouchers v ON v.id = ve.voucher_id
-        WHERE ve.ledger_id = :lid AND v.company_id = :cid AND v.status = 'posted'
-          AND (v.voucher_date < :from_date
-               OR (v.voucher_date = :from_open AND {$openingSourceSql}))
-    ");
-    $openingStmt->execute(['lid' => $selectedLedgerId, 'cid' => $companyId,
-        'from_date' => $fromDate, 'from_open' => $fromDate]);
-    $openingBalance = round((float) $openingStmt->fetchColumn(), 2);
-    $directOpening = round((float) ($selectedLedger['opening_balance'] ?? 0), 2);
-    if ($directOpening > 0.004) {
-        $openingBalance += (string) ($selectedLedger['opening_side'] ?? 'debit') === 'credit'
-            ? -$directOpening : $directOpening;
-    }
+    $statementBalances = rc_ledger_balances($companyId, $fromDate, $toDate, '', 0, $selectedLedgerId, [], $fyStart);
+    $openingBalance = (float) ($statementBalances[0]['opening_net'] ?? 0);
 
     $stmtSql = "
         SELECT v.id AS voucher_id, v.voucher_no, v.voucher_type, v.reference_no, v.narration,
@@ -108,30 +88,10 @@ if ($selectedLedger) {
 // ---------------------------------------------------------------------------
 $balances = [];
 if (!$selectedLedger) {
-    $balancesSql = "
-        SELECT l.id, l.code, l.name, l.type,
-               COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = 'debit' THEN ve.amount ELSE 0 END), 0) AS debit_total,
-               COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND ve.entry_type = 'credit' THEN ve.amount ELSE 0 END), 0) AS credit_total
-        FROM ledgers l
-        LEFT JOIN voucher_entries ve ON ve.ledger_id = l.id
-        LEFT JOIN vouchers v ON v.id = ve.voucher_id
-            AND v.company_id = l.company_id AND v.fiscal_year_id = :fy AND v.status = 'posted'
-        WHERE l.company_id = :cid
-    ";
-    $balancesParams = ['fy' => $fiscalYearId, 'cid' => $companyId];
-    if ($typeFilter !== '') {
-        $balancesSql .= ' AND l.type = :ltype';
-        $balancesParams['ltype'] = $typeFilter;
-    }
-    if ($searchQuery !== '') {
-        $balancesSql .= ' AND (l.code LIKE :q1 OR l.name LIKE :q2)';
-        $like = '%' . $searchQuery . '%';
-        $balancesParams += ['q1' => $like, 'q2' => $like];
-    }
-    $balancesSql .= ' GROUP BY l.id, l.code, l.name, l.type ORDER BY l.code ASC';
-    $balancesStmt = db()->prepare($balancesSql);
-    $balancesStmt->execute($balancesParams);
-    $balances = $balancesStmt->fetchAll();
+    $balances = array_values(array_filter(
+        ledger_report_balances($companyId, $fiscalYearId),
+        static fn (array $row): bool => $typeFilter === '' || $row['type'] === $typeFilter
+    ));
 }
 
 $fmtMoney = static fn (float $amount): string => $currency . number_format($amount, 2);
@@ -192,7 +152,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if ($selectedLedger): ?>
         <div style="overflow-x:auto">
         <table class="reference-table">
-            <thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Party</th><th>Narration / Memo</th><th class="is-numeric">Debit</th><th class="is-numeric">Credit</th><th class="is-numeric">Balance</th></tr></thead>
+            <thead><tr><th>Date</th><th>Voucher</th><th>Type</th><th>Party</th><th>Narration / Memo</th><th class="is-numeric">Debit</th><th class="is-numeric">Credit</th><th class="is-numeric">Closing Balance</th></tr></thead>
             <tbody>
                 <?php
                 $running = $openingBalance;
@@ -245,15 +205,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <tbody>
                 <?php if ($balances === []): ?><tr><td colspan="7">No ledgers match the current filters.</td></tr><?php endif; ?>
                 <?php foreach ($balances as $row): ?>
-                    <?php $rowBalance = (float) $row['debit_total'] - (float) $row['credit_total']; ?>
+                    <?php $rowBalance = round((float) $row['closing_net'], 2); ?>
                     <tr>
                         <td><?= e($row['code']) ?></td>
                         <td><?= e($row['name']) ?></td>
                         <td><?= e($row['type']) ?></td>
                         <td class="is-numeric"><?= e($fmtMoney((float) $row['debit_total'])) ?></td>
                         <td class="is-numeric"><?= e($fmtMoney((float) $row['credit_total'])) ?></td>
-                        <td class="is-numeric <?= $rowBalance < 0 ? 'text-danger' : '' ?>"><?= e($fmtMoney(abs($rowBalance))) ?> <?= $rowBalance >= 0 ? 'Dr' : 'Cr' ?></td>
-                        <td><div style="display:flex;gap:6px"><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $row['id'])) ?>">Open</a><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/create-account.php?edit_id=' . (int) $row['id'])) ?>" title="Edit account details">Edit</a></div></td>
+                        <td class="is-numeric <?= $rowBalance < 0 ? 'text-danger' : '' ?>"><?= e($fmtMoney(abs($rowBalance))) ?> <?= $rowBalance > 0 ? 'Dr' : ($rowBalance < 0 ? 'Cr' : '') ?></td>
+                        <td><?php if ((int) $row['id'] > 0): ?><div style="display:flex;gap:6px"><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $row['id'])) ?>">Open</a><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/create-account.php?edit_id=' . (int) $row['id'])) ?>" title="Edit account details">Edit</a></div><?php else: ?>—<?php endif; ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
