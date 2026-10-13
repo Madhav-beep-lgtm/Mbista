@@ -262,7 +262,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
     </details>
 </div>
 
-<form method="get" class="workspace-form-grid" style="margin:14px 0">
+<form method="get" class="coa-filter-bar">
     <label>View
         <select id="coa-section" name="view" aria-controls="coa-tree-panel coa-posting-panel coa-audit-panel">
             <?php foreach ($coaViews as $viewKey => $viewLabel): ?>
@@ -276,8 +276,23 @@ $statusPill = static fn (string $status): string => $status === 'active'
     <div style="align-self:end;display:flex;gap:10px">
         <button class="button" type="submit"><?= icon('search') ?>Filter</button>
         <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Clear</a>
+        <details class="action-menu" id="coa-upload-menu">
+            <summary class="button secondary coa-upload-toggle" aria-label="Spreadsheet actions" title="Upload or download template">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5"/></svg>
+            </summary>
+            <div class="action-menu-options">
+                <button type="button" id="coa-upload-trigger">Upload</button>
+                <a href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>">Download template</a>
+            </div>
+        </details>
     </div>
 </form>
+<form method="post" enctype="multipart/form-data" id="coa-upload-form" hidden>
+    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+    <input type="hidden" name="action" value="coa_upload">
+    <input type="file" name="import_file" id="coa-upload-file" accept=".xlsx,.csv" aria-label="Upload chart of accounts spreadsheet" required>
+</form>
+<p id="coa-upload-status" role="status" hidden>Uploading spreadsheet for preview…</p>
 <?php if ($filteredLedgerCount > count($ledgers)): ?>
     <div class="notice">Showing the first <?= count($ledgers) ?> of <?= $filteredLedgerCount ?> matching ledgers. Narrow the search or group to locate another account.</div>
 <?php endif; ?>
@@ -294,31 +309,7 @@ $coaRowPill = static function (string $status): string {
     return '<span class="mbw-pill tone-red">Reject</span>';
 };
 ?>
-<details class="feature-disclosure" id="coa-import"<?= $coaStaged !== null ? ' open' : '' ?>>
-    <summary><span><strong><?= icon('documents') ?>Chart of accounts from a spreadsheet</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
-
-    
-
-    <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
-        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-        <input type="hidden" name="action" value="coa_upload">
-        <label>Spreadsheet<input type="file" name="import_file" accept=".xlsx,.csv" required></label>
-        <?php // The template sits beside the upload button rather than in the
-              // paragraph above: someone who has not got a file yet needs it
-              // before they can use this form, and that is the moment they are
-              // looking here. ?>
-        <div style="align-self:end;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <button type="submit" class="button"><?= icon('layers') ?>Upload &amp; Preview</button>
-            <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>"><?= icon('documents') ?>Download template</a>
-        </div>
-        <div style="grid-column:1/-1">
-            <span class="frm-optional">
-                .xlsx or .csv, up to <?= number_format(COA_IMPORT_MAX_ROWS) ?> rows &middot;
-                <a href="<?= e(url('admin/chart-of-accounts.php?import_template=csv')) ?>">template as .csv</a> &middot;
-                <a href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>">export the current chart to edit</a>
-            </span>
-        </div>
-    </form>
+<section class="mbw-card" id="coa-import" aria-label="Spreadsheet preview"<?= $coaStaged === null ? ' hidden' : '' ?>>
 
     <?php if ($coaStaged !== null): ?>
         <?php
@@ -440,7 +431,7 @@ $coaRowPill = static function (string $status): string {
             
         <?php endif; ?>
     <?php endif; ?>
-</details>
+</section>
 
 
 
@@ -533,6 +524,26 @@ $coaRowPill = static function (string $status): string {
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    var uploadMenu = document.getElementById('coa-upload-menu');
+    var uploadFile = document.getElementById('coa-upload-file');
+    document.getElementById('coa-upload-trigger').addEventListener('click', function () {
+        uploadMenu.open = false;
+        uploadFile.click();
+    });
+    uploadFile.addEventListener('change', function () {
+        if (!uploadFile.files.length) return;
+        document.getElementById('coa-upload-status').hidden = false;
+        document.getElementById('coa-upload-form').requestSubmit();
+    });
+    document.addEventListener('click', function (event) {
+        if (!uploadMenu.contains(event.target)) uploadMenu.open = false;
+    });
+    uploadMenu.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            uploadMenu.open = false;
+            uploadMenu.querySelector('summary').focus();
+        }
+    });
     var view = document.getElementById('coa-section');
     var search = document.getElementById('coa-search');
     var rows = Array.from(document.querySelectorAll('#coa-tree .coa-node'));

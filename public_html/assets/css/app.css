@@ -376,6 +376,16 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .action-menu-options { position: absolute; z-index: 100; right: 0; top: calc(100% + 6px); min-width: 190px; padding: 6px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); box-shadow: var(--shadow-menu); }
 .action-menu-options a { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--color-text); border-radius: var(--radius-control); }
 .action-menu-options a:hover, .action-menu-options a:focus-visible { background: var(--color-primary-soft); color: var(--color-primary); }
+.chart-accounts-page .coa-filter-bar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
+.chart-accounts-page .coa-filter-bar > label { width: 220px; max-width: 100%; font-size: 13px; }
+.chart-accounts-page .coa-filter-bar > label:nth-child(2) { width: 280px; }
+.chart-accounts-page .coa-filter-bar input,
+.chart-accounts-page .coa-filter-bar select,
+.chart-accounts-page .coa-filter-bar .button { min-height: 36px; height: 36px; padding: 6px 10px; font-size: 13px; }
+.chart-accounts-page .coa-filter-bar .coa-upload-toggle { width: 36px; padding: 0; }
+.chart-accounts-page #coa-upload-menu .action-menu-options button { display: flex; width: 100%; padding: 12px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
+.chart-accounts-page #coa-upload-menu .action-menu-options button:hover,
+.chart-accounts-page #coa-upload-menu .action-menu-options button:focus-visible { background: var(--color-primary-soft); color: var(--color-primary); }
 .modal-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; padding: var(--space-4); place-items: center; background: rgba(15, 23, 32, .45); }
 .modal-overlay:not(.is-open) { display: none; }
 .modal-card, dialog { width: min(100%, 680px); max-height: calc(100vh - 32px); overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-menu); }
