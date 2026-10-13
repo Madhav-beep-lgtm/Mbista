@@ -35,7 +35,7 @@ $bad = $input; $bad['tax_ledger_id'] = 1;
 if (!voucher_compose('sales', $bad, $ledgers)['errors']) throw new RuntimeException('Non-tax ledger accepted');
 $bad = $input; $bad['value_tax_rate'][0] = -13;
 if (!voucher_compose('sales', $bad, $ledgers)['errors']) throw new RuntimeException('Negative tax accepted');
-if (count(voucher_entry_type_catalog()) !== 8) throw new RuntimeException('Missing voucher types');
+if (count(voucher_entry_type_catalog()) !== 9 || !isset(voucher_entry_type_catalog()['production'])) throw new RuntimeException('Missing voucher types');
 $services = $input + ['trade_mode' => 'services'];
 foreach (['sales', 'credit_note'] as $type) {
     if (voucher_compose($type, $services, $ledgers)['errors']) throw new RuntimeException('Service sales rejected');

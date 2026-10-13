@@ -244,7 +244,7 @@ function voucher_type_url(string $type): string
 /** Voucher types intentionally entered from the compact voucher workspace. */
 function voucher_entry_type_catalog(): array
 {
-    return voucher_type_catalog();
+    return voucher_type_catalog() + ['production' => ['label' => 'Production Voucher', 'short' => 'Production']];
 }
 
 // ---------------------------------------------------------------------------

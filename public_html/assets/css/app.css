@@ -876,6 +876,13 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .vch-bill-actions { display:flex; justify-content:flex-end; gap:10px; margin:12px 0; }
 @media(max-width:480px) { .vch-bill-dialog .frm-grid { grid-template-columns:1fr; } }
 .frm-grid.vch-header-grid { grid-template-columns:repeat(3,minmax(0,260px)); align-items:start; justify-content:start; gap:16px; }
+.voucher-type-production .production-cost-row { margin:12px 0; padding:12px; border:1px solid var(--color-border); border-radius:8px; min-width:0; }
+.voucher-type-production .production-cost-row legend { padding:0 6px; font-size:13px; font-weight:600; }
+.voucher-type-production [hidden] { display:none !important; }
+.voucher-type-production .vch-table :is(input,select) { width:100%; min-width:0; }
+.voucher-type-production .vch-table th:first-child { width:65%; }
+.voucher-type-production .vch-table td { padding:8px; }
+.voucher-type-production .frm-section > .button { margin-top:10px; }
 .frm-grid.vch-trade-header-grid { grid-template-columns:repeat(4,minmax(0,260px)); padding-top:8px; }
 .vch-party-label { position:relative; }
 .vch-party-label > em { position:absolute; top:-0.7em; left:0; font-size:11px; line-height:1; }

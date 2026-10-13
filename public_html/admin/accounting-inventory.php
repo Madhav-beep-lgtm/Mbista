@@ -13,6 +13,7 @@ if (defined('INVENTORY_PAGE')) {
 }
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/manufacturing_engine.php';
+require_once __DIR__ . '/../../app/production_voucher.php';
 // The item master is shared with the Jewellery module, so this page has to be
 // able to read and complete the jewellery half of an item. Pure function
 // definitions — it does nothing unless the client has the module switched on.
@@ -74,6 +75,7 @@ $itemTypes = $inventoryProfile['show_manufacturing']
  */
 function inv_back_url(string $extra = ''): string
 {
+    if (defined('PRODUCTION_VOUCHER')) return 'admin/voucher-form.php?type=production';
     if (defined('INVENTORY_PAGE')) {
         return 'admin/' . inventory_pages()[INVENTORY_PAGE]['file']
             . ($extra === '' ? '' : (str_starts_with($extra, '#') ? $extra : '?' . ltrim($extra, '&?')));
@@ -231,6 +233,10 @@ function inventory_post_production_voucher(int $companyId, int $fiscalYearId, in
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
+    if (defined('PRODUCTION_VOUCHER') && $action !== 'create_manufacturing_order') {
+        http_response_code(400);
+        exit('Unsupported production action.');
+    }
     if (defined('ITEMS_WORKSPACE') && !in_array($action, ['save_item', 'save_item_unit', 'save_stock_type'], true)) {
         http_response_code(400);
         exit('Unsupported Items action.');
@@ -1460,7 +1466,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'create_manufacturing_order') {
+        if (!defined('PRODUCTION_VOUCHER')) {
+            flash('error', 'Create production through the Production voucher.');
+            redirect('admin/voucher-form.php?type=production');
+        }
         require_permission('inventory', 'create');
+        require_permission('accounting', 'post');
+        $_SESSION['production_retry'][$companyId . ':' . $fiscalYearId] = array_intersect_key($_POST, array_flip([
+            'order_no', 'voucher_date', 'finished_item_id', 'quantity', 'input_item_id', 'input_quantity',
+            'cost_description', 'cost_amount', 'cost_mode', 'cost_expense', 'cost_credit', 'cost_centre', 'cost_reference', 'notes',
+        ]));
+        if (staff_accountant_forces_approval()) {
+            flash('error', 'Production posting requires an authorised posting user.');
+            redirect(inv_back_url());
+        }
+        if (inv_accounting_method($companyId) !== 'periodic') {
+            flash('error', 'This production voucher requires periodic inventory accounting.');
+            redirect(inv_back_url());
+        }
+        try {
+            $productionCosts = production_cost_lines($_POST, $companyId);
+            $productionDate = inventory_valid_date((string) ($_POST['voucher_date'] ?? ''));
+            $productionFy = $productionDate ? fiscal_year_for_date($companyId, $productionDate) : null;
+            if (!$productionFy || (int) $productionFy['id'] !== $fiscalYearId || (int) ($_POST['context_fiscal_year_id'] ?? 0) !== $fiscalYearId) {
+                throw new RuntimeException('Select a production date in the active financial year. Refresh if the year changed.');
+            }
+            if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9\/-]{0,59}$/', (string) ($_POST['order_no'] ?? ''))) throw new RuntimeException('Enter a valid production voucher number (up to 60 characters).');
+            $_POST['production_mode'] = 'complete';
+            $_POST['started_on'] = $_POST['completed_on'] = $productionDate;
+            $_POST['labour_cost'] = 0;
+            $_POST['overhead_absorbed'] = array_sum(array_column($productionCosts, 'amount'));
+            $_POST['byproduct_value'] = $_POST['abnormal_waste_cost'] = 0;
+            $_POST['bom_id'] = 0;
+            $_POST['notes'] = json_encode(['narration' => trim((string) ($_POST['notes'] ?? '')), 'additional_costs' => $productionCosts], JSON_THROW_ON_ERROR);
+        } catch (Throwable $exception) {
+            flash('error', $exception->getMessage());
+            redirect(inv_back_url());
+        }
         if (!($inventoryProfile['show_manufacturing'] ?? false)) {
             flash('error', 'Manufacturing orders are available only for manufacturing companies.');
             redirect(inv_back_url());
@@ -1486,7 +1528,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $startedOn = inventory_valid_date((string) ($_POST['started_on'] ?? '')) ?? date('Y-m-d');
         $completedOn = inventory_valid_date((string) ($_POST['completed_on'] ?? '')) ?? date('Y-m-d');
         $finishedItem = inventory_company_item($finishedItemId, $companyId);
-        if (!$finishedItem || $quantity <= 0) {
+        if (!$finishedItem || $quantity <= 0 || !is_finite($quantity) || $finishedItem['status'] !== 'active') {
             flash('error', 'Finished item and quantity are required.');
             redirect(inv_back_url());
         }
@@ -1498,15 +1540,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $inputItemId = (int) $inputItemIdRaw;
             $inputQty = round((float) ($inputQuantities[$index] ?? 0), 3);
             $inputRate = round((float) ($inputRates[$index] ?? 0), 2);
-            if ($inputItemId <= 0 || $inputQty <= 0) {
+            if ($inputItemId <= 0 && $inputQty == 0) {
                 continue;
+            }
+            if ($inputItemId <= 0 || $inputQty <= 0 || !is_finite($inputQty)) {
+                flash('error', 'Each material line requires an item and positive quantity.');
+                redirect(inv_back_url());
             }
             if ($inputItemId === $finishedItemId) {
                 flash('error', 'The finished item cannot also be one of its own input materials.');
                 redirect(inv_back_url());
             }
             $inputItem = inventory_company_item($inputItemId, $companyId);
-            if (!$inputItem) {
+            if (!$inputItem || $inputItem['status'] !== 'active') {
                 flash('error', 'Input item not found for this company.');
                 redirect(inv_back_url());
             }
@@ -1542,6 +1588,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             db()->beginTransaction();
+            // Lock in stable order, then recheck aggregated quantities inside the transaction.
+            $requiredStock = [];
+            foreach ($inputs as $input) {
+                $id = (int) $input['item']['id'];
+                $requiredStock[$id] = ($requiredStock[$id] ?? 0.0) + $input['qty'];
+            }
+            $lockIds = array_unique([...array_keys($requiredStock), $finishedItemId]);
+            sort($lockIds);
+            foreach ($lockIds as $id) {
+                $lock = db()->prepare('SELECT id FROM inventory_items WHERE company_id = ? AND id = ? FOR UPDATE');
+                $lock->execute([$companyId, $id]);
+                if (!$lock->fetchColumn()) throw new RuntimeException('Production item no longer exists.');
+                $freshItem = inventory_company_item($id, $companyId);
+                if (($requiredStock[$id] ?? 0) > (float) $freshItem['on_hand'] + 0.0005) throw new RuntimeException('Insufficient stock for ' . $freshItem['sku']);
+            }
             $stmt = db()->prepare('
                 INSERT INTO manufacturing_orders (company_id, fiscal_year_id, order_no, finished_item_id, bom_id, quantity, labour_cost, overhead_absorbed, byproduct_value, abnormal_waste_cost, status, started_on, completed_on, notes)
                 VALUES (:company_id, :fiscal_year_id, :order_no, :finished_item_id, :bom_id, :quantity, :labour_cost, :overhead_absorbed, :byproduct_value, :abnormal_waste_cost, :status, :started_on, :completed_on, :notes)
@@ -1673,10 +1734,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             $produceTxnId = (int) db()->lastInsertId();
             inv_apply_movement($companyId, $finishedItemId, $quantity, 0.0, $finishedRate, $completedOn, (string) ($finishedItem['valuation_method'] ?? 'weighted_average'), $produceTxnId);
-            $voucherId = inventory_post_production_voucher($companyId, $fiscalYearId, $orderId, $orderNo, $completedOn, inv_item_stock_ledger_id($companyId, $finishedItem), $inputCostByLedger, $userId, [
-                'labour' => $labourCost, 'overhead' => $overheadAbsorbed,
-                'byproduct' => $byproductValue, 'abnormal' => $abnormalWaste,
-            ]);
+            $voucherId = production_post_costs($companyId, $fiscalYearId, $orderId, $orderNo, $completedOn, $userId, $productionCosts);
             // Variances vs the BOM standard, when this order was built from one.
             if ($bom) {
                 $actualLines = array_map(static fn (array $in): array => ['item_id' => (int) $in['item']['id'], 'qty' => $in['qty'], 'rate' => $in['rate']], $inputs);
@@ -1697,8 +1755,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->commit();
             security_event('inventory_movement_posted', 'success', 'Manufacturing order #' . $orderId . ' created.', $companyId, $userId);
             log_activity('manufacturing_order', $orderId, 'completed', 'Manufacturing order completed.', $userId);
-            flash('success', 'Manufacturing order ' . $orderNo . ' completed and stock updated.'
-                . ($voucherId > 0 ? ' Journal voucher MFG-' . $orderNo . ' posted (finished goods Dr / materials Cr).' : ' Link ledgers to the items involved to auto-post the production journal voucher.'));
+            unset($_SESSION['production_retry'][$companyId . ':' . $fiscalYearId]);
+            flash('success', 'Production voucher ' . $orderNo . ' posted and stock updated.'
+                . ($voucherId > 0 ? ' Additional costs posted to the accounts.' : ' No financial entries required.'));
         } catch (Throwable $exception) {
             if (db()->inTransaction()) {
                 db()->rollBack();
@@ -1880,7 +1939,7 @@ if ($editId > 0) {
     $editItem = $stmt->fetch() ?: null;
 }
 
-$ledgerStmt = db()->prepare("SELECT id, code, name FROM ledgers WHERE company_id = :company_id AND status = 'active' ORDER BY code ASC");
+$ledgerStmt = db()->prepare("SELECT id, code, name, type FROM ledgers WHERE company_id = :company_id AND status = 'active' ORDER BY code ASC");
 $ledgerStmt->execute(['company_id' => $companyId]);
 $ledgers = $ledgerStmt->fetchAll();
 
@@ -1918,6 +1977,16 @@ $itemStmt = db()->prepare('
 ');
 $itemStmt->execute(['company_id' => $companyId]);
 $items = $itemStmt->fetchAll();
+if (defined('PRODUCTION_VOUCHER')) {
+    require_permission('inventory', 'create');
+    require_permission('accounting', 'post');
+    if (empty($inventoryProfile['show_manufacturing'])) {
+        flash('error', 'Production is available for manufacturing companies.');
+        redirect('admin/items.php');
+    }
+    require __DIR__ . '/../../app/views/vouchers/production.php';
+    return;
+}
 
 // Discard retry data from the retired purchase grid without changing saved records.
 unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_bills'], $_SESSION['inv_purchase_grid_errors']);
@@ -2815,57 +2884,7 @@ $invMoveItemOptions = static function () use ($items): string {
     <?php endif; ?>
     <?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
         <?php if ($invShows('manufacturing')): ?>
-        <details class="feature-disclosure" id="manufacturing" open>
-            <summary><span><strong><?= icon('settings') ?>Production Order</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-            <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
-                <input type="hidden" name="action" value="create_manufacturing_order">
-                <label>Order no<input type="text" name="order_no" placeholder="Leave blank for auto"></label>
-                <label>Mode<select name="production_mode">
-                    <option value="complete">Complete immediately (consume + produce)</option>
-                    <option value="start">Start production — Work in Progress</option>
-                </select></label>
-                <label>Finished item<select name="finished_item_id" required><option value="">Select finished item</option><?php foreach ($items as $item): ?><?php if ($item['status'] !== 'active') { continue; } ?><option value="<?= e((int) $item['id']) ?>"><?= e($item['sku'] . ' - ' . $item['name'] . ' (' . str_replace('_', ' ', $item['item_type']) . ')') ?></option><?php endforeach; ?></select></label>
-                <label>Quantity produced<input type="number" step="0.001" min="0.001" name="quantity" required></label>
-                <label>Started on<input type="date" name="started_on" value="<?= e(date('Y-m-d')) ?>"></label>
-                <label>Completed on<input type="date" name="completed_on" value="<?= e(date('Y-m-d')) ?>"></label>
-                <?php
-                $bomOptions = table_exists('bom_headers')
-                    ? db()->query("SELECT bh.id, bh.bom_no, bh.output_qty, i.sku FROM bom_headers bh JOIN inventory_items i ON i.id = bh.finished_item_id WHERE bh.company_id = " . $companyId . " AND bh.status = 'active' ORDER BY bh.bom_no")->fetchAll(PDO::FETCH_ASSOC)
-                    : [];
-                ?>
-                <label>Bill of materials (optional)<select name="bom_id"><option value="0">No BOM — free-form inputs</option><?php foreach ($bomOptions as $b): ?><option value="<?= e((int) $b['id']) ?>"><?= e($b['bom_no'] . ' → ' . $b['sku'] . ' (batch ' . number_format((float) $b['output_qty'], 3) . ')') ?></option><?php endforeach; ?></select></label>
-                <label>Direct labour cost<input type="number" step="0.01" min="0" name="labour_cost" value="0.00"></label>
-                <label>Overhead absorbed (normal capacity)<input type="number" step="0.01" min="0" name="overhead_absorbed" value="0.00"></label>
-                <label>By-product / scrap value<input type="number" step="0.01" min="0" name="byproduct_value" value="0.00"></label>
-                <label>Abnormal waste cost <small style="color:var(--mbw-muted)">(expensed, never inventoried)</small><input type="number" step="0.01" min="0" name="abnormal_waste_cost" value="0.00"></label>
-                <div class="workspace-span-2">
-                    <strong style="font-size:13px;color:var(--mbw-heading)">Input materials</strong>
-                    
-                    <div style="overflow-x:auto">
-                    <table id="mo-input-lines">
-                        <thead><tr><th>Input item</th><th class="is-numeric" style="width:150px">Quantity</th><th class="is-numeric" style="width:170px">Rate</th><th style="width:44px"></th></tr></thead>
-                        <tbody>
-                            <?php for ($i = 0; $i < 4; $i++): ?>
-                                <tr>
-                                    <?php // Four rows once meant four copies of the whole item master.
-                                          // One list now, shared. See shared_options(). ?>
-                                    <?php $inputOpts = shared_options('inv-input-items', $invItemOptions); ?>
-                                    <td><select name="input_item_id[]"<?= $inputOpts['fill'] ? ' data-fill-from="inv-input-items"' : '' ?>><?= $inputOpts['html'] ?></select></td>
-                                    <td class="is-numeric"><input type="number" step="0.001" min="0" name="input_quantity[]"></td>
-                                    <td class="is-numeric"><input type="number" step="0.01" min="0" name="input_rate[]" placeholder="Auto: purchase rate"></td>
-                                    <td><button type="button" class="button secondary mbw-delete-action" title="Delete this row" aria-label="Delete this row" onclick="var b=this.closest('tbody');if(b.rows.length>1){this.closest('tr').remove();}else{this.closest('tr').querySelectorAll('input').forEach(function(i){i.value='';});this.closest('tr').querySelector('select').selectedIndex=0;}"><?= icon('trash') ?></button></td>
-                                </tr>
-                            <?php endfor; ?>
-                        </tbody>
-                    </table>
-                    </div>
-                    <button type="button" class="button secondary" style="margin-top:6px" onclick="var t=document.querySelector('#mo-input-lines tbody');var r=t.rows[0].cloneNode(true);r.querySelectorAll('input').forEach(function(i){i.value='';});r.querySelector('select').selectedIndex=0;t.appendChild(r);">+ Add input row</button>
-                </div>
-                <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-                <button type="submit"><?= icon('settings') ?>Save production order</button>
-            </form>
-        </details>
+        <a class="button" href="<?= e(url('admin/voucher-form.php?type=production')) ?>"><?= icon('settings') ?>New Production voucher</a>
         <?php endif; ?>
 
         <?php if ($invShows('bom')): ?>
@@ -2910,24 +2929,6 @@ $invMoveItemOptions = static function () use ($items): string {
 </section>
 <?php endif; ?>
 
-<?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing' && $invTask === 'manufacturing'): ?>
-    <?php
-    $flowSteps = [
-        ['Create Production Order', url('admin/accounting-inventory.php?view=manufacturing#manufacturing'), 'Open the production order form'],
-        ['Select Finished Item & Inputs', url('admin/accounting-inventory.php?view=manufacturing#manufacturing'), 'Pick the finished item and its material lines'],
-        ['Issue Materials', url('admin/accounting-inventory.php?view=manufacturing#manufacturing'), 'Saving in Start mode issues the materials to production'],
-        ['Work in Progress', url('admin/reports-center.php?report=manufacturing-wip'), 'Open the WIP report — value locked in open orders'],
-        ['Complete Production', url('admin/accounting-inventory.php?view=manufacturing#manufacturing-orders'), 'Complete an open order from the orders table'],
-        ['Finished Goods Receipt', url('admin/accounting-inventory.php#stock-movement'), 'Completion books the produce movement into stock'],
-        ['Stock & Accounting Updated', url('admin/reports-center.php?report=manufacturing-cost'), 'Production cost report; ledger-linked items also post a journal voucher'],
-    ];
-    ?>
-    <section class="mbw-flow-panel manufacturing-flow" aria-label="Manufacturing production workflow">
-        <?php foreach ($flowSteps as $stepIndex => [$stepLabel, $stepUrl, $stepTitle]): ?>
-            <a href="<?= e($stepUrl) ?>" title="<?= e($stepTitle) ?>"><b><?= e((string) ($stepIndex + 1)) ?></b><span><?= e($stepLabel) ?></span></a>
-        <?php endforeach; ?>
-    </section>
-<?php endif; ?>
 
 <?php if ($invView === 'inventory'): ?>
 <?php if ($invShows('item-stock-summary')): ?>
@@ -3167,13 +3168,13 @@ $invMoveItemOptions = static function () use ($items): string {
                 <?php foreach ($manufacturingOrders as $order): ?>
                     <?php $orderOpen = in_array((string) $order['status'], ['draft', 'in_progress'], true); ?>
                     <tr>
-                        <td><?= e($order['order_no']) ?></td>
+                        <td><a href="<?= e(url('admin/production-voucher-view.php?id=' . (int) $order['id'])) ?>"><?= e($order['order_no']) ?></a></td>
                         <td><?= e($order['sku'] . ' - ' . $order['finished_item_name']) ?></td>
                         <td class="is-numeric"><?= e(number_format((float) $order['quantity'], 3)) ?></td>
                         <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $order['input_cost'], 2)) ?> <small style="color:var(--mbw-muted)">(<?= e((int) $order['input_lines']) ?> lines)</small></td>
                         <td><span class="mbw-pill <?= $order['status'] === 'completed' ? 'tone-green' : ($order['status'] === 'cancelled' ? 'tone-red' : 'tone-amber') ?>"><?= e(str_replace('_', ' ', ucfirst($order['status']))) ?></span></td>
-                        <td><?= e($order['started_on'] ?? '-') ?></td>
-                        <td><?= e($order['completed_on'] ?? '-') ?></td>
+                        <td><?= e(app_date($order['started_on'] ?? '')) ?></td>
+                        <td><?= e(app_date($order['completed_on'] ?? '')) ?></td>
                         <td style="white-space:nowrap">
                             <?php if ($orderOpen): ?>
                                 <form method="post" style="display:inline" data-confirm="Complete <?= e($order['order_no']) ?>? <?= e(number_format((float) $order['quantity'], 3)) ?> finished goods will be received into stock at the material cost.">

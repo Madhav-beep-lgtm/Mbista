@@ -1,6 +1,13 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+if (($_GET['type'] ?? '') === 'production') {
+    define('PRODUCTION_VOUCHER', true);
+    $_GET['view'] = 'manufacturing';
+    $_GET['task'] = 'manufacturing';
+    require __DIR__ . '/accounting-inventory.php';
+    return;
+}
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/voucher_types.php';
 require_once __DIR__ . '/../../app/voucher_bills.php';
