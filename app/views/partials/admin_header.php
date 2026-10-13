@@ -2,6 +2,8 @@
 $pageTitle = $pageTitle ?? 'Admin';
 $pageSubtitle = $pageSubtitle ?? '';
 $bodyClass = $bodyClass ?? 'admin-layout';
+$headerNavigationNeutral = !empty($_SESSION['books_navigation_neutral']);
+unset($_SESSION['books_navigation_neutral']);
 // Legacy rc-*/blueprint styles resolve their tokens from this body class;
 // keep it so pages that still use them don't lose their variables.
 if (str_contains($bodyClass, 'admin-layout') && !str_contains($bodyClass, 'accounting-reference-layout')) {
@@ -285,7 +287,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
     <link rel="mask-icon" href="/assets/img/favicon.svg" color="#1676A3">
     <?php require __DIR__ . '/app_styles.php'; ?>
 </head>
-<body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>">
+<body class="<?= e($bodyClass) ?>" data-date-mode="<?= e(date_mode()) ?>" data-nav-neutral="<?= $headerNavigationNeutral ? 'true' : 'false' ?>">
 <?php require __DIR__ . '/sidebar_boot.php'; ?>
 <div class="admin-shell">
     <aside class="admin-sidebar" id="adminSidebar">

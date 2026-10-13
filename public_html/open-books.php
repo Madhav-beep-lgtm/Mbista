@@ -31,4 +31,5 @@ if (!activate_company_context($booksCompanyId, true)) {
 
 security_event('company_switch', 'success', 'Client opened own accounting books (company #' . $booksCompanyId . ').', $booksCompanyId, (int) $user['id']);
 flash('success', 'Opened accounting for ' . ($profile['organization_name'] ?? 'your organization') . '.');
+$_SESSION['books_navigation_neutral'] = true;
 redirect('admin/accounting-dashboard.php');

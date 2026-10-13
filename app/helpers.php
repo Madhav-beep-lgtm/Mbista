@@ -1984,6 +1984,7 @@ function handle_company_switch(int $companyId, string $failureUrl): never
         }
         flash('success', 'Opened full accounting for ' . ($bookProfile['organization_name'] ?? 'client') . '.'
             . ($bookAccessLevel === 'approval' ? ' Entries you make here are sent to the client and admin for approval.' : ''));
+        $_SESSION['books_navigation_neutral'] = true;
         redirect('admin/accounting-dashboard.php');
     }
 
@@ -1994,6 +1995,7 @@ function handle_company_switch(int $companyId, string $failureUrl): never
         }
 
         flash('success', 'M.Bista superadmin portal opened.');
+        $_SESSION['books_navigation_neutral'] = true;
         redirect('admin/index.php');
     }
 
@@ -2003,6 +2005,7 @@ function handle_company_switch(int $companyId, string $failureUrl): never
     }
 
     flash('success', 'Opened ' . (string) ($company['name'] ?? 'company') . '.');
+    $_SESSION['books_navigation_neutral'] = true;
     redirect('admin/index.php');
 }
 

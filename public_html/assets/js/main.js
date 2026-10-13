@@ -664,27 +664,35 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  const currentParams = new URLSearchParams(window.location.search);
-  document.querySelectorAll('.admin-nav a, .site-header .nav a').forEach((link) => {
-    let linkUrl;
-    try {
-      linkUrl = new URL(link.href, window.location.origin);
-    } catch (error) {
-      return;
+  // Select one destination; expandable headings are never active pages.
+  document.querySelectorAll('.admin-nav, .site-header .nav').forEach((nav) => {
+    const links = Array.from(nav.querySelectorAll('a'));
+    const serverActive = links.filter(link => link.classList.contains('is-active'));
+    links.forEach(link => {
+      link.classList.remove('is-active');
+      link.removeAttribute('aria-current');
+    });
+    if (document.body.dataset.navNeutral === 'true') return;
+    const current = new URL(window.location.href);
+    const destinations = links.filter(link => {
+      const href = (link.getAttribute('href') || '').trim();
+      return href && !href.startsWith('#') && !link.hasAttribute('data-nav-toggle');
+    });
+    const matches = destinations.map(link => {
+      let target;
+      try { target = new URL(link.href, current); } catch { return null; }
+      if (target.origin !== current.origin || target.pathname !== current.pathname || target.hash) return null;
+      for (const [key, value] of target.searchParams) {
+        const actual = current.searchParams.get(key) ?? (key === 'tab' ? 'sales' : null);
+        if (value !== actual) return null;
+      }
+      return { link, score: Array.from(target.searchParams).length };
+    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    const selected = matches[0]?.link || destinations.find(link => serverActive.includes(link));
+    if (selected) {
+      selected.classList.add('is-active');
+      selected.setAttribute('aria-current', 'page');
     }
-    if (linkUrl.hash || linkUrl.pathname !== window.location.pathname) {
-      return;
-    }
-    const linkParams = new URLSearchParams(linkUrl.search);
-    const linkView = linkParams.get('view');
-    if (linkView !== null && linkView !== currentParams.get('view')) {
-      return;
-    }
-    const linkTab = linkParams.get('tab');
-    if (linkTab !== null && linkTab !== (currentParams.get('tab') || 'sales')) {
-      return;
-    }
-    link.classList.add('is-active');
   });
 });
 
@@ -938,39 +946,39 @@ document.addEventListener('DOMContentLoaded', () => {
       category: 'admin/jewellery.php?view=masters#item-categories',
       karigar_id: 'admin/jewellery-workshop.php?view=karigars',
       'l_karigar_id[]': 'admin/jewellery-workshop.php?view=karigars',
-      party_id: 'admin/accounting-parties.php',
-      ledger_id: 'admin/chart-ledgers.php',
-      settle_ledger_id: 'admin/chart-ledgers.php',
+      party_id: 'admin/create-account.php',
+      ledger_id: 'admin/create-account.php',
+      settle_ledger_id: 'admin/create-account.php',
     },
     accounting: {
-      party_id: 'admin/accounting-parties.php',
-      ledger_id: 'admin/chart-ledgers.php',
+      party_id: 'admin/create-account.php',
+      ledger_id: 'admin/create-account.php',
       item_id: 'admin/accounting-inventory.php?view=inventory',
-      group_id: 'admin/chart-groups.php',
+      group_id: 'admin/create-account.php?level=group',
       // The specialised voucher screens name each ledger slot for the job it
       // does — the bank a payment leaves, the head a sale credits — so every
       // one has to be listed for itself.
-      'ledger_id[]': 'admin/chart-ledgers.php',
-      'tender_ledger[]': 'admin/chart-ledgers.php',
-      'line_ledger[]': 'admin/chart-ledgers.php',
-      'value_ledger[]': 'admin/chart-ledgers.php',
-      contra_from_ledger: 'admin/chart-ledgers.php',
-      contra_to_ledger: 'admin/chart-ledgers.php',
-      settlement_ledger_id: 'admin/chart-ledgers.php',
-      tax_ledger_id: 'admin/chart-ledgers.php',
+      'ledger_id[]': 'admin/create-account.php',
+      'tender_ledger[]': 'admin/create-account.php',
+      'line_ledger[]': 'admin/create-account.php',
+      'value_ledger[]': 'admin/create-account.php',
+      contra_from_ledger: 'admin/create-account.php',
+      contra_to_ledger: 'admin/create-account.php',
+      settlement_ledger_id: 'admin/create-account.php',
+      tax_ledger_id: 'admin/create-account.php',
     },
     hospitality: {
       ingredient_id: 'admin/hospitality.php?view=ingredients',
       menu_item_id: 'admin/hospitality.php?view=menu-items',
       sales_item_id: 'admin/hospitality.php?view=menu-items',
       recipe_id: 'admin/hospitality.php?view=recipes',
-      ledger_id: 'admin/chart-ledgers.php',
+      ledger_id: 'admin/create-account.php',
     },
     assets: {
       category_id: 'admin/fixed-assets.php?view=categories',
-      buyer_party_id: 'admin/accounting-parties.php',
-      lessor_party_id: 'admin/accounting-parties.php',
-      ledger_id: 'admin/chart-ledgers.php',
+      buyer_party_id: 'admin/create-account.php',
+      lessor_party_id: 'admin/create-account.php',
+      ledger_id: 'admin/create-account.php',
     },
     hr: {
       leave_type_id: 'admin/hr.php?view=leave',
@@ -978,7 +986,7 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     payroll: {
       employee_id: 'admin/payroll-employees.php',
-      ledger_id: 'admin/chart-ledgers.php',
+      ledger_id: 'admin/create-account.php',
     },
     workspace: {
       client_id: 'admin/workspace.php?view=clients',
@@ -987,8 +995,8 @@ document.addEventListener('DOMContentLoaded', () => {
       contract_id: 'admin/workspace.php?view=contracts',
       compliance_type_id: 'admin/compliance.php?view=types',
       type_id: 'admin/compliance.php?view=types',
-      fine_ledger_id: 'admin/chart-ledgers.php',
-      party_id: 'admin/accounting-parties.php',
+      fine_ledger_id: 'admin/create-account.php',
+      party_id: 'admin/create-account.php',
     },
   };
 
