@@ -59,6 +59,20 @@ function app_date(?string $adDate, string $adFormat = 'd M Y'): string
     return $ad . ' (' . $bs . ' BS)';
 }
 
+/** Numeric date matching filter controls; the surrounding heading identifies AD/BS. */
+function app_date_short(?string $adDate): string
+{
+    $adDate = substr((string) $adDate, 0, 10);
+    if ($adDate === '' || strtotime($adDate) === false) {
+        return '';
+    }
+    if (date_mode() === 'bs') {
+        $bs = ad_to_bs($adDate);
+        return $bs === null ? app_date($adDate, 'Y-m-d') . ' AD' : sprintf('%04d-%02d-%02d', $bs[0], $bs[1], $bs[2]);
+    }
+    return date('Y-m-d', strtotime($adDate));
+}
+
 /** Format an AD period (from-to) honoring the active date mode. */
 function app_date_range(?string $fromAd, ?string $toAd): string
 {

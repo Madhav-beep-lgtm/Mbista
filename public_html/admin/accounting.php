@@ -473,20 +473,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th class="is-numeric">Total</th><th>Status</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?><th>Actions</th></tr>
+            <tr><th>Date (<?= e(strtoupper(date_mode())) ?>)</th><th>Voucher No</th><th>Type</th><th>Reference</th><th class="is-numeric">Total</th><th>Status</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?><th>Actions</th></tr>
         </thead>
         <tbody>
             <?php if ($vouchers === []): ?>
-                <tr><td colspan="<?= $hasVoucherApprovals ? '9' : '8' ?>">No vouchers posted for selected context.</td></tr>
+                <tr><td colspan="<?= $hasVoucherApprovals ? '8' : '7' ?>">No vouchers posted for selected context.</td></tr>
             <?php endif; ?>
             <?php $canEditVouchers = user_can('edit') && user_can_do('accounting', 'edit'); ?>
             <?php $canDeleteVouchers = user_can('delete') && user_can_do('accounting', 'edit') && !staff_accountant_forces_approval(); ?>
             <?php foreach ($vouchers as $voucher): ?>
                 <tr>
-                    <td><?= e(app_date((string) (($voucher['voucher_date'] ?? '') ?: substr((string) ($voucher['posted_at'] ?? ''), 0, 10)), 'Y-m-d')) ?></td>
+                    <td><?= e(app_date_short((string) (($voucher['voucher_date'] ?? '') ?: substr((string) ($voucher['posted_at'] ?? ''), 0, 10)))) ?></td>
                     <td><a href="<?= e(url('admin/voucher-view.php?id=' . (int) $voucher['id'])) ?>" data-voucher-preview><?= e($voucher['voucher_no']) ?></a></td>
                     <td><?php $vRowType = voucher_type_spec((string) $voucher['voucher_type']); ?><span class="mbw-pill tone-<?= e((string) $vRowType['tone']) ?>"><?= e((string) $vRowType['short']) ?></span></td>
-                    <td><?= e($voucher['party_name'] ?? '') ?></td>
                     <td><?= e($voucher['reference_no'] ?? '') ?></td>
                     <td class="is-numeric"><?= e(site_currency_symbol()) ?><?= e(number_format((float) $voucher['total_amount'], 2)) ?></td>
                     <td><?php
