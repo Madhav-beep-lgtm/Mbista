@@ -252,16 +252,26 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .chart-accounts-page .coa-action:hover { background:var(--color-primary-soft); }
 .chart-accounts-page .coa-action:focus-visible { outline:2px solid var(--color-primary); outline-offset:2px; }
 .chart-accounts-page #account-create-form h3 { margin: 20px 0 12px; font-size: 14px; }
-.items-creation-page .items-creation-card { padding: 20px; }
-.items-creation-page .item-creation-form fieldset { margin: 18px 0; padding: 14px; border: 1px solid var(--color-border); border-radius: var(--radius-control); min-width: 0; }
+.items-creation-page .items-creation-card { padding: 16px; }
+.items-creation-page .item-creation-form { max-width: 1200px; }
+.items-creation-page .item-creation-form fieldset { margin: 12px 0; padding: 12px 14px 14px; border: 1px solid var(--color-border); border-radius: 10px; min-width: 0; background: var(--color-surface); box-shadow: 0 2px 5px rgb(15 23 42 / 3%); }
 .items-creation-page .item-creation-form legend { padding: 0 6px; font-size: 14px; font-weight: 650; }
 .items-creation-page .workspace-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
-.items-creation-page label { min-width: 0; font-size: 13px; }
-.items-creation-page .item-creation-form input:not([type="checkbox"]), .items-creation-page .item-creation-form select { min-height: 38px; }
+.items-creation-page label { min-width: 0; font-size: 13px; gap: 5px; }
+.items-creation-page .item-creation-form :is(input:not([type="checkbox"]):not([type="hidden"]), select, .ss-trigger) { width: 100%; min-width: 0; min-height: 36px; height: 36px; box-sizing: border-box; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+.items-creation-page .item-creation-form input[type="number"] { text-align: right; font-variant-numeric: tabular-nums; }
+.items-creation-page .item-creation-form :is(input, select, .ss-trigger):focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.items-creation-page .item-details-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.items-creation-page .item-name-field { grid-column: span 2; }
+.items-creation-page .item-rates-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.items-creation-page .item-ledgers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.items-creation-page .item-creation-form .checkbox-line { display: flex; align-items: center; gap: 8px; padding: 8px 0; }
+.items-creation-page .item-creation-form .actions { padding-top: 12px; border-top: 1px solid var(--color-border); }
 .items-creation-page [hidden] { display: none !important; }
 .items-creation-page table { margin-top: 12px; width: 100%; border-collapse: collapse; }
 .items-creation-page th, .items-creation-page td { border: 1px solid var(--color-border); padding: 10px; text-align: left; }
-@media (max-width: 760px) { .items-creation-page .workspace-form-grid { grid-template-columns: 1fr; } .items-creation-page .workspace-span-2 { grid-column: auto; } }
+@media (max-width: 1100px) { .items-creation-page .item-details-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .items-creation-page .item-name-field { grid-column: auto; } }
+@media (max-width: 760px) { .items-creation-page .workspace-form-grid { grid-template-columns: 1fr; } .items-creation-page .workspace-span-2, .items-creation-page .item-name-field { grid-column: auto; } .items-creation-page .items-creation-card { padding: 12px; } }
 .chart-accounts-page #account-create-form fieldset { margin: 20px 0 0; padding: 14px; border: 1px solid var(--color-border); border-radius: var(--radius-control); min-width: 0; }
 .chart-accounts-page #account-create-form legend { padding: 0 6px; font-size: 14px; font-weight: 650; }
 .chart-accounts-page #account-create-form .workspace-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 300px)); align-items: start; gap: 12px 16px; }

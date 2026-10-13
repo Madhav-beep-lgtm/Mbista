@@ -1,12 +1,12 @@
         <form method="post" class="item-creation-form">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="save_item">
-            <fieldset><legend>Item details</legend><div class="workspace-form-grid">
+            <fieldset><legend>Item details</legend><div class="workspace-form-grid item-details-grid">
             <input type="hidden" name="item_id" value="<?= e((int) ($editItem['id'] ?? 0)) ?>">
             <label>Code<input type="text" name="sku" maxlength="<?= inv_item_code_max() ?>"
                    pattern="[A-Za-z0-9][A-Za-z0-9.\-]*"
                    value="<?= e($editItem['sku'] ?? inv_next_item_code($companyId)) ?>" required></label>
-            <label>Name<input type="text" name="name" maxlength="<?= inv_item_name_max() ?>" value="<?= e($editItem['name'] ?? '') ?>" required></label>
+            <label class="item-name-field">Name<input type="text" name="name" maxlength="<?= inv_item_name_max() ?>" value="<?= e($editItem['name'] ?? '') ?>" required></label>
             <label>Stock type<select name="stock_type_id" required><option value="">Select stock type</option><?php foreach (inv_stock_types($companyId) as $typeId => $typeName): ?><option value="<?= (int)$typeId ?>" <?= (int)($editItem['stock_type_id'] ?? 0) === (int)$typeId ? 'selected' : '' ?>><?= e($typeName) ?></option><?php endforeach; ?></select></label>
             <label>Valuation method
                 <select name="valuation_method">
@@ -43,7 +43,7 @@
                     <?php endforeach; ?>
                 </select>
             </label>
-            </div></fieldset><fieldset><legend>Rates and stock settings</legend><div class="workspace-form-grid">
+            </div></fieldset><fieldset><legend>Rates and stock settings</legend><div class="workspace-form-grid item-rates-grid">
             <label>HS code<input type="text" name="hs_code" value="<?= e($editItem['hs_code'] ?? '') ?>"></label>
             <label>Default selling rate<input type="number" step="0.01" min="0" name="sales_rate" value="<?= e($editItem['sales_rate'] ?? '0.00') ?>"></label>
             <label>Purchase rate<input type="number" step="0.01" name="purchase_rate" value="<?= e($editItem['purchase_rate'] ?? '0.00') ?>"></label>
@@ -51,7 +51,7 @@
             <label>Opening value 
                 <input type="number" step="0.01" min="0" name="opening_amount" value="<?= e($editItem['opening_amount'] ?? '0.00') ?>" placeholder="qty × cost at opening"></label>
             <label>Reorder level<input type="number" step="0.001" name="reorder_level" value="<?= e($editItem['reorder_level'] ?? '0.000') ?>"></label>
-            </div></fieldset><fieldset><legend>Ledger mapping</legend><div class="workspace-form-grid">
+            </div></fieldset><fieldset><legend>Ledger mapping</legend><div class="workspace-form-grid item-ledgers-grid">
             <?php
             // Per-item ledgers, exactly like the fixed-asset register form:
             // the four everyday purposes are chosen here and belong to THIS
