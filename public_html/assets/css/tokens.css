@@ -19,13 +19,15 @@
   --color-warning-soft: #FFFAEB;
   --color-info: #175CD3;
   --color-info-soft: #EFF8FF;
+  --color-action: #111827;
+  --color-action-hover: #000000;
 
   --font-sans: Inter, system-ui, -apple-system, "Segoe UI", "Noto Sans Devanagari", sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
   --font-size-control: 13px;
-  --font-size-body: 14px;
+  --font-size-body: 13px;
   --font-size-section: 17px;
   --font-size-title: clamp(24px, 2.4vw, 28px);
   --line-height: 1.5;
@@ -40,11 +42,11 @@
   --space-10: 40px;
   --space-12: 48px;
 
-  --radius-control: 6px;
-  --radius-panel: 8px;
+  --radius-control: 5px;
+  --radius-panel: 10px;
   --radius-round: 999px;
   --control-height: 40px;
-  --sidebar-width: 236px;
+  --sidebar-width: 248px;
   --sidebar-rail-width: 68px;
   --topbar-height: 62px;
   --content-max: 1680px;

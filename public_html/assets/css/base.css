@@ -1,4 +1,11 @@
 /* Reset, document defaults and foundational typography. */
+@font-face {
+  font-family: "Inter";
+  src: url("../fonts/inter-latin-wght-normal.woff2") format("woff2-variations");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
 *, *::before, *::after { box-sizing: border-box; }
 html { min-width: 320px; background: var(--color-bg); scroll-behavior: smooth; }
 body {

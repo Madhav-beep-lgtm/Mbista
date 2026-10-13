@@ -172,7 +172,7 @@ table.jw-lines td.c-del button:hover { background: var(--mbw-red-soft, #fdeaea);
    The captions come from data-label rather than a second set of <span>s because
    the header already says these words once. Saying them twice in the markup is
    two places to change a column name and one of them to forget. */
-@media (max-width: 720px) {
+@media (max-width: 640px) {
     .jw-lines-scroll { overflow-x: visible; scrollbar-gutter: auto; }
     table.jw-lines,
     table.jw-lines tbody,

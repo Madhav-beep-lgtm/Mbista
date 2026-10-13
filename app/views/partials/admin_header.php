@@ -480,19 +480,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
         ?>
         <header class="admin-topbar">
             <?php require __DIR__ . '/sidebar_toggle.php'; ?>
-            <?php if ($pageHero !== false): ?>
-                <?php /* Page identity is presented in the hero below; repeating
-                          its breadcrumb here wastes the primary toolbar space. */ ?>
-            <?php else: ?>
-                <div class="admin-topbar-title">
-                    <h1><?= e($pageTitle) ?></h1>
-                    <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Admin') ?></p>
-                </div>
-            <?php endif; ?>
             <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
                 <span class="mbw-search-glyph"><?= icon('search') ?></span>
                 <label class="sr-only" for="admin-global-search">Search</label>
-                <input id="admin-global-search" type="search" name="q" placeholder="Search transactions, reports, ledgers..." value="<?= e((string) ($_GET['q'] ?? '')) ?>">
+                <input id="admin-global-search" type="search" name="q" value="<?= e((string) ($_GET['q'] ?? '')) ?>">
                 <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
             </form>
             <a class="admin-icon-button" href="<?= e(url('admin/reports-center.php')) ?>" aria-label="Open Reports Center" title="Reports Center"><?= icon('analytics') ?></a>
@@ -653,16 +644,11 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             </div>
         </header>
         <div class="admin-content">
-            <?php if ($pageHero === false): ?>
-                <nav class="admin-breadcrumb" aria-label="Breadcrumb"><?= $headerBreadcrumbHtml ?></nav>
-            <?php endif; ?>
+            <nav class="admin-breadcrumb" aria-label="Breadcrumb"><?= $headerBreadcrumbHtml ?></nav>
             <?php if ($pageHero !== false): ?>
-                <div class="cr-head">
-                    <span class="cr-head-icon"><?= icon((string) (is_array($pageHero) && !empty($pageHero['icon']) ? $pageHero['icon'] : ($headerPageIcons[$headerScript] ?? 'dashboard'))) ?></span>
+                <div class="cr-head page-head">
                     <div>
                         <h2><?= e(is_array($pageHero) && !empty($pageHero['title']) ? $pageHero['title'] : $pageTitle) ?></h2>
-                        <?php $heroSub = is_array($pageHero) && !empty($pageHero['sub']) ? $pageHero['sub'] : $pageSubtitle; ?>
-                        <?php if ($heroSub !== ''): ?><p><?= e($heroSub) ?></p><?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>

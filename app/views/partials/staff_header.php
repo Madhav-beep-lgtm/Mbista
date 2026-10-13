@@ -72,14 +72,10 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
     <section class="admin-main">
         <header class="admin-topbar">
             <?php require __DIR__ . '/sidebar_toggle.php'; ?>
-            <div class="admin-topbar-title">
-                <h1><?= e($pageTitle) ?></h1>
-                <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Staff') ?></p>
-            </div>
             <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
                 <span class="mbw-search-glyph"><?= icon('search') ?></span>
                 <label class="sr-only" for="staff-global-search">Search</label>
-                <input id="staff-global-search" type="search" name="q" placeholder="Search tasks, clients, documents..." value="<?= e((string) ($_GET['q'] ?? '')) ?>">
+                <input id="staff-global-search" type="search" name="q" value="<?= e((string) ($_GET['q'] ?? '')) ?>">
                 <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
             </form>
             <?php if ($headerStaffCompany): ?>
@@ -108,6 +104,8 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
             </div>
         </header>
         <div class="admin-content">
+            <nav class="admin-breadcrumb" aria-label="Breadcrumb"><a href="<?= e(url('staff/dashboard.php')) ?>">Dashboard</a> <span aria-hidden="true">&#8250;</span> <strong><?= e($pageTitle) ?></strong></nav>
+            <div class="cr-head page-head"><div><h2><?= e($pageTitle) ?></h2></div></div>
             <?php if ($message = flash('success')): ?>
                 <div class="notice success flash-notice"><?= e($message) ?></div>
             <?php endif; ?>

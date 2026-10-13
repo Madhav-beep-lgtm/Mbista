@@ -1,13 +1,21 @@
 @media print {
-  @page { margin: 12mm; }
+  @page { size: A4 landscape; margin: 12mm; }
   body { background: #fff !important; color: #000 !important; font-size: 10pt; }
   .utility-bar, .site-header, .site-footer, .admin-sidebar, .admin-topbar,
   .admin-breadcrumb, .actions, .button, button, .no-print, .frm-del,
+  .mbw-tabbar, .inventory-action-tabs, .reference-tabs, .filter-card, .filters-card,
+  .reference-pagination, .ssr-pagination, .admin-orders-pagination, .column-view-control,
   .mobile-menu-button { display: none !important; }
   .admin-shell, .admin-main, .admin-content { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
   .card, .mbw-card, .form-card, .panel { border-color: #aaa !important; box-shadow: none !important; break-inside: avoid; }
-  table { width: 100% !important; font-size: 9pt; }
+  table { display: table !important; width: 100% !important; font-size: 9pt; }
+  thead { display: table-header-group !important; }
+  tbody { display: table-row-group !important; }
+  tr { display: table-row !important; }
+  th, td { display: table-cell !important; position: static !important; white-space: normal !important; }
+  [data-secondary-column] { display: table-cell !important; }
   th, td { border-color: #bbb !important; color: #000 !important; }
   a { color: #000 !important; text-decoration: none !important; }
   .page-break { break-before: page; }
+  .document-signatures, .signature-places { margin-top: 18mm; break-inside: avoid; }
 }

@@ -156,9 +156,9 @@
 .admin-content { width: 100%; max-width: var(--content-max); margin-inline: auto; padding: 18px; }
 .admin-breadcrumb { display: flex; margin-bottom: var(--space-2); align-items: center; flex-wrap: wrap; gap: 6px; color: var(--color-text-muted); font-size: var(--font-size-sm); }
 .cr-head { display: flex; margin-bottom: var(--space-4); align-items: center; gap: 12px; }
-.cr-head-icon { display: grid; width: 40px; height: 40px; place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-primary-soft); color: var(--color-primary); }
+.cr-head-icon { display: none; }
 .cr-head h2 { font-size: var(--font-size-title); }
-.cr-head p { margin: 2px 0 0; color: var(--color-text-muted); }
+.cr-head p { display: none; }
 .sidebar-toggle { display: inline-grid; width: 38px; height: 38px; place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); }
 body.sidebar-collapsed .admin-shell { grid-template-columns: var(--sidebar-rail-width) minmax(0, 1fr); }
 body.sidebar-collapsed .admin-sidebar { padding-inline: 8px; }

@@ -1,4 +1,109 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const isApplicationPage = document.body.classList.contains('admin-layout')
+    || document.body.classList.contains('accounting-reference-layout');
+
+  if (isApplicationPage) {
+    document.querySelectorAll('input[placeholder], textarea[placeholder]').forEach((field) => {
+      field.removeAttribute('placeholder');
+    });
+  }
+
+  const tableWrappers = document.querySelectorAll(
+    '.mbw-tablewrap, .rc-table-scroll, .table-responsive, .reference-table-wrap, .inv-item-grid-scroll'
+  );
+
+  tableWrappers.forEach((wrapper, tableIndex) => {
+    const table = wrapper.querySelector('table');
+    if (!table || table.matches('.frm-entries, .vch-table, .jw-lines')
+      || table.querySelector('tbody select, tbody textarea, tbody input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])')) {
+      return;
+    }
+
+    const headingCells = Array.from(table.querySelectorAll('thead tr:last-child th'));
+    if (headingCells.length === 0) {
+      return;
+    }
+
+    const headings = headingCells.map((heading) => heading.textContent.replace(/\s+/g, ' ').trim());
+    const recordIndex = headings.findIndex((heading) => /^(#|sn|no\.?|record|voucher|code|item code)$/i.test(heading));
+    const statusIndex = headings.findIndex((heading) => /^(status|state)$/i.test(heading));
+
+    table.querySelectorAll('tbody tr').forEach((row) => {
+      Array.from(row.children).forEach((cell, cellIndex) => {
+        const heading = headings[cellIndex] || '';
+        cell.dataset.label = heading;
+
+        if (cellIndex === (recordIndex >= 0 ? recordIndex : 0)) {
+          cell.dataset.cardTitle = '';
+        }
+        if (cellIndex === statusIndex) {
+          cell.dataset.statusCell = '';
+        }
+        if (/^(narration|remarks|description|notes?)$/i.test(heading)) {
+          cell.classList.add('free-text-cell');
+          const fullText = cell.textContent.replace(/\s+/g, ' ').trim();
+          if (fullText !== '') {
+            cell.title = fullText;
+          }
+        }
+      });
+    });
+    table.classList.add('responsive-list');
+
+    if (headingCells.length <= 8) {
+      return;
+    }
+
+    table.classList.add('wide-list');
+    const secondaryIndexes = headings
+      .map((heading, index) => index)
+      .filter((index) => index > 5 && index !== statusIndex && index !== headings.length - 1);
+
+    secondaryIndexes.forEach((columnIndex) => {
+      table.querySelectorAll('tr').forEach((row) => {
+        if (row.children[columnIndex]) {
+          row.children[columnIndex].dataset.secondaryColumn = '';
+        }
+      });
+    });
+
+    const pageKey = window.location.pathname.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'page';
+    const storageKey = `columns:${pageKey}:${tableIndex}`;
+    let columnMode = 'main';
+    try {
+      columnMode = localStorage.getItem(storageKey) === 'all' ? 'all' : 'main';
+    } catch (error) {
+      columnMode = 'main';
+    }
+
+    const control = document.createElement('div');
+    control.className = 'column-view-control no-print';
+    control.setAttribute('aria-label', 'Columns');
+    control.innerHTML = '<span>Columns:</span><button type="button" data-column-mode="main">Main</button><span>/</span><button type="button" data-column-mode="all">All</button>';
+    wrapper.before(control);
+
+    const applyColumnMode = (mode) => {
+      columnMode = mode === 'all' ? 'all' : 'main';
+      table.classList.toggle('is-main-columns', columnMode === 'main');
+      control.querySelectorAll('[data-column-mode]').forEach((button) => {
+        button.setAttribute('aria-pressed', button.dataset.columnMode === columnMode ? 'true' : 'false');
+      });
+      try {
+        localStorage.setItem(storageKey, columnMode);
+      } catch (error) {
+        // Storage can be unavailable in private browsing.
+      }
+    };
+
+    control.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-column-mode]');
+      if (button) {
+        applyColumnMode(button.dataset.columnMode);
+      }
+    });
+    applyColumnMode(columnMode);
+  });
+
   const year = document.querySelector('[data-year]');
   if (year) {
     year.textContent = new Date().getFullYear();
@@ -119,11 +224,6 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   fileInputs.forEach((input) => {
-    const hint = document.createElement('p');
-    hint.className = 'contacts-file-hint';
-    hint.textContent = 'Allowed: pdf, png, jpg, jpeg, webp, txt, doc, docx. Max 5 MB.';
-    input.parentElement?.appendChild(hint);
-
     input.addEventListener('change', () => {
       clearFieldError(input);
       const file = input.files && input.files[0] ? input.files[0] : null;

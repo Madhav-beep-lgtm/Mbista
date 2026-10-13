@@ -578,9 +578,9 @@ ok($offline !== '' && stripos($offline, 'nothing at all') !== false,
 $grid = (string) @file_get_contents($root . '/app/views/partials/jewellery_line_grid.php');
 ok(substr_count($grid, 'data-label="') >= 20,
     'Every grid cell carries its own caption, so a row can be read as a card when the header is gone');
-ok(str_contains($grid, '@media (max-width: 720px)') && str_contains($grid, 'content: attr(data-label)'),
-    'And below 720px the rows ARE cards, captions and all');
-ok(preg_match('~@media \(max-width: 720px\).*?font-size: 16px~s', $grid) === 1,
+ok(str_contains($grid, '@media (max-width: 640px)') && str_contains($grid, 'content: attr(data-label)'),
+    'And at 640px the rows ARE cards, captions and all');
+ok(preg_match('~@media \(max-width: 640px\).*?font-size: 16px~s', $grid) === 1,
     'Inputs hit 16px on a phone — Safari zooms the whole page for anything smaller and does not zoom back');
 
 echo "\n15. Every shell uses one ordered CSS entry point\n";
@@ -628,8 +628,46 @@ foreach ($sourceOrder as $sourceName) {
 ok($ordered, 'The global bundle preserves the intentional seven-layer cascade order');
 
 $layerCss = (string) @file_get_contents($root . '/public_html/assets/css/base.css');
-ok(str_contains($tokens, 'Inter, system-ui') && str_contains($layerCss, 'var(--font-sans)'),
-    'Typography uses the local system stack without a third-party font request');
+$componentsCss = (string) @file_get_contents($root . '/public_html/assets/css/components.css');
+$printCss = (string) @file_get_contents($root . '/public_html/assets/css/print.css');
+$interFont = $root . '/public_html/assets/fonts/inter-latin-wght-normal.woff2';
+ok(is_file($interFont) && filesize($interFont) > 10000
+    && str_contains($layerCss, '@font-face')
+    && str_contains($layerCss, '../fonts/inter-latin-wght-normal.woff2')
+    && str_contains($tokens, 'Inter, system-ui')
+    && !preg_match('~fonts\.(?:googleapis|gstatic)\.com~i', $layerCss . $tokens),
+    'Inter is self-hosted, with the required system fallbacks and no font CDN');
+ok(str_contains($tokens, '--font-size-body: 13px')
+    && str_contains($tokens, '--sidebar-width: 248px')
+    && str_contains($tokens, '--radius-control: 5px')
+    && str_contains($tokens, '--radius-panel: 10px'),
+    'Body type, sidebar width, and shared radii match the application contract');
+ok(preg_match('~\.button[^\{]*\{[^}]*font-size:\s*14px[^}]*font-weight:\s*600~s', $componentsCss) === 1
+    && str_contains($componentsCss, 'min-height: 36px'),
+    'Buttons use the required type weight, height, and outlined-button height');
+ok(str_contains($componentsCss, 'grid-template-columns: repeat(3, minmax(0, 1fr))'),
+    'Shared forms use a three-column desktop grid');
+ok(str_contains($componentsCss, 'tbody td, tfoot td { white-space: nowrap; }')
+    && str_contains($componentsCss, 'thead th')
+    && str_contains($componentsCss, 'white-space: normal'),
+    'Data cells stay on one line while headings may wrap');
+ok(str_contains($componentsCss, '.free-text-cell')
+    && str_contains($mainJs, 'cell.title = fullText'),
+    'Free-text columns are capped and retain their full text in a title attribute');
+ok(str_contains($mainJs, "table.classList.add('responsive-list')")
+    && str_contains($componentsCss, '@media (max-width: 640px)')
+    && str_contains($componentsCss, 'content: attr(data-label)'),
+    'Shared list tables become labelled row cards at phone width');
+ok(str_contains($mainJs, 'Columns:')
+    && str_contains($mainJs, 'localStorage.getItem(storageKey)')
+    && str_contains($printCss, '[data-secondary-column]'),
+    'Wide lists offer remembered Main / All columns and print every column');
+ok(str_contains($printCss, '@page { size: A4 landscape;')
+    && str_contains($printCss, '.column-view-control'),
+    'Print uses landscape pages and hides screen-only controls');
+ok(str_contains($mainJs, "field.removeAttribute('placeholder')")
+    && !str_contains($mainJs, 'contacts-file-hint'),
+    'Application fields render without invented placeholder or file-hint text');
 
 echo "\n16. Every class in the markup has something behind it\n";
 // An audit found 834 distinct classes and 26 with no rule in any stylesheet,

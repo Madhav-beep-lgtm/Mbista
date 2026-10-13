@@ -65,10 +65,6 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
     <section class="admin-main">
         <header class="admin-topbar">
             <?php require __DIR__ . '/sidebar_toggle.php'; ?>
-            <div class="admin-topbar-title">
-                <h1><?= e($pageTitle) ?></h1>
-                <p><?= $pageSubtitle !== '' ? e($pageSubtitle) : 'Signed in as ' . e($currentUser['name'] ?? 'Client') ?></p>
-            </div>
             <?php if ($headerClientProfile): ?>
                 <div class="admin-context-chip" aria-label="Your client context">
                     <span class="admin-context-icon"><?= icon('clients') ?></span>
@@ -94,6 +90,8 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
             </div>
         </header>
         <div class="admin-content">
+            <nav class="admin-breadcrumb" aria-label="Breadcrumb"><a href="<?= e(url('dashboard.php')) ?>">Dashboard</a> <span aria-hidden="true">&#8250;</span> <strong><?= e($pageTitle) ?></strong></nav>
+            <div class="cr-head page-head"><div><h2><?= e($pageTitle) ?></h2></div></div>
             <?php if ($message = flash('success')): ?>
                 <div class="notice success flash-notice"><?= e($message) ?></div>
             <?php endif; ?>
