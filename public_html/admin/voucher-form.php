@@ -839,7 +839,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </label>
-            <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/accounting-parties.php?panel=party')) ?>">＋ Add party</a>
                 <?php endif; ?>
                 <label>Branch
                     <select name="location">
@@ -893,9 +892,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endif; ?>
                 <input type="hidden" name="cost_centre" value="<?= e((string) ($prefill['cost_centre'] ?? '')) ?>">
             </div>
+            <?php if ($spec['layout'] === 'trade') include __DIR__ . '/../../app/views/vouchers/layout_trade.php'; ?>
         </section>
 
-        <?php include __DIR__ . '/../../app/views/vouchers/layout_' . $spec['layout'] . '.php'; ?>
+        <?php if ($spec['layout'] !== 'trade') include __DIR__ . '/../../app/views/vouchers/layout_' . $spec['layout'] . '.php'; ?>
 
         <section class="mbw-card frm-section vch-support-card">
             <div class="vch-support-grid">

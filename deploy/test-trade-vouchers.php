@@ -36,4 +36,19 @@ if (!voucher_compose('sales', $bad, $ledgers)['errors']) throw new RuntimeExcept
 $bad = $input; $bad['value_tax_rate'][0] = -13;
 if (!voucher_compose('sales', $bad, $ledgers)['errors']) throw new RuntimeException('Negative tax accepted');
 if (count(voucher_entry_type_catalog()) !== 8) throw new RuntimeException('Missing voucher types');
+$services = $input + ['trade_mode' => 'services'];
+foreach (['sales', 'credit_note'] as $type) {
+    if (voucher_compose($type, $services, $ledgers)['errors']) throw new RuntimeException('Service sales rejected');
+}
+foreach (['purchase', 'debit_note'] as $type) {
+    if (!voucher_compose($type, $services, $ledgers)['errors']) throw new RuntimeException('Service purchase accepted');
+}
+$goods = $input + ['trade_mode' => 'goods'];
+if (!voucher_compose('sales', $goods, $ledgers)['errors']) throw new RuntimeException('Goods without inventory accepted');
+$goods['value_item'] = [10, 11, 12];
+foreach (['sales', 'purchase', 'debit_note', 'credit_note'] as $type) {
+    if (voucher_compose($type, $goods, $ledgers)['errors']) throw new RuntimeException('Goods lines rejected');
+}
+$services['value_item'] = [10, 0, 0];
+if (!voucher_compose('sales', $services, $ledgers)['errors']) throw new RuntimeException('Inventory allowed in services');
 echo "Four trade types: mixed taxes, balance, edit/retry, invalid tax and type selector passed.\n";

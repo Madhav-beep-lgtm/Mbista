@@ -18,6 +18,10 @@ declare(strict_types=1);
  * customer's account — so the third mode below lets the money be split across
  * as many ways as it actually came in, each landing in its own ledger.
  */
+$supportsServices = in_array($spec['key'], ['sales', 'credit_note'], true);
+$hasExistingValues = !empty($prefill['values']);
+$hasInventoryValues = count(array_filter($prefill['values'] ?? [], static fn (array $row): bool => (int) ($row['item_id'] ?? 0) > 0)) > 0;
+$tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? ($hasExistingValues && !$hasInventoryValues ? 'services' : 'goods')) : 'goods';
 $partySide = (string) $spec['party_side'];
 $partyIsDebit = $partySide === 'debit';
 $settlementMode = (string) ($prefill['settlement_mode'] ?? 'party');
@@ -35,7 +39,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
 <input type="hidden" name="settlement_mode" value="<?= e($settlementMode) ?>">
 <input type="hidden" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
 <input type="hidden" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">
-<section class="mbw-card frm-section vch-focus" <?= $warehouseOptions === [] && empty($spec['needs_reason']) && $settlementMode !== 'cash' ? 'hidden' : '' ?>>
+<section class="frm-section vch-focus" <?= $warehouseOptions === [] && empty($spec['needs_reason']) && $settlementMode !== 'cash' ? 'hidden' : '' ?>>
     <div class="frm-grid frm-grid-4">
         <?php // Shown for a credit document and for a split alike: a split can
               // leave part of the bill on the party's account, and that part
@@ -73,7 +77,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
       // the party side of the voucher, so the till, the wallet and the
       // receivable each carry exactly what they took — which is the only way
       // the drawer can be counted against the day book at close of business. ?>
-<section class="mbw-card frm-section vch-entry-panel" data-settlement-field="split" id="vch-settle-section" hidden>
+<section class="frm-section vch-entry-panel" data-settlement-field="split" id="vch-settle-section" hidden>
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-green"><?= icon('coins') ?></span>
         <h2>How it was settled</h2>
@@ -129,24 +133,25 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
     <p class="vch-settle-note" id="vch-settle-note" data-state="short"></p>
 </section>
 
-<section class="mbw-card frm-section vch-entry-panel">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-blue"><?= icon('layers') ?></span>
-        <h2><?= e((string) $spec['value_label']) ?></h2>
-        <span class="frm-optional">Amounts before tax. Fill quantity and rate and the amount works itself out.</span>
+<section class="frm-section vch-entry-panel">
+    <div class="frm-grid vch-header-grid" style="margin-bottom:16px">
+        <label><?= $supportsServices ? 'Sales category' : 'Purchase category' ?>
+        <select name="trade_mode" id="vch-trade-mode">
+            <option value="goods" <?= $tradeMode === 'goods' ? 'selected' : '' ?>><?= $supportsServices ? 'Goods sales' : 'Goods purchase' ?></option>
+            <?php if ($supportsServices): ?><option value="services" <?= $tradeMode === 'services' ? 'selected' : '' ?>>Service sales</option><?php endif; ?>
+        </select></label>
     </div>
-
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['values'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">
                 <thead>
                     <tr>
                         <th style="width:36px">SN</th>
-                        <?php if ($itemOptions !== []): ?><th style="width:190px">Item</th><?php endif; ?>
+                        <th style="width:190px" data-goods-field>Inventory item <em>*</em></th>
                         <th style="width:200px"><?= $spec['value_role'] === 'income' ? 'Sales ledger' : 'Purchase ledger' ?> <em>*</em></th>
-                        <th>Description</th><th style="width:180px">Cost centre <em>*</em></th>
-                        <th class="is-numeric" style="width:100px">Qty</th>
-                        <th class="is-numeric" style="width:120px">Rate</th>
+                        <th data-description-heading>Description / Service</th><th style="width:180px">Cost centre <em>*</em></th>
+                        <th class="is-numeric" style="width:100px" data-goods-field>Qty</th>
+                        <th class="is-numeric" style="width:120px" data-goods-field>Rate</th>
                         <th style="width:145px">Tax treatment</th><th style="width:85px">Tax %</th><th class="is-numeric" style="width:120px">Line total</th><th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
                     </tr>
@@ -163,10 +168,9 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
         <template data-row-template>
             <tr>
                 <td data-sn>1</td>
-                <?php if ($itemOptions !== []): ?>
-                <td>
+                <td data-goods-field>
                     <select name="value_item[]" data-field="item_id" class="vch-item">
-                        <option value="">No stock item</option>
+                        <option value="">Select inventory item</option>
                         <?php foreach ($itemOptions as $item): ?>
                             <option value="<?= (int) $item['id'] ?>"
                                     data-name="<?= e((string) $item['name']) ?>"
@@ -176,7 +180,6 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                         <?php endforeach; ?>
                     </select>
                 </td>
-                <?php endif; ?>
                 <td>
                     <select name="value_ledger[]" data-field="ledger_id" class="vch-ledger">
                         <option value="">Select ledger</option>
@@ -184,8 +187,8 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                     </select>
                 </td>
                 <td><input type="text" name="value_description[]" data-field="description" maxlength="255" placeholder="Item or service"></td><td><select name="value_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
-                <td class="is-numeric"><input type="number" name="value_qty[]" data-field="qty" class="frm-num vch-qty" step="0.001" min="0" placeholder="0"></td>
-                <td class="is-numeric"><input type="number" name="value_rate[]" data-field="rate" class="frm-num vch-rate" step="0.01" min="0" placeholder="0.00"></td>
+                <td class="is-numeric" data-goods-field><input type="number" name="value_qty[]" data-field="qty" class="frm-num vch-qty" step="0.001" min="0" placeholder="0"></td>
+                <td class="is-numeric" data-goods-field><input type="number" name="value_rate[]" data-field="rate" class="frm-num vch-rate" step="0.01" min="0" placeholder="0.00"></td>
 
                 <td><select name="value_tax_mode[]" data-field="tax_mode" class="vch-line-tax-mode"><option value="exclusive" <?= $taxMode === 'exclusive' ? 'selected' : '' ?>>Exclusive</option><option value="inclusive" <?= $taxMode === 'inclusive' ? 'selected' : '' ?>>Inclusive</option><option value="none" <?= $taxMode === 'none' ? 'selected' : '' ?>>Exempt / no tax</option></select></td>
                 <td><input type="number" name="value_tax_rate[]" data-field="tax_rate" class="vch-line-tax-rate" min="0" max="100" step="0.01" value="<?= e((string) $taxRate) ?>"></td>
@@ -206,7 +209,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
     </label>
 </div>
 
-<section class="mbw-card frm-section vch-summary-card">
+<section class="frm-section vch-summary-card">
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-green"><?= icon('coins') ?></span>
         <h2>What will be posted</h2>
@@ -302,7 +305,20 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function applyTradeMode() {
+        var goods = document.getElementById('vch-trade-mode').value === 'goods';
+        form.querySelectorAll('[data-goods-field]').forEach(function (cell) {
+            cell.hidden = !goods;
+            cell.querySelectorAll('input, select').forEach(function (field) {
+                field.disabled = !goods;
+                field.required = goods && (field.classList.contains('vch-item') || field.classList.contains('vch-qty'));
+            });
+        });
+        var title = form.querySelector('[data-description-heading]');
+        if (title) title.textContent = goods ? 'Description' : 'Service';
+    }
     function recalc() {
+        applyTradeMode();
 
         var taxable = 0;
         var tax = 0;
@@ -310,8 +326,9 @@ document.addEventListener('DOMContentLoaded', function () {
         var stockUnits = 0;
 
         form.querySelectorAll('[data-rows] tr').forEach(function (row) {
-            var qty = Number((row.querySelector('.vch-qty') || {}).value) || 0;
-            var unitRate = Number((row.querySelector('.vch-rate') || {}).value) || 0;
+            var isGoods = document.getElementById('vch-trade-mode').value === 'goods';
+            var qty = isGoods ? Number((row.querySelector('.vch-qty') || {}).value) || 0 : 0;
+            var unitRate = isGoods ? Number((row.querySelector('.vch-rate') || {}).value) || 0 : 0;
             var amountField = row.querySelector('.vch-value-amount');
             var itemSelect = row.querySelector('.vch-item');
             if (itemSelect && itemSelect.value && qty > 0) { stockLines++; stockUnits += qty; }

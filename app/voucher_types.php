@@ -840,6 +840,19 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
         $rate = (float) voucher_input_row($input, 'value_rate', $index);
         $itemId = (int) voucher_input_row($input, 'value_item', $index);
         $description = voucher_input_row($input, 'value_description', $index);
+        if (isset($input['trade_mode'])) {
+            $tradeMode = (string) $input['trade_mode'];
+            if (!in_array($tradeMode, ['goods', 'services'], true)
+                || ($tradeMode === 'services' && in_array($spec['key'], ['purchase', 'debit_note'], true))) {
+                $result['errors'][] = 'Service purchases belong in a Journal voucher.';
+            } elseif ($tradeMode === 'goods' && ($itemId <= 0 || $quantity <= 0)) {
+                $result['errors'][] = 'Line ' . ($index + 1) . ': select an inventory item and quantity for goods.';
+            } elseif ($tradeMode === 'services' && $itemId > 0) {
+                $result['errors'][] = 'Service lines cannot contain inventory items.';
+            } elseif ($tradeMode === 'services' && trim($description) === '') {
+                $result['errors'][] = 'Line ' . ($index + 1) . ': enter the service description.';
+            }
+        }
         if ($quantity > 0 && $rate > 0) {
             $description = trim($description . ' — ' . rtrim(rtrim(number_format($quantity, 3, '.', ''), '0'), '.') . ' × ' . number_format($rate, 2), ' —');
         }
@@ -1542,6 +1555,7 @@ function voucher_prefill_from_input(string $type, array $input): array
         }
         $prefill['warehouse_id'] = (int) ($input['warehouse_id'] ?? 0);
         $prefill['tax_mode'] = (string) ($input['tax_mode'] ?? 'exclusive');
+        $prefill['trade_mode'] = (string) ($input['trade_mode'] ?? 'goods');
         $prefill['tax_rate'] = (float) ($input['tax_rate'] ?? 13);
         $prefill['tax_ledger_id'] = (int) ($input['tax_ledger_id'] ?? 0);
         $prefill['values'] = [];
