@@ -32,6 +32,9 @@ require_once __DIR__ . '/../../app/inventory_purchase_batch.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
+if (in_array((string) ($_GET['task'] ?? ''), ['purchase', 'sale'], true)) {
+    require_permission('accounting', 'view');
+}
 if (!defined('ITEMS_WORKSPACE') && $_SERVER['REQUEST_METHOD'] === 'GET' && $_GET === []) {
     redirect('admin/items.php');
 }
@@ -742,6 +745,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($type === 'purchase') {
             flash('error', 'Record item purchases through a Purchase voucher.');
             redirect('admin/voucher-form.php?type=purchase');
+        }
+        if (in_array($type, ['sale', 'sales_return', 'purchase_return'], true)) {
+            $voucherType = ['sale' => 'sales', 'sales_return' => 'credit_note', 'purchase_return' => 'debit_note'][$type];
+            flash('error', 'Record sales and returns through vouchers.');
+            redirect('admin/voucher-form.php?type=' . $voucherType);
         }
         $qty = round(abs((float) ($_POST['quantity'] ?? 0)), 3);
         $rate = round((float) ($_POST['rate'] ?? 0), 2);
@@ -1916,7 +1924,6 @@ unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_bills'], $_SESSION
 
 $pageMovementTypes = defined('INVENTORY_PAGE') ? (match (INVENTORY_PAGE) {
     'opening' => ['opening'],
-    'sale' => ['sale', 'sales_return'],
     'adjust' => ['adjustment', 'write_off', 'damage', 'expiry'],
     'transfer' => ['warehouse_transfer', 'departmental_transfer'],
     default => [],
@@ -2773,189 +2780,9 @@ $invMoveItemOptions = static function () use ($items): string {
 ?>
 
 
-    <?php
-    // Purchase and opening entries this company has prepared or posted, ONE
-    // ROW PER BILL, drafts first because they are the ones still waiting on
-    // somebody. A supplier's invoice for twelve items is one entry with twelve
-    // item lines, not twelve entries, so this reads against the paper.
-    //
-    // Read only on the page that shows them. Every task used to pay for this,
-    // including the ones that never mention a purchase.
-    $purBills = [];
-    $purMergePlan = [];
-    if ($invShows('movement-purchase-entries')) {
-        $purBills = inv_purchase_bill_list($companyId, 25);
-        // Bills that were entered one voucher per item, before a bill knew how
-        // to stay in one piece. Read-only: nothing moves until somebody asks.
-        $purMergePlan = inv_purchase_bill_merge_plan($companyId);
-    }
-    ?>
-    <?php if ($invShows('movement-purchase-entries')): ?>
-    <details class="feature-disclosure" id="movement-purchase-entries" <?= array_filter($purBills, static fn (array $r): bool => (string) $r['status'] === 'draft') !== [] ? 'open' : '' ?>>
-        <summary><span><strong><?= icon('tasks') ?>Purchase entries</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
-
-        <?php if ($purMergePlan !== []): ?>
-            <?php
-            $mergeVouchers = 0;
-            $mergeItems = 0;
-            foreach ($purMergePlan as $mergeRow) { $mergeVouchers += (int) $mergeRow['vouchers']; $mergeItems += (int) $mergeRow['items']; }
-            ?>
-            <div class="inv-merge-notice">
-                <strong><?= icon('tasks') ?> <?= count($purMergePlan) ?> bill(s) were entered one voucher per item.</strong>
-                <p style="margin:6px 0 0;font-size:12.5px;color:var(--mbw-muted)">
-                    <?= (int) $mergeVouchers ?> vouchers carry <?= (int) $mergeItems ?> items that belong to <?= count($purMergePlan) ?> invoice(s).
-                    Merging gathers each bill into one entry: one line per item, with the supplier credit and VAT stated once.
-                    <strong>Figures are carried across, not recalculated</strong>, so ledger totals do not move. The absorbed voucher numbers are recorded in the narration.
-                </p>
-                <details style="margin-top:10px">
-                    <summary style="cursor:pointer;font-weight:600;font-size:12.5px">Preview what would be merged</summary>
-                    <div class="rc-table-scroll" style="margin-top:8px"><table class="rc-table">
-                        <thead><tr><th>Bill</th><th>Supplier</th><th>Date</th><th>Status</th><th class="align-right">Vouchers</th><th class="align-right">Items</th><th class="align-right">Total</th><th>Keeps</th><th>Absorbs</th></tr></thead>
-                        <tbody>
-                        <?php foreach ($purMergePlan as $mergeRow): ?>
-                            <tr>
-                                <td><strong><?= e((string) $mergeRow['ref_no']) ?></strong></td>
-                                <td><?= e((string) ($mergeRow['party_name'] ?: '—')) ?></td>
-                                <td><?= e((string) $mergeRow['date']) ?></td>
-                                <td><span class="mbw-pill <?= (string) $mergeRow['status'] === 'draft' ? 'tone-gray' : 'tone-blue' ?>"><?= e((string) $mergeRow['status']) ?></span></td>
-                                <td class="align-right"><?= (int) $mergeRow['vouchers'] ?> &rarr; 1</td>
-                                <td class="align-right"><?= (int) $mergeRow['items'] ?></td>
-                                <td class="align-right"><?= e(number_format((float) $mergeRow['total'], 2)) ?></td>
-                                <td><?= e((string) ($mergeRow['keep_no'] ?: 'the first draft')) ?></td>
-                                <td style="max-width:280px"><span style="color:var(--mbw-muted);font-size:11.5px"><?= e(implode(', ', array_filter($mergeRow['absorb_nos'])) ?: 'the other drafts') ?></span></td>
-                            </tr>
-                        <?php endforeach; ?>
-                        </tbody>
-                    </table></div>
-                </details>
-                <?php if (user_can_do('accounting', 'post')): ?>
-                    <form method="post" style="margin-top:10px" onsubmit="return confirm('Merge these bills into one entry each? The figures are carried across, so nothing in the ledger changes value \u2014 the duplicate vouchers are absorbed and removed.');">
-                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
-                        <input type="hidden" name="action" value="merge_purchase_bills">
-                        <button type="submit"><?= icon('badge-check') ?>Merge <?= count($purMergePlan) ?> bill(s) into one entry each</button>
-                    </form>
-                <?php else: ?>
-                    
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-
-        <?php if ($purBills === []): ?>
-            
-        <?php else: ?>
-        <div class="rc-table-scroll"><table class="rc-table">
-            <thead><tr><th>Voucher</th><th>Items</th><th>Dates</th><th>Entry</th><th class="align-right">Amount</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-                <?php foreach ($purBills as $pb): ?>
-                    <?php
-                    $peDraft = (string) $pb['status'] === 'draft';
-                    $pbId = (int) $pb['id'];
-                    ?>
-                    <tr>
-                        <td><?= $peDraft ? '<span style="color:var(--mbw-muted)">not numbered yet</span>' : e((string) $pb['voucher_no']) ?>
-                            <?php if (($pb['reference_no'] ?? '') !== ''): ?><br><strong>Bill <?= e((string) $pb['reference_no']) ?></strong><?php endif; ?>
-                            <?php if (($pb['party_name'] ?? '') !== ''): ?><br><span style="color:var(--mbw-muted)"><?= e((string) $pb['party_name']) ?></span><?php endif; ?>
-                        </td>
-                        <td>
-                            <span class="mbw-pill tone-blue"><?= (int) $pb['item_count'] ?> item<?= (int) $pb['item_count'] === 1 ? '' : 's' ?></span>
-                            <?php foreach ($pb['items'] as $pbItem): ?>
-                                <div style="margin-top:4px"><?= e((string) $pbItem['sku']) ?>
-                                    <span style="color:var(--mbw-muted)"><?= e((string) $pbItem['item_name']) ?></span><br>
-                                    <span style="color:var(--mbw-muted)"><?= e(number_format((float) $pbItem['qty_in'] + (float) $pbItem['qty_out'], 3)) ?>
-                                        @ <?= e(number_format((float) $pbItem['rate'], 2)) ?> (<?= e((string) $pbItem['transaction_type']) ?>)</span>
-                                </div>
-                            <?php endforeach; ?>
-                        </td>
-                        <td><span style="color:var(--mbw-muted)">Bought</span> <?= e((string) ($pb['voucher_date'] ?? '—')) ?><br>
-                            <span style="color:var(--mbw-muted)">Posting</span> <?= e((string) ($pb['posting_date'] ?? '—')) ?>
-                        </td>
-                        <td>
-                            <details class="inv-entry-preview">
-                                <summary><?= icon('documents') ?>Preview entry (<?= count($pb['lines']) ?> line<?= count($pb['lines']) === 1 ? '' : 's' ?>)</summary>
-                                <div class="inv-entry-preview-body">
-                                    <?php $prevDr = 0.0; $prevCr = 0.0; ?>
-                                    <?php foreach ($pb['lines'] as $pl): ?>
-                                        <?php if ((string) $pl['entry_type'] === 'debit') { $prevDr += (float) $pl['amount']; } else { $prevCr += (float) $pl['amount']; } ?>
-                                        <div class="inv-entry-line<?= (string) $pl['entry_type'] === 'credit' ? ' is-credit' : '' ?>">
-                                            <span class="inv-entry-side"><?= (string) $pl['entry_type'] === 'debit' ? 'Dr' : 'Cr' ?></span>
-                                            <span class="inv-entry-ledger"><?= e((string) $pl['ledger_name']) ?></span>
-                                            <span class="inv-entry-amount"><?= e(number_format((float) $pl['amount'], 2)) ?></span>
-                                            <?php if (($pl['memo'] ?? '') !== ''): ?><span class="inv-entry-memo"><?= e((string) $pl['memo']) ?></span><?php endif; ?>
-                                        </div>
-                                    <?php endforeach; ?>
-                                    <div class="inv-entry-line inv-entry-foot">
-                                        <span class="inv-entry-side"></span>
-                                        <span class="inv-entry-ledger"><?= abs($prevDr - $prevCr) < 0.005 ? 'Balanced' : 'OUT BY ' . e(number_format(abs($prevDr - $prevCr), 2)) ?></span>
-                                        <span class="inv-entry-amount"><?= e(number_format($prevDr, 2)) ?></span>
-                                        <span class="inv-entry-memo"><?= e((string) ($pb['narration'] ?? '')) ?></span>
-                                    </div>
-                                </div>
-                            </details>
-                        </td>
-                        <td class="align-right"><?= e(number_format((float) $pb['total_amount'], 2)) ?></td>
-                        <td><span class="mbw-pill <?= $peDraft ? 'tone-gray' : 'tone-blue' ?>"><?= $peDraft ? 'draft' : 'posted' ?></span>
-                            <?php if (!$peDraft): ?><br><span style="color:var(--mbw-muted);font-size:11.5px">in the books</span><?php endif; ?>
-                        </td>
-                        <td>
-                            <div class="inv-bill-actions">
-                                <?php if ($peDraft): ?>
-                                    <form method="post" onsubmit="return confirm('Post this entry to the ledger? It will be given a voucher number.');">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
-                                        <input type="hidden" name="action" value="post_movement_draft">
-                                        <input type="hidden" name="voucher_id" value="<?= $pbId ?>">
-                                        <button type="submit">Post it</button>
-                                    </form>
-                                <?php endif; ?>
-                                <?php if ((string) ($currentUser['role'] ?? '') === 'admin'): ?>
-                                    <form method="post" onsubmit="return confirm('Delete this whole bill? Its accounting entry, its <?= (int) $pb['item_count'] ?> stock movement(s) and the value they carried are removed, and the cost layers are rebuilt as if the bill had never been entered. This cannot be undone.');">
-                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
-                                        <input type="hidden" name="action" value="delete_purchase_bill">
-                                        <input type="hidden" name="voucher_id" value="<?= $pbId ?>">
-                                        <button type="submit" class="secondary mbw-delete-action">Delete</button>
-                                    </form>
-                                <?php endif; ?>
-                            </div>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table></div>
-        <?php endif; ?>
-    </details>
-    <?php endif; ?>
-
-    <?php if ($invShows('movement-sale')): ?>
-    <details class="feature-disclosure" id="movement-sale">
-        <summary><span><strong><?= icon('tasks') ?>Record Sale / Sales Return</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-        <form method="post" class="workspace-form-grid" id="saleMovementForm">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
-            <input type="hidden" name="action" value="record_movement">
-            <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
-            <label>Item<select name="item_id" id="saleMovItem" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
-            <label>Movement<select name="transaction_type">
-                <option value="sale">Sale</option>
-                <option value="sales_return">Sales return</option>
-            </select></label>
-            <label>Warehouse<select name="warehouse_id"><option value="0">— unassigned —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
-            <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
-            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
-            <label>Rate<input type="number" step="0.01" min="0" name="rate" id="saleMovRate" placeholder="Auto from item"></label>
-            <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-            <button type="submit"><?= icon('tasks') ?>Record</button>
-        </form>
-        <script>
-        (function () {
-            var item = document.getElementById('saleMovItem');
-            var rate = document.getElementById('saleMovRate');
-            item.addEventListener('change', function () {
-                var opt = item.options[item.selectedIndex];
-                if (opt && opt.value) { rate.value = opt.getAttribute('data-sales-rate'); }
-            });
-        })();
-        </script>
-    </details>
-    <?php endif; ?>
+    <?php if ($invShows('movement-purchase-entries') || $invShows('movement-sale')):
+        require __DIR__ . '/../../app/views/partials/inventory_voucher_history.php';
+    endif; ?>
 
     <?php if ($invShows('movement-adjust')): ?>
     <details class="feature-disclosure" id="movement-adjust">
@@ -3301,7 +3128,7 @@ $invMoveItemOptions = static function () use ($items): string {
 </section>
 <?php endif; ?>
 
-<?php if ($pageMovementTypes === null || $pageMovementTypes !== []): ?>
+<?php if (!in_array($invTask, ['purchase', 'sale'], true) && ($pageMovementTypes === null || $pageMovementTypes !== [])): ?>
 <section class="mbw-card" data-collapsible>
     <div class="mbw-card-head">
         <h2>Recent Stock Movements</h2>
