@@ -814,7 +814,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
     <div class="frm-main">
         <section class="mbw-card frm-section vch-head-card">
-            <div class="frm-grid vch-header-grid">
+            <div class="frm-grid vch-header-grid<?= $spec['layout'] === 'trade' ? ' vch-trade-header-grid' : '' ?>">
                 <?php if ($editVoucher === null): ?>
                     <?php include __DIR__ . '/../../app/views/vouchers/type_strip.php'; ?>
                 <?php else: ?>
@@ -829,7 +829,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($prefill['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required>
                 </label>
                 <?php if ((string) $spec['layout'] === 'trade'): ?>
-        <label><span><?= e((string) $spec['party_label']) ?> <em>*</em></span>
+        <label><span class="vch-party-label"><em aria-hidden="true">*</em><?= e((string) $spec['party_label']) ?></span>
             <select name="party_id" id="vch-party" class="js-searchable">
                 <option value="0">Select <?= e(strtolower((string) $spec['party_label'])) ?></option>
                 <?php foreach ($partyOptions as $party): ?>
