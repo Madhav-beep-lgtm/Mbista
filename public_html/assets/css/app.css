@@ -633,6 +633,11 @@ canvas { max-width: 100%; }
 .reports-center-page .rc2-export.is-open .rc2-export-menu { display:grid; }
 .reports-center-page .rc2-export-menu a { display:flex; align-items:center; gap:9px; padding:10px; border-radius:5px; text-decoration:none; color:var(--color-text); }
 .reports-center-page .rc2-export-menu a:hover { background:var(--color-primary-soft); }
+.reports-center-page .rc-trial-balance { table-layout:fixed; width:100%; min-width:0 !important; }
+.reports-center-page .rc-trial-balance :is(th,td) { min-width:0 !important; padding:8px 7px; white-space:normal; overflow-wrap:anywhere; font-size:12px; }
+.reports-center-page .rc-trial-balance .rpt-cell-main { width:auto; }
+.reports-center-page .rc-ledger-link { color:var(--color-primary); text-decoration:underline; text-underline-offset:3px; }
+.reports-center-page .rc-ledger-link:focus-visible { outline:2px solid var(--color-primary); outline-offset:2px; }
 .reports-center-page [hidden] { display:none !important; }
 @media (max-width:1000px) { .reports-center-page .rc2-filters-body { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:640px) { .reports-center-page .rc2-filters-body { grid-template-columns:repeat(2,minmax(0,1fr)); } }

@@ -579,22 +579,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </form>
 
 <section class="rc2-preview mbw-card" id="rc2Preview" aria-label="Report preview">
-    <div class="rc2-preview-head">
-        <div class="rc2-preview-tools">
-            <input type="search" id="rc2AcctSearch" class="rc2-acct-search rc2-hier-only" placeholder="Search account..." aria-label="Search accounts in this report">
-            <button type="button" class="rc2-mini rc2-hier-only" id="rc2ExpandAll">Expand all</button>
-            <button type="button" class="rc2-mini rc2-hier-only" id="rc2CollapseAll">Collapse all</button>
-        </div>
-    </div>
 <div class="rpt-fullwidth">
     <main class="rc-report-view rpt-statement" id="rc2Statement">
         <div class="rc-table-scroll">
-            <?php rc_render_table($report, $hasGroups); ?>
+            <?php rc_render_table($report, $hasGroups, url('admin/ledgers.php?from=' . $fromDate . '&to=' . $toDate . '&ledger_id=')); ?>
         </div>
         <?php if ($compareEnabled && $compareReport !== null): ?>
             <div class="rpt-bar rpt-bar-compare">Comparison Period — <?= e(date('d M Y', strtotime($compareFrom))) ?> to <?= e(date('d M Y', strtotime($compareTo))) ?></div>
             <div class="rc-table-scroll">
-                <?php rc_render_table($compareReport, $hasGroups); ?>
+                <?php rc_render_table($compareReport, $hasGroups, url('admin/ledgers.php?from=' . $compareFrom . '&to=' . $compareTo . '&ledger_id=')); ?>
             </div>
         <?php endif; ?>
         <?php rc_render_notes($reportNotes); ?>
@@ -723,6 +716,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             levelSelect.addEventListener('change', function () { setDisplayLevel(levelSelect.value); });
         }
         statement.addEventListener('click', function (event) {
+            if (event.target.closest('a')) return;
             var tr = event.target.closest('tr');
             if (!tr) { return; }
             if (tr.dataset.node) {
@@ -732,32 +726,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 window.location = ledgerDrillBase + tr.dataset.ledgerId;
             }
         });
-        var expandAll = document.getElementById('rc2ExpandAll');
-        var collapseAll = document.getElementById('rc2CollapseAll');
-        if (expandAll) { expandAll.addEventListener('click', function () { collapsedNodes = {}; hierRefresh(); }); }
-        if (collapseAll) { collapseAll.addEventListener('click', function () { setDisplayLevel('master'); if (levelSelect) { levelSelect.value = 'master'; } }); }
-        var acctSearch = document.getElementById('rc2AcctSearch');
-        if (acctSearch) {
-            acctSearch.addEventListener('input', function () {
-                var q = acctSearch.value.trim().toLowerCase();
-                if (!q) { hierRefresh(); return; }
-                var keepNodes = {};
-                hierRows.forEach(function (tr) {
-                    if (tr.textContent.toLowerCase().indexOf(q) !== -1) {
-                        var p = tr.dataset.parent || '';
-                        while (p) { keepNodes[p] = true; p = parentOf[p] || ''; }
-                        if (tr.dataset.node) { keepNodes[tr.dataset.node] = true; }
-                        tr._rc2Match = true;
-                    } else {
-                        tr._rc2Match = false;
-                    }
-                });
-                hierRows.forEach(function (tr) {
-                    var show = tr._rc2Match || (tr.dataset.node && keepNodes[tr.dataset.node]);
-                    tr.classList.toggle('rpt-hidden', !show);
-                });
-            });
-        }
+
     } else {
         document.querySelectorAll('.rc2-hier-only').forEach(function (el) { el.style.display = 'none'; });
         if (levelSelect && statement) {

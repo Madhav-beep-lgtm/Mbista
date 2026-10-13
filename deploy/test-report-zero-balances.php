@@ -15,3 +15,19 @@ if ($shown['sum'] !== $hidden['sum']) throw new RuntimeException('Hide zero chan
 $zero = rc_group_balances([$balances[0]], ['asset'], $value, false);
 if ($zero['groups'] === []) throw new RuntimeException('All-zero report became empty');
 echo "Zero balances visibility, period activity and unchanged totals passed.\n";
+function e(string $value): string { return htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); }
+$report = [
+    'title' => 'Trial Balance',
+    'columns' => [['Code', 'left', ''], ['Particulars', 'left', '']],
+    'rows' => [rc_row(['111', 'Cash & bank'], '', ['level' => 2, 'ledger_id' => 42, 'label_cell' => 1])],
+    'totals' => null,
+];
+ob_start();
+rc_render_table($report, false, '/admin/ledgers.php?ledger_id=');
+$html = ob_get_clean();
+if (!str_contains($html, 'href="/admin/ledgers.php?ledger_id=42"') || !str_contains($html, 'Cash &amp; bank')) throw new RuntimeException('Accessible ledger link missing');
+ob_start();
+rc_render_table($report, false);
+$print = ob_get_clean();
+if (str_contains($print, 'rc-ledger-link')) throw new RuntimeException('Screen links leaked into print');
+echo "Ledger links and print separation passed.\n";

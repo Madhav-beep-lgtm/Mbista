@@ -2804,10 +2804,14 @@ function rc_has_group_columns(array $report): bool
     return array_reduce($report['columns'], static fn (bool $carry, array $col): bool => $carry || $col[2] !== '', false);
 }
 
-function rc_render_table(array $report, bool $hasGroups): void
+function rc_render_table(array $report, bool $hasGroups, string $ledgerLinkBase = ''): void
 {
+    $isTrialBalance = ($report['title'] ?? '') === 'Trial Balance';
     ?>
-    <table class="rc-table">
+    <table class="rc-table<?= $isTrialBalance ? ' rc-trial-balance' : '' ?>">
+        <?php if ($isTrialBalance): ?>
+            <colgroup><col style="width:7%"><col style="width:27%"><?php for ($i = 0; $i < 6; $i++): ?><col style="width:11%"><?php endfor; ?></colgroup>
+        <?php endif; ?>
         <thead>
             <?php if ($hasGroups): ?>
                 <tr>
@@ -2873,7 +2877,7 @@ function rc_render_table(array $report, bool $hasGroups): void
                 <?php $labelCell = isset($meta['level']) ? (int) ($meta['label_cell'] ?? 0) : -1; ?>
                 <tr class="<?= e(implode(' ', $classes)) ?>"<?= $attrs ?>>
                     <?php foreach ($cells as $cellIndex => $cell): ?>
-                        <td class="align-<?= e($report['columns'][$cellIndex][1] ?? 'left') ?><?= $cellIndex === $labelCell ? ' rpt-cell-main' : '' ?>"><?= e((string) $cell) ?></td>
+                        <td class="align-<?= e($report['columns'][$cellIndex][1] ?? 'left') ?><?= $cellIndex === $labelCell ? ' rpt-cell-main' : '' ?>"><?php if ($ledgerLinkBase !== '' && (int) ($meta['ledger_id'] ?? 0) > 0 && $cellIndex === $labelCell): ?><a class="rc-ledger-link" href="<?= e($ledgerLinkBase . (int) $meta['ledger_id']) ?>"><?= e((string) $cell) ?></a><?php else: ?><?= e((string) $cell) ?><?php endif; ?></td>
                     <?php endforeach; ?>
                 </tr>
             <?php endforeach; ?>
