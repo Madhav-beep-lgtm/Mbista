@@ -2866,7 +2866,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 $inheritLedger = inv_resolve_mapping($companyId, $itemFormPurpose, null, trim((string) ($editItem['category'] ?? '')) ?: null);
                 $ownLedgerId = $itemMapCurrent[$itemFormPurpose] ?? 0;
                 ?>
-                <label><?= e($itemPurposeMeta[$itemFormPurpose]['label'] ?? $itemFormPurpose) ?> ledger (this item only)
+                <label><?= e($itemFormPurpose === 'purchases' || ($itemFormPurpose === 'inventory_asset' && inv_accounting_method($companyId) !== 'periodic') ? 'Purchase / inventory' : ($itemPurposeMeta[$itemFormPurpose]['label'] ?? $itemFormPurpose)) ?> ledger (this item only)
                     <select name="item_map[<?= e($itemFormPurpose) ?>]" data-fill-from="inv-ledger-options">
                         <option value="0">— inherit default<?= $inheritLedger ? ': ' . e($inheritLedger['name']) : ' (not set)' ?> —</option>
                         <?= $invLedgerChosen((int) $ownLedgerId) ?>

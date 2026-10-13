@@ -137,8 +137,8 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                     <tr>
                         <th style="width:36px">SN</th>
                         <th style="width:190px" data-goods-field>Inventory item <em>*</em></th>
-                        <th style="width:200px"><?= $spec['value_role'] === 'income' ? 'Sales ledger' : 'Purchase ledger' ?> <em>*</em></th>
-                        <th data-description-heading>Description / Service</th><th style="width:180px">Cost centre <em>*</em></th>
+                        <?php if ($spec['value_role'] === 'income'): ?><th style="width:200px">Sales ledger <em>*</em></th><?php endif; ?>
+                        <th data-description-heading data-service-field>Service</th><th style="width:180px">Cost centre <em>*</em></th>
                         <th class="is-numeric" style="width:100px" data-goods-field>Qty</th>
                         <th class="is-numeric" style="width:120px" data-goods-field>Rate</th>
                         <th style="width:145px">Tax treatment</th><th style="width:85px">Tax %</th><th class="is-numeric" style="width:120px">Line total</th><th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
@@ -169,13 +169,15 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                         <?php endforeach; ?>
                     </select>
                 </td>
+                <?php if ($spec['value_role'] === 'income'): ?>
                 <td>
                     <select name="value_ledger[]" data-field="ledger_id" class="vch-ledger">
                         <option value="">Select ledger</option>
                         <?= $renderLedgerOptions($optionsValue, 0) ?>
                     </select>
                 </td>
-                <td><input type="text" name="value_description[]" data-field="description" maxlength="255" placeholder="Item or service"></td><td><select name="value_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
+                <?php else: ?><td hidden><input type="hidden" name="value_ledger[]" data-field="ledger_id" class="vch-ledger"></td><?php endif; ?>
+                <td data-service-field><input type="text" name="value_description[]" data-field="description" maxlength="255" placeholder="Item or service"></td><td><select name="value_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
                 <td class="is-numeric" data-goods-field><input type="number" name="value_qty[]" data-field="qty" class="frm-num vch-qty" step="0.001" min="0" placeholder="0"></td>
                 <td class="is-numeric" data-goods-field><input type="number" name="value_rate[]" data-field="rate" class="frm-num vch-rate" step="0.01" min="0" placeholder="0.00"></td>
 
@@ -288,6 +290,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (rateField && (Number(rateField.value) || 0) === 0) { rateField.value = option.getAttribute('data-rate') || ''; }
         if (qtyField && (Number(qtyField.value) || 0) === 0) { qtyField.value = '1'; }
         var stockLedger = option.getAttribute('data-ledger');
+        if (ledgerField && ledgerField.type === 'hidden') { ledgerField.value = stockLedger || ''; }
         if (stockDirection === 'in' && ledgerField && ledgerField.value === '' && stockLedger && stockLedger !== '0'
             && ledgerField.querySelector('option[value="' + stockLedger + '"]')) {
             ledgerField.value = stockLedger;
@@ -303,6 +306,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 field.required = goods && (field.classList.contains('vch-item') || field.classList.contains('vch-qty'));
             });
         });
+        form.querySelectorAll('[data-service-field]').forEach(function (cell) { cell.hidden = goods; });
         var title = form.querySelector('[data-description-heading]');
         if (title) title.textContent = goods ? 'Description' : 'Service';
     }

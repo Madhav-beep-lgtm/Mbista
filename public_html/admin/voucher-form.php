@@ -164,6 +164,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if (($spec['layout'] ?? '') === 'trade'
+        && (($composeInput['trade_mode'] ?? '') === 'goods' || in_array($voucherType, ['purchase', 'debit_note'], true))) {
+        $itemLookup = db()->prepare("SELECT * FROM inventory_items WHERE id = ? AND company_id = ? AND status = 'active'");
+        foreach ((array) ($composeInput['value_item'] ?? []) as $index => $itemId) {
+            $itemLookup->execute([(int) $itemId, $companyId]);
+            $selectedItem = $itemLookup->fetch(PDO::FETCH_ASSOC);
+            if (!$selectedItem) {
+                $problems[] = 'Line ' . ($index + 1) . ': select an active inventory item belonging to this company.';
+                continue;
+            }
+            $composeInput['value_description'][$index] = (string) $selectedItem['name'];
+            if (in_array($voucherType, ['purchase', 'debit_note'], true)) {
+                $purchaseLedgerId = inv_accounting_method($companyId) === 'periodic'
+                    ? (int) (inv_resolve_mapping($companyId, 'purchases', (int) $selectedItem['id'], (string) ($selectedItem['category'] ?? ''))['id'] ?? 0)
+                    : inv_item_stock_ledger_id($companyId, $selectedItem);
+                $composeInput['value_ledger'][$index] = $purchaseLedgerId;
+                if ($purchaseLedgerId <= 0 || !isset($ledgerDirectory[$purchaseLedgerId])) {
+                    $problems[] = 'Configure an active purchase / inventory ledger on item "' . $selectedItem['name'] . '" before saving.';
+                }
+            }
+        }
+    }
     $composed = voucher_compose($voucherType, $composeInput, $ledgerDirectory, $isDraft);
     $problems = array_merge($problems, $composed['errors']);
     $entries = $composed['entries'];
@@ -594,6 +616,9 @@ if ($stockMovementType !== null && voucher_stock_ready()) {
     $itemStmt->execute(['company_id' => $companyId]);
     foreach ($itemStmt->fetchAll() as $item) {
         $item['stock_ledger_id'] = inv_item_stock_ledger_id($companyId, $item);
+        if (in_array($spec['key'], ['purchase', 'debit_note'], true) && inv_accounting_method($companyId) === 'periodic') {
+            $item['stock_ledger_id'] = (int) (inv_resolve_mapping($companyId, 'purchases', (int) $item['id'], (string) ($item['category'] ?? ''))['id'] ?? 0);
+        }
         $itemOptions[] = $item;
     }
     if ($itemOptions !== [] && table_exists('warehouses')) {
