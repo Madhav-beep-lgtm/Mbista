@@ -16,10 +16,6 @@ $bankSide = (string) $spec['bank_side'];
 $isMoneyIn = $bankSide === 'debit';
 ?>
 <section class="mbw-card frm-section vch-focus vch-work-section vch-money-section vch-entry-panel">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-<?= e((string) $spec['tone']) ?>"><?= icon($isMoneyIn ? 'trend-up' : 'trend-down') ?></span>
-        <h2><?= e((string) $spec['bank_label']) ?></h2>
-    </div>
 
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['tender'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap">

@@ -814,13 +814,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
     <div class="frm-main">
         <section class="mbw-card frm-section vch-head-card">
-            <div class="frm-section-head">
-                <div class="vch-document-title">
-                    <h2><?= e((string) $spec['label']) ?></h2>
-                    <span class="vch-currency"><?= e(trim($currency)) ?></span>
-                </div>
-                <span class="vch-document-state"><?= $editVoucher ? e(ucfirst((string) ($editVoucher['status'] ?? 'draft'))) : 'Draft' ?> · Prepared by <?= e((string) ($currentUser['name'] ?? 'User')) ?></span>
-            </div>
             <div class="frm-grid vch-header-grid">
                 <?php if ($editVoucher === null): ?>
                     <?php include __DIR__ . '/../../app/views/vouchers/type_strip.php'; ?>
