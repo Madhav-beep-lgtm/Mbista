@@ -629,12 +629,12 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                         <div class="admin-profile-dropdown">
                             <div class="admin-profile-dropdown-head">
                                 <span class="admin-profile-avatar is-large"><?= e($headerUserInitials) ?></span>
-                                <span><strong><?= e($headerUserName) ?></strong><small><?= e((string) ($currentUser['email'] ?? $headerUserRole)) ?></small></span>
+                                <strong><?= e($headerUserName) ?></strong>
                             </div>
-                            <a href="<?= e(url('admin/profile.php')) ?>"><?= icon('profile') ?><span><strong>My profile</strong><small>Personal details and security</small></span></a>
-                            <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><span><strong>Users</strong><small>Accounts and permissions</small></span></a>
-                            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><span><strong>Settings</strong><small>System preferences</small></span></a>
-                            <a class="is-logout" href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?><span><strong>Logout</strong><small>End this session</small></span></a>
+                            <a href="<?= e(url('admin/profile.php')) ?>"><?= icon('profile') ?><strong>My profile</strong></a>
+                            <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><strong>Users</strong></a>
+                            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><strong>Settings</strong></a>
+                            <a class="is-logout" href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?><strong>Logout</strong></a>
                         </div>
                     </details>
                 <?php endif; ?>
