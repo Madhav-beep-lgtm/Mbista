@@ -62,21 +62,21 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 }
 
 // Keep the interactive hierarchy bounded. Large charts previously loaded
-// every ledger, even when the user only needed one account. Search and group
-// filters make the bounded view useful without restoring that memory spike.
+// every ledger, even when the user only needed one account. A shared search
+// covers ledger codes, names and their groups.
 $coaSearch = trim((string) ($_GET['q'] ?? ''));
-$coaGroupId = max(0, (int) ($_GET['group_id'] ?? 0));
 $coaWhere = ['company_id = :cid'];
 $coaBindings = ['cid' => $companyId];
 if ($coaSearch !== '') {
     // Native PDO prepares cannot reuse one named placeholder twice.
-    $coaWhere[] = '(code LIKE :coa_code_search OR name LIKE :coa_name_search)';
+    $coaWhere[] = '(code LIKE :coa_code_search OR name LIKE :coa_name_search
+        OR EXISTS (SELECT 1 FROM ledger_groups g
+            WHERE g.id = ledgers.group_id AND g.company_id = ledgers.company_id
+              AND (g.name LIKE :coa_group_name_search OR g.code LIKE :coa_group_code_search)))';
     $coaBindings['coa_code_search'] = '%' . $coaSearch . '%';
     $coaBindings['coa_name_search'] = '%' . $coaSearch . '%';
-}
-if ($coaGroupId > 0) {
-    $coaWhere[] = 'group_id = :coa_group_id';
-    $coaBindings['coa_group_id'] = $coaGroupId;
+    $coaBindings['coa_group_name_search'] = '%' . $coaSearch . '%';
+    $coaBindings['coa_group_code_search'] = '%' . $coaSearch . '%';
 }
 $coaWhereSql = implode(' AND ', $coaWhere);
 $ledgerStatsStmt = db()->prepare("SELECT COUNT(*) AS total_count,
@@ -255,16 +255,8 @@ $statusPill = static fn (string $status): string => $status === 'active'
             <option value="<?= e(url('admin/audit-trail.php')) ?>">Audit log</option>
         </select>
     </label>
-    <label>Find ledger
-        <input type="search" name="q" value="<?= e($coaSearch) ?>" placeholder="Code or account name">
-    </label>
-    <label>Group
-        <select name="group_id">
-            <option value="0">All groups</option>
-            <?php foreach ($groups as $group): ?>
-                <option value="<?= (int) $group['id'] ?>"<?= $coaGroupId === (int) $group['id'] ? ' selected' : '' ?>><?= e((string) $group['name']) ?></option>
-            <?php endforeach; ?>
-        </select>
+    <label>Ledger or group
+        <input type="search" name="q" value="<?= e($coaSearch) ?>">
     </label>
     <div style="align-self:end;display:flex;gap:10px">
         <button class="button" type="submit"><?= icon('search') ?>Filter</button>
