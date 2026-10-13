@@ -1,6 +1,13 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+if (($_GET['type'] ?? '') === 'stock_transfer') {
+    define('STOCK_TRANSFER_VOUCHER', true);
+    $_GET['view'] = 'inventory';
+    $_GET['task'] = 'transfer';
+    require __DIR__ . '/accounting-inventory.php';
+    return;
+}
 if (($_GET['type'] ?? '') === 'production') {
     define('PRODUCTION_VOUCHER', true);
     $_GET['view'] = 'manufacturing';

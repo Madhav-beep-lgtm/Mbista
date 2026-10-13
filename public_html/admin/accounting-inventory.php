@@ -75,6 +75,7 @@ $itemTypes = $inventoryProfile['show_manufacturing']
  */
 function inv_back_url(string $extra = ''): string
 {
+    if (defined('STOCK_TRANSFER_VOUCHER')) return 'admin/voucher-form.php?type=stock_transfer';
     if (defined('PRODUCTION_VOUCHER')) return 'admin/voucher-form.php?type=production';
     if (defined('INVENTORY_PAGE')) {
         return 'admin/' . inventory_pages()[INVENTORY_PAGE]['file']
@@ -233,6 +234,10 @@ function inventory_post_production_voucher(int $companyId, int $fiscalYearId, in
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
+    if (defined('STOCK_TRANSFER_VOUCHER') && ($action !== 'record_movement' || !inv_movement_is_location_only((string) ($_POST['transaction_type'] ?? '')))) {
+        http_response_code(400);
+        exit('Unsupported stock transfer action.');
+    }
     if (defined('PRODUCTION_VOUCHER') && $action !== 'create_manufacturing_order') {
         http_response_code(400);
         exit('Unsupported production action.');
@@ -811,6 +816,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // later COGS) and no GL voucher is posted. Cost here is informational
         // only, stamped from the item's current carrying cost.
         if (inv_movement_is_location_only($type)) {
+            if (!defined('STOCK_TRANSFER_VOUCHER')) {
+                flash('error', 'Record stock transfers through the Stock Transfer voucher.');
+                redirect('admin/voucher-form.php?type=stock_transfer');
+            }
+            if (!inventory_valid_date((string) ($_POST['transaction_date'] ?? '')) || (int) ($_POST['context_fiscal_year_id'] ?? 0) !== $fiscalYearId || (int) ($moveFiscalYear['id'] ?? 0) !== $fiscalYearId) {
+                flash('error', 'Select a transfer date in the active financial year.');
+                redirect(inv_back_url());
+            }
+            if (!is_finite($qty) || (float) ($_POST['quantity'] ?? 0) <= 0 || $item['status'] !== 'active' || !preg_match('/^STF-[A-Z0-9-]{1,50}$/', (string) $refNo)) {
+                flash('error', 'Valid transfer number and quantity required.');
+                redirect(inv_back_url());
+            }
             if ($warehouseId === null || $toWarehouseId === null || $warehouseId === $toWarehouseId) {
                 flash('error', 'Select two different warehouses for a transfer (from and to).');
                 redirect(inv_back_url());
@@ -831,6 +848,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $transferValue = round($qty * $unitCostAtIssue, 2);
             try {
                 db()->beginTransaction();
+                $transferCompanyLock = db()->prepare('SELECT id FROM companies WHERE id = ? FOR UPDATE');
+                $transferCompanyLock->execute([$companyId]);
+                $activeLocations = db()->prepare('SELECT COUNT(*) FROM warehouses WHERE company_id = ? AND is_active = 1 AND id IN (?, ?)');
+                $activeLocations->execute([$companyId, $warehouseId, $toWarehouseId]);
+                if ((int)$activeLocations->fetchColumn() !== 2) throw new RuntimeException('Select two active company warehouses.');
+                $transferLock = db()->prepare('SELECT id FROM inventory_items WHERE id = ? AND company_id = ? FOR UPDATE');
+                $transferLock->execute([$itemId, $companyId]);
+                if (!$transferLock->fetchColumn()) throw new RuntimeException('Transfer item not found.');
+                $duplicate = db()->prepare("SELECT id FROM inventory_transactions WHERE company_id = ? AND ref_no = ? AND transaction_type IN ('warehouse_transfer','departmental_transfer') LIMIT 1");
+                $duplicate->execute([$companyId, $refNo]);
+                if ($duplicate->fetchColumn()) throw new RuntimeException('This stock transfer voucher has already been posted.');
+                if ($qty > inv_item_warehouse_qty($companyId, $itemId, $warehouseId) + 0.0005) throw new RuntimeException('Insufficient stock at the source warehouse.');
                 $insertTxn = db()->prepare('
                     INSERT INTO inventory_transactions (
                         company_id, fiscal_year_id, item_id, transaction_type, ref_no, transaction_date,
@@ -1977,6 +2006,11 @@ $itemStmt = db()->prepare('
 ');
 $itemStmt->execute(['company_id' => $companyId]);
 $items = $itemStmt->fetchAll();
+if (defined('STOCK_TRANSFER_VOUCHER')) {
+    require_permission('inventory', 'create');
+    require __DIR__ . '/../../app/views/vouchers/stock_transfer.php';
+    return;
+}
 if (defined('PRODUCTION_VOUCHER')) {
     require_permission('inventory', 'create');
     require_permission('accounting', 'post');
@@ -2545,7 +2579,7 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
 
 <?php endif; ?>
 
-<?php if (in_array($invView, ['inventory', 'manufacturing'], true)): ?>
+<?php if (in_array($invView, ['inventory', 'manufacturing'], true) && !($invView === 'manufacturing' && $invTask === 'manufacturing')): ?>
 <section class="mbw-card" <?= $invShows('warehouses') ? '' : 'data-collapsible' ?> aria-label="Inventory workbench">
     <?php if (!$invShows('warehouses')): ?>
     <div class="mbw-card-head inventory-workbench-head">
@@ -2858,34 +2892,11 @@ $invMoveItemOptions = static function () use ($items): string {
     <?php endif; ?>
 
     <?php if ($invShows('movement-transfer')): ?>
-    <details class="feature-disclosure" id="movement-transfer">
-        <summary><span><strong><?= icon('tasks') ?>Warehouse / Departmental Transfer</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
-        <form method="post" class="workspace-form-grid">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
-            <input type="hidden" name="action" value="record_movement">
-            <?php $moveOpts = shared_options('inv-move-items', $invMoveItemOptions, (string) ($moveItemId ?: '')); ?>
-            <label>Item<select name="item_id" required<?= $moveOpts['fill'] ? ' data-fill-from="inv-move-items"' : '' ?>><?= $moveOpts['html'] ?></select></label>
-            <label>Movement<select name="transaction_type">
-                <option value="warehouse_transfer">Warehouse transfer</option>
-                <option value="departmental_transfer">Departmental transfer</option>
-            </select></label>
-            <label>From warehouse<select name="warehouse_id" required><option value="">Select source</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
-            <label>To warehouse<select name="to_warehouse_id" required><option value="">Select destination</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>"><?= e($warehouse['name']) ?></option><?php endforeach; ?></select></label>
-            <label>Date<input type="date" name="transaction_date" value="<?= e(date('Y-m-d')) ?>" required></label>
-            <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
-            <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
-            <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-            <div class="workspace-span-2"></div>
-            <button type="submit"><?= icon('tasks') ?>Record transfer</button>
-        </form>
-    </details>
+    <?php require __DIR__ . '/../../app/views/partials/stock_transfer_history.php'; ?>
     <?php endif; ?>
 
     <?php endif; ?>
     <?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
-        <?php if ($invShows('manufacturing')): ?>
-        <a class="button" href="<?= e(url('admin/voucher-form.php?type=production')) ?>"><?= icon('settings') ?>New Production voucher</a>
-        <?php endif; ?>
 
         <?php if ($invShows('bom')): ?>
         <details class="feature-disclosure" id="bom">
@@ -3088,7 +3099,7 @@ $invMoveItemOptions = static function () use ($items): string {
 </section>
 <?php endif; ?>
 
-<?php if (!in_array($invTask, ['purchase', 'sale'], true) && ($pageMovementTypes === null || $pageMovementTypes !== [])): ?>
+<?php if (!in_array($invTask, ['purchase', 'sale', 'transfer'], true) && ($pageMovementTypes === null || $pageMovementTypes !== [])): ?>
 <section class="mbw-card" data-collapsible>
     <div class="mbw-card-head">
         <h2>Recent Stock Movements</h2>
