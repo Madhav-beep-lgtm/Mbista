@@ -177,6 +177,14 @@ if ! php "$REPO_DIR/deploy/repair-schema.php" "$APP_BASE"; then
     die "database schema repair failed"
 fi
 echo "deploy: database schema is current"
+if [ -n "${ACCOUNT_CODE_MIGRATION:-}" ]; then
+    case "$ACCOUNT_CODE_MIGRATION" in
+        --dry-run|--apply) ;;
+        *) die "ACCOUNT_CODE_MIGRATION must be --dry-run or --apply" ;;
+    esac
+    php "$REPO_DIR/deploy/migrate-account-codes.php" "$APP_BASE" "$ACCOUNT_CODE_MIGRATION" \
+        || die "account code migration failed"
+fi
 
 # Prove the copy actually landed, rather than trusting that it did.
 #

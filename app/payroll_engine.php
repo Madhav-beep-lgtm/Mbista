@@ -66,7 +66,7 @@ function payroll_fix_ledger_groups(int $companyId): void
         }
         db()->prepare('INSERT INTO ledger_groups (company_id, master_key, code, name, is_cash_or_bank, is_system, is_active)
                 VALUES (:cid, :mk, :code, :name, 0, 0, 1)')
-            ->execute(['cid' => $companyId, 'mk' => $masterKey, 'code' => $code, 'name' => $name]);
+            ->execute(['cid' => $companyId, 'mk' => $masterKey, 'code' => coa_next_group_code($companyId, $masterKey), 'name' => $name]);
         return (int) db()->lastInsertId();
     };
 
@@ -99,9 +99,9 @@ function payroll_fix_ledger_groups(int $companyId): void
     ];
 
     foreach ($targets as $ledgerCode => [$resolveTarget, $okMasters]) {
-        $stmt = db()->prepare('SELECT l.id, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank, lg.code AS group_code
+        $stmt = db()->prepare('SELECT l.id, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank, COALESCE(lg.legacy_code, lg.code) AS group_code
             FROM ledgers l LEFT JOIN ledger_groups lg ON lg.id = l.group_id
-            WHERE l.company_id = :cid AND l.code = :code LIMIT 1');
+            WHERE l.company_id = :cid AND :code IN (l.code, l.legacy_code) LIMIT 1');
         $stmt->execute(['cid' => $companyId, 'code' => $ledgerCode]);
         $ledger = $stmt->fetch();
         if (!$ledger) {

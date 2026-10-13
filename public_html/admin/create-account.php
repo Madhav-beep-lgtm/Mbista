@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $duplicate = db()->prepare("SELECT id FROM $table WHERE company_id = :cid AND LOWER(TRIM(name)) = LOWER(:name) AND id <> :edit_id LIMIT 1");
         $duplicate->execute(['cid' => $companyId, 'name' => $name, 'edit_id' => $editId]);
         if ($duplicate->fetchColumn()) throw new InvalidArgumentException('An account with this name already exists at this level.');
-        $code = $editAccount ? (string) $editAccount['code'] : ($isGroup ? coa_next_group_code($companyId, $masterKey) : coa_next_ledger_code($companyId, (int) $groupId));
+        $code = $editAccount ? (string) $editAccount['code'] : ($isGroup ? coa_next_group_code($companyId, $masterKey, $groupId) : coa_next_ledger_code($companyId, (int) $groupId, $ledgerParent, $nature));
         $data = ['company_id' => $companyId, 'code' => $code, 'name' => $name, 'is_system' => 0] + $metadata;
         if ($isGroup) $data += ['master_key' => $masterKey, 'parent_group_id' => $groupId, 'is_active' => 1, 'is_cash_or_bank' => empty($values['is_cash_or_bank']) ? 0 : 1];
         else $data += ['group_id' => $groupId, 'parent_ledger_id' => $ledgerParent, 'type' => $nature, 'status' => 'active'];

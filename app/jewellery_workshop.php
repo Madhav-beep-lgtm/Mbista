@@ -244,7 +244,7 @@ function jw_holder_ledger(int $companyId, string $groupPurpose, string $code, st
         return 0;
     }
 
-    $byCode = db()->prepare('SELECT id, name FROM ledgers WHERE company_id = :cid AND code = :code LIMIT 1');
+    $byCode = db()->prepare('SELECT id, name FROM ledgers WHERE company_id = :cid AND :code IN (code, legacy_code) LIMIT 1');
     $byCode->execute(['cid' => $companyId, 'code' => $code]);
     $row = $byCode->fetch(PDO::FETCH_ASSOC);
     if ($row) {
@@ -262,16 +262,13 @@ function jw_holder_ledger(int $companyId, string $groupPurpose, string $code, st
     $byName->execute(['cid' => $companyId, 'gid' => $groupId, 'name' => $name]);
     $ledgerId = (int) ($byName->fetchColumn() ?: 0);
     if ($ledgerId > 0) {
-        db()->prepare('UPDATE ledgers SET code = :code WHERE id = :id AND company_id = :cid')
+        db()->prepare('UPDATE ledgers SET legacy_code = :code WHERE id = :id AND company_id = :cid')
             ->execute(['code' => $code, 'id' => $ledgerId, 'cid' => $companyId]);
 
         return $ledgerId;
     }
 
-    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status) VALUES (:cid, :gid, :code, :name, 'asset', 'active')")
-        ->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code, 'name' => $name]);
-
-    return (int) db()->lastInsertId();
+    return coa_create_system_ledger($companyId, $groupId, $code, $name, 'asset');
 }
 
 /** Find or create the supplier party a contractor karigar's wages accrue to. */

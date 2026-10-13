@@ -51,7 +51,7 @@ function ensure_customer_advance_ledger(int $companyId, int $partyId = 0): int
     }
 
     $code = 'CUST-ADV';
-    $stmt = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND code = :code LIMIT 1');
+    $stmt = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND :code IN (code, legacy_code) LIMIT 1');
     $stmt->execute(['cid' => $companyId, 'code' => $code]);
     $ledgerId = (int) ($stmt->fetchColumn() ?: 0);
     if ($ledgerId > 0) {
@@ -64,11 +64,7 @@ function ensure_customer_advance_ledger(int $companyId, int $partyId = 0): int
     if ($groupId <= 0) {
         return 0;
     }
-    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status)
-        VALUES (:cid, :gid, :code, :name, 'liability', :sys, 'active')")
-        ->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code, 'name' => $name, 'sys' => 1]);
-
-    return (int) db()->lastInsertId();
+    return coa_create_system_ledger($companyId, $groupId, $code, $name, 'liability', true);
 }
 
 /** Resolve a task's client party + mirror target. Returns null if the task is unusable. */

@@ -137,7 +137,7 @@ function rc_pdf_section(array $report, string $title, string $note = ''): array
         $meta = rc_row_meta($row);
         $level = isset($meta['level']) ? max(0, (int) $meta['level']) : 0;
         $labelCell = isset($meta['level']) ? (int) ($meta['label_cell'] ?? 0) : -1;
-        $out = ['emphasis' => rc_row_style($row) === 'total' ? 'total' : ''];
+        $out = ['emphasis' => in_array(rc_row_style($row), ['total', 'bold', 'section'], true) ? 'total' : ''];
         foreach (array_values($cells) as $index => $cell) {
             $text = is_array($cell) ? (string) ($cell['text'] ?? '') : (string) $cell;
             $out['c' . $index] = $index === $labelCell && $level > 0
@@ -436,7 +436,7 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     $openingAt4 = "(d.vdate = :open4 AND {$openingSrc})";
 
     $sql = "
-        SELECT l.id, l.code, l.name, l.type, l.opening_balance, l.opening_side, lg.name AS group_name, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank,
+        SELECT l.id, l.code, l.name, l.type, l.group_id, l.parent_ledger_id, l.opening_balance, l.opening_side, lg.name AS group_name, lg.master_key, COALESCE(lg.is_cash_or_bank, 0) AS is_cash_or_bank,
                COALESCE(b.op_dr, 0) AS op_dr, COALESCE(b.op_cr, 0) AS op_cr,
                COALESCE(b.tx_dr, 0) AS tx_dr, COALESCE(b.tx_cr, 0) AS tx_cr,
                COALESCE(b.pre_fy_dr, 0) AS pre_fy_dr, COALESCE(b.pre_fy_cr, 0) AS pre_fy_cr
@@ -676,62 +676,11 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         }
         case 'trial-balance': {
             $balances = rc_ledger_balances($scopeCompanyId, $from, $to, (string) $ctx['vtype'], (int) $ctx['group_id'], (int) $ctx['ledger_id'], (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
-            // Master -> Group -> Ledger hierarchy in natural chart order.
-            $tbValue = static fn (array $b): array => [
-                (float) $b['op_side_dr'], (float) $b['op_side_cr'],
-                (float) $b['tx_dr'], (float) $b['tx_cr'],
-                (float) $b['cl_side_dr'], (float) $b['cl_side_cr'],
-            ];
-            // Every head the chart knows, PLUS whatever belongs to none.
-            //
-            // A trial balance that quietly leaves an account out is the most
-            // dangerous report in the system: it balances by omission, or -- as
-            // happened here -- fails to balance for a reason nothing on the page
-            // explains. A group whose master_key is empty or unrecognised used
-            // to be skipped by this loop entirely, taking its ledgers with it,
-            // and seven accounts holding millions simply were not printed.
-            //
-            // Anything unplaceable is now gathered at the foot under its own
-            // heading, so the figure is on the page, the total is honest, and
-            // the accounts needing a head are named rather than hunted for.
-            $masterOrder = array_keys(LEDGER_MASTERS);
-            $strayMasters = [];
-            foreach ($balances as $balanceRow) {
-                $rowMaster = (string) ($balanceRow['master_key'] ?? '');
-                if (!in_array($rowMaster, $masterOrder, true) && !in_array($rowMaster, $strayMasters, true)) {
-                    $strayMasters[] = $rowMaster;
-                }
-            }
-            $rows = [];
-            $grand = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-            $mi = 0;
-            foreach (array_merge($masterOrder, $strayMasters === [] ? [] : ['__unclassified__']) as $masterKey) {
-                $unclassified = $masterKey === '__unclassified__';
-                $section = rc_group_balances($balances, $unclassified ? $strayMasters : [$masterKey], $tbValue, (bool) ($ctx['hide_zero'] ?? false));
-                if ($section['groups'] === []) {
-                    continue;
-                }
-                $mi++;
-                $node = 'm' . $mi;
-                $masterLabel = $unclassified
-                    ? 'Unclassified — these groups belong to no head and are excluded from the P&L'
-                    : (string) (LEDGER_MASTERS[$masterKey]['label'] ?? ucwords(str_replace('_', ' ', $masterKey)));
-                $sum = $section['sum'] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-                $rows[] = rc_row(array_merge([(string) $mi, strtoupper($masterLabel)], array_map('rc_fmt', $sum)), 'bold', ['level' => 0, 'node' => $node, 'label_cell' => 1]);
-                $gi = 0;
-                foreach ($section['groups'] as $groupName => $groupData) {
-                    $gi++;
-                    $gnode = $node . '.' . $gi;
-                    $gsum = $groupData['sum'] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-                    $rows[] = rc_row(array_merge([$mi . '.' . $gi, $groupName], array_map('rc_fmt', $gsum)), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node, 'label_cell' => 1]);
-                    foreach ($groupData['ledgers'] as $ledgerLine) {
-                        $rows[] = rc_row(array_merge([(string) $ledgerLine['b']['code'], (string) $ledgerLine['b']['name']], array_map('rc_fmt', $ledgerLine['vals'])), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id'], 'label_cell' => 1]);
-                    }
-                }
-                foreach ($sum as $i => $v) {
-                    $grand[$i] += (float) $v;
-                }
-            }
+            $groupStmt = db()->prepare('SELECT * FROM ledger_groups WHERE company_id = ?');
+            $groupStmt->execute([$scopeCompanyId]);
+            $tree = coa_trial_balance_rows($balances, $groupStmt->fetchAll(PDO::FETCH_ASSOC), (bool) ($ctx['hide_zero'] ?? false));
+            $rows = $tree['rows'];
+            $grand = $tree['totals'];
             return [
                 'number' => '1',
                 'title' => 'Trial Balance',
@@ -2810,7 +2759,7 @@ function rc_render_table(array $report, bool $hasGroups, string $ledgerLinkBase 
     ?>
     <table class="rc-table<?= $isTrialBalance ? ' rc-trial-balance' : '' ?>">
         <?php if ($isTrialBalance): ?>
-            <colgroup><col style="width:7%"><col style="width:27%"><?php for ($i = 0; $i < 6; $i++): ?><col style="width:11%"><?php endfor; ?></colgroup>
+            <colgroup><col style="width:16%"><col style="width:24%"><?php for ($i = 0; $i < 6; $i++): ?><col style="width:10%"><?php endfor; ?></colgroup>
         <?php endif; ?>
         <thead>
             <?php if ($hasGroups): ?>

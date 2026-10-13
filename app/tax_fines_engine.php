@@ -139,7 +139,7 @@ function fines_post_voucher(int $companyId, int $taxLedgerId, float $amount, str
     // Fines & Penalties expense ledger, auto-created once under an indirect
     // expense group (fines are never deductible business costs, but they are
     // still real expenses in the books).
-    $fineLedgerStmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND code = 'FINES-PEN' LIMIT 1");
+    $fineLedgerStmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND 'FINES-PEN' IN (code, legacy_code) LIMIT 1");
     $fineLedgerStmt->execute(['cid' => $companyId]);
     $fineLedgerId = (int) ($fineLedgerStmt->fetchColumn() ?: 0);
     if ($fineLedgerId <= 0) {
@@ -149,9 +149,7 @@ function fines_post_voucher(int $companyId, int $taxLedgerId, float $amount, str
         if ($groupId <= 0) {
             return ['ok' => false, 'error' => 'No expense ledger group exists to hold the Fines & Penalties ledger.', 'voucher_id' => 0];
         }
-        db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status) VALUES (:cid, :gid, 'FINES-PEN', 'Government Fines & Interest', 'expense', 'active')")
-            ->execute(['cid' => $companyId, 'gid' => $groupId]);
-        $fineLedgerId = (int) db()->lastInsertId();
+        $fineLedgerId = coa_create_system_ledger($companyId, $groupId, 'FINES-PEN', 'Government Fines & Interest', 'expense');
     }
     try {
         $voucherId = (int) create_voucher_with_entries([

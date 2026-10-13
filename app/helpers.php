@@ -145,44 +145,28 @@ function ledger_master_nature(string $masterKey): ?string
 }
 
 /**
- * Structured chart-of-accounts codes: master = 1 digit by nature,
- * group = master digit + sequence (2 digits), ledger = group code +
- * sequence (3 digits). Codes are always system-generated.
+ * Fixed-width chart identifiers: M.GG.SS.LLL.UU; absent levels are zero-filled.
  */
+require_once __DIR__ . '/coa_codes.php';
+
 function coa_master_digit(string $masterKey): string
 {
-    $digits = ['asset' => '1', 'liability' => '2', 'equity' => '3', 'revenue' => '4', 'expense' => '5'];
-    return $digits[ledger_master_nature($masterKey) ?? 'asset'] ?? '1';
+    return (string) (COA_NATURE_CODES[ledger_master_nature($masterKey) ?? ''] ?? throw new InvalidArgumentException('Unknown master.'));
 }
 
-function coa_next_group_code(int $companyId, string $masterKey): string
+function coa_next_group_code(int $companyId, string $masterKey, ?int $parentGroupId = null): string
 {
-    $digit = coa_master_digit($masterKey);
-    $stmt = db()->prepare('SELECT code FROM ledger_groups WHERE company_id = :cid AND code REGEXP :pattern');
-    $stmt->execute(['cid' => $companyId, 'pattern' => '^' . $digit . '[0-9]+$']);
-    $max = 0;
-    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $existing) {
-        $max = max($max, (int) substr((string) $existing, 1));
-    }
-    return $digit . (string) ($max + 1);
+    return coa_allocate_code($companyId, 'ledger_groups', ['master_key' => $masterKey, 'parent_group_id' => $parentGroupId]);
 }
 
-function coa_next_ledger_code(int $companyId, int $groupId): string
+function coa_next_ledger_code(int $companyId, int $groupId, ?int $parentLedgerId = null, ?string $nature = null): string
 {
-    $groupStmt = db()->prepare('SELECT code, master_key FROM ledger_groups WHERE id = :id AND company_id = :cid LIMIT 1');
-    $groupStmt->execute(['id' => $groupId, 'cid' => $companyId]);
-    $group = $groupStmt->fetch();
-    $base = $group && preg_match('/^\d+$/', (string) $group['code'])
-        ? (string) $group['code']
-        : coa_master_digit((string) ($group['master_key'] ?? '')) . '0';
-    $stmt = db()->prepare('SELECT code FROM ledgers WHERE company_id = :cid AND code REGEXP :pattern');
-    $stmt->execute(['cid' => $companyId, 'pattern' => '^' . $base . '[0-9]+$']);
-    $max = 0;
-    $baseLength = strlen($base);
-    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $existing) {
-        $max = max($max, (int) substr((string) $existing, $baseLength));
+    if ($nature === null) {
+        $stmt = db()->prepare('SELECT master_key FROM ledger_groups WHERE id = ? AND company_id = ?');
+        $stmt->execute([$groupId, $companyId]);
+        $nature = ledger_master_nature((string) $stmt->fetchColumn()) ?? 'asset';
     }
-    return $base . (string) ($max + 1);
+    return coa_allocate_code($companyId, 'ledgers', ['group_id' => $groupId ?: null, 'parent_ledger_id' => $parentLedgerId, 'type' => $nature]);
 }
 
 function e(mixed $value): string
@@ -2943,7 +2927,7 @@ function ledger_by_code(int $companyId, string $code): ?array
         return null;
     }
 
-    $stmt = db()->prepare('SELECT * FROM ledgers WHERE company_id = :company_id AND code = :code LIMIT 1');
+    $stmt = db()->prepare('SELECT * FROM ledgers WHERE company_id = :company_id AND :code IN (code, legacy_code) LIMIT 1');
     $stmt->execute([
         'company_id' => $companyId,
         'code' => $code,
@@ -3083,8 +3067,8 @@ function party_ledger_group_id(int $companyId, string $role): int
         WHERE company_id = :cid
           AND is_active = 1
           AND master_key = :master_key
-          AND (code = :code OR LOWER(TRIM(name)) = LOWER(TRIM(:name)))
-        ORDER BY (code = :code2) DESC, id ASC
+          AND (:code IN (code, legacy_code) OR LOWER(TRIM(name)) = LOWER(TRIM(:name)))
+        ORDER BY (:code2 IN (code, legacy_code)) DESC, id ASC
         LIMIT 1');
     $legacy->execute([
         'cid' => $companyId,
@@ -3102,12 +3086,7 @@ function party_ledger_group_id(int $companyId, string $role): int
         return $groupId;
     }
 
-    $code = (string) $definition['group_code'];
-    $codeCheck = db()->prepare('SELECT COUNT(*) FROM ledger_groups WHERE company_id = :cid AND code = :code');
-    $codeCheck->execute(['cid' => $companyId, 'code' => $code]);
-    if ((int) $codeCheck->fetchColumn() > 0) {
-        $code = coa_next_group_code($companyId, (string) $definition['master_key']);
-    }
+    $code = coa_next_group_code($companyId, (string) $definition['master_key']);
 
     $roleColumn = $hasRoleColumn ? ', party_role' : '';
     $roleValue = $hasRoleColumn ? ', :role' : '';
@@ -3135,7 +3114,7 @@ function party_ledger_role_for_group(int $companyId, int $groupId): ?string
     }
 
     $select = column_exists('ledger_groups', 'party_role') ? ', party_role' : '';
-    $stmt = db()->prepare('SELECT code, name, master_key' . $select . ' FROM ledger_groups WHERE id = :id AND company_id = :cid LIMIT 1');
+    $stmt = db()->prepare('SELECT COALESCE(legacy_code, code) AS code, name, master_key' . $select . ' FROM ledger_groups WHERE id = :id AND company_id = :cid LIMIT 1');
     $stmt->execute(['id' => $groupId, 'cid' => $companyId]);
     $group = $stmt->fetch();
     if (!$group) {
@@ -3571,7 +3550,7 @@ function opening_balance_ledger_id(int $companyId): int
     if ($companyId <= 0 || !table_exists('ledgers')) {
         return 0;
     }
-    $stmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND code = 'OPENING_BAL' LIMIT 1");
+    $stmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND 'OPENING_BAL' IN (code, legacy_code) LIMIT 1");
     $stmt->execute(['cid' => $companyId]);
     $ledgerId = (int) ($stmt->fetchColumn() ?: 0);
     if ($ledgerId > 0) {
@@ -3589,9 +3568,7 @@ function opening_balance_ledger_id(int $companyId): int
         $groupId = (int) db()->lastInsertId();
     }
 
-    db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, 'OPENING_BAL', 'Opening Balance Adjustments', 'equity', 1, 'active')")
-        ->execute(['cid' => $companyId, 'gid' => $groupId]);
-    return (int) db()->lastInsertId();
+    return coa_create_system_ledger($companyId, $groupId, 'OPENING_BAL', 'Opening Balance Adjustments', 'equity', true);
 }
 
 /**
@@ -5245,15 +5222,15 @@ function client_mirror_ledger(int $booksCompanyId, string $kind, ?string $provid
         $findGroup = static function (string $masterKey, string $code, string $name) use ($booksCompanyId): int {
             $stmt = db()->prepare('SELECT id FROM ledger_groups
                 WHERE company_id = :cid AND is_active = 1 AND is_cash_or_bank = 0
-                  AND (code = :code OR (name = :name AND master_key = :master_key))
-                ORDER BY (code = :code2) DESC, id ASC LIMIT 1');
+                  AND (:code IN (code, legacy_code) OR (name = :name AND master_key = :master_key))
+                ORDER BY (:code2 IN (code, legacy_code)) DESC, id ASC LIMIT 1');
             $stmt->execute(['cid' => $booksCompanyId, 'code' => $code, 'name' => $name, 'master_key' => $masterKey, 'code2' => $code]);
             $groupId = (int) ($stmt->fetchColumn() ?: 0);
             if ($groupId > 0) {
                 return $groupId;
             }
             db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system) VALUES (:cid, :code, :name, :master_key, 0, 0)')
-                ->execute(['cid' => $booksCompanyId, 'code' => $code, 'name' => $name, 'master_key' => $masterKey]);
+                ->execute(['cid' => $booksCompanyId, 'code' => coa_next_group_code($booksCompanyId, $masterKey), 'name' => $name, 'master_key' => $masterKey]);
 
             return (int) db()->lastInsertId();
         };
@@ -5533,7 +5510,7 @@ function auto_post_invoice_discount_voucher(int $billingRequestId, int $invoiceI
     }
 
     // Discount Allowed lives under indirect expenses; created once per company.
-    $discountLedgerStmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND code = 'DISC-ALLOWED' LIMIT 1");
+    $discountLedgerStmt = db()->prepare("SELECT id FROM ledgers WHERE company_id = :cid AND 'DISC-ALLOWED' IN (code, legacy_code) LIMIT 1");
     $discountLedgerStmt->execute(['cid' => $companyId]);
     $discountLedgerId = (int) ($discountLedgerStmt->fetchColumn() ?: 0);
     if ($discountLedgerId <= 0) {
@@ -5543,9 +5520,7 @@ function auto_post_invoice_discount_voucher(int $billingRequestId, int $invoiceI
         if ($expenseGroupId <= 0) {
             return;
         }
-        db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status) VALUES (:cid, :gid, 'DISC-ALLOWED', 'Discount Allowed', 'expense', 'active')")
-            ->execute(['cid' => $companyId, 'gid' => $expenseGroupId]);
-        $discountLedgerId = (int) db()->lastInsertId();
+        $discountLedgerId = coa_create_system_ledger($companyId, $expenseGroupId, 'DISC-ALLOWED', 'Discount Allowed', 'expense');
     }
 
     // VAT no longer due reduces the VAT payable; without the mapped tax ledger
@@ -7303,7 +7278,7 @@ function company_financials_snapshot(int $companyId, int $fiscalYearId): array
     }
 
     $stmt = db()->prepare('
-        SELECT l.id, l.type, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank, g.code AS group_code, g.name AS group_name,
+        SELECT l.id, l.type, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank, COALESCE(g.legacy_code, g.code) AS group_code, g.name AS group_name,
                COALESCE(SUM(CASE WHEN ve.entry_type = \'debit\' THEN ve.amount ELSE 0 END), 0) AS debit_total,
                COALESCE(SUM(CASE WHEN ve.entry_type = \'credit\' THEN ve.amount ELSE 0 END), 0) AS credit_total
         FROM ledgers l
@@ -7314,7 +7289,7 @@ function company_financials_snapshot(int $companyId, int $fiscalYearId): array
             AND v.fiscal_year_id = :fiscal_year_id
             AND v.status = \'posted\'
         WHERE l.company_id = :company_id
-        GROUP BY l.id, l.type, g.is_cash_or_bank, g.code, g.name
+        GROUP BY l.id, l.type, g.is_cash_or_bank, g.code, g.legacy_code, g.name
     ');
     $stmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
 
@@ -7464,15 +7439,13 @@ function provision_client_books(int $clientProfileId): int
         // Hand carries the opening figure through the year untouched and is
         // revalued to the closing figure once, at the year end.
         ['PURCHASES', 'Purchases', 'expense', 'PURCHASE_GRP'],
-        ['PURCH_RET', 'Purchase returns', 'revenue', 'PURCHASE_GRP'],
+        ['PURCH_RET', 'Purchase returns', 'revenue', 'DIRECT_INCOME_GRP'],
         ['STOCK_HAND', 'Stock in hand', 'asset', 'STOCK_GRP'],
     ];
-    $ledgerInsert = db()->prepare('INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status) VALUES (:cid, :gid, :code, :name, :type, 1, \'active\')');
     $ledgerIds = [];
     foreach ($ledgerSeeds as [$lCode, $lName, $lType, $lGroup]) {
         $seedGroupId = $groupIds[$lGroup] ?? 0;
-        $ledgerInsert->execute(['cid' => $booksCompanyId, 'gid' => $seedGroupId ?: null, 'code' => coa_next_ledger_code($booksCompanyId, (int) $seedGroupId), 'name' => $lName, 'type' => $lType]);
-        $ledgerIds[$lCode] = (int) db()->lastInsertId();
+        $ledgerIds[$lCode] = coa_create_system_ledger($booksCompanyId, (int) $seedGroupId, $lCode, $lName, $lType, true);
     }
     if (table_exists('company_ledger_mappings')) {
         $mapInsert = db()->prepare('INSERT INTO company_ledger_mappings (company_id, map_key, ledger_id) VALUES (:cid, :k, :lid)');

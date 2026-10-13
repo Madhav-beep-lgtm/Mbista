@@ -33,10 +33,10 @@ function coa_report_data(array $company, array $fiscalYear, array $masters, arra
             $add([(string) $ledger['code'], (string) $ledger['name'], !empty($ledger['parent_ledger_id']) ? 'Subledger' : 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status'])], 'body', !empty($ledger['parent_ledger_id']) ? 3 : 2);
         }
     };
-    foreach ($masters as $key => $master) {
-        $add([(string) $key, (string) $master['label'], 'Master', ucfirst((string) $master['nature']), 'Active'], 'section');
+    foreach (COA_NATURE_CODES as $nature => $digit) {
+        $add([coa_code_format($digit), $nature === 'revenue' ? 'Income' : ucfirst($nature), 'Master', ucfirst($nature), 'Active'], 'section');
         foreach ($groups as $group) {
-            if ((string) $group['master_key'] === (string) $key) $addGroup($group);
+            if (ledger_master_nature((string) $group['master_key']) === $nature) $addGroup($group);
         }
     }
     foreach ($groups as $group) {

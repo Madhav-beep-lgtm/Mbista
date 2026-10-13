@@ -1202,7 +1202,7 @@ function jewellery_autocreate_mappings(int $companyId, int $userId = 0): array
             // Identity is the stable code, so re-running never duplicates and a
             // later rename of the ledger cannot orphan the mapping.
             $code = 'JW-' . strtoupper(str_replace('_', '-', $purpose));
-            $byCode = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND code = :code LIMIT 1');
+            $byCode = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND :code IN (code, legacy_code) LIMIT 1');
             $byCode->execute(['cid' => $companyId, 'code' => $code]);
             $ledgerId = (int) ($byCode->fetchColumn() ?: 0);
 
@@ -1216,11 +1216,7 @@ function jewellery_autocreate_mappings(int $companyId, int $userId = 0): array
             }
 
             if ($ledgerId <= 0) {
-                db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
-                    VALUES (:cid, :gid, :code, :name, :type, 'active')")
-                    ->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code,
-                        'name' => $ledgerName, 'type' => jw_ledger_type_for_master($masterKey)]);
-                $ledgerId = (int) db()->lastInsertId();
+                $ledgerId = coa_create_system_ledger($companyId, $groupId, $code, $ledgerName, jw_ledger_type_for_master($masterKey));
                 $result['created'][] = $ledgerName;
             }
 

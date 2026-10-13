@@ -93,7 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $codeStmt->execute(['id' => $groupId, 'cid' => $companyId]);
             $code = (string) ($codeStmt->fetchColumn() ?: coa_next_group_code($companyId, $masterKey));
         } else {
-            $code = coa_next_group_code($companyId, $masterKey);
+            $code = coa_next_group_code($companyId, $masterKey, $parentGroupId ?: null);
         }
         if ($groupId > 0) {
             $sql = 'UPDATE ledger_groups SET code = :code, name = :name, master_key = :master_key, is_cash_or_bank = :is_cash_or_bank' . ($supportsGroupHierarchy ? ', parent_group_id = :parent_group_id' : '') . ' WHERE id = :id AND company_id = :company_id';

@@ -426,7 +426,9 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .chart-accounts-page .coa-table td { background: var(--color-surface); }
 .chart-accounts-page .coa-table .coa-master-row td { background: var(--color-primary-soft); font-weight: 650; }
 .chart-accounts-page .coa-table .coa-group-row td { background: var(--color-surface-muted); }
-.chart-accounts-page .coa-table .coa-group-row td:nth-child(2) { font-weight: 600; }
+.chart-accounts-page .coa-table :is(.coa-master-row,.coa-group-row) td { font-weight:700; }
+.reports-center-page .rc-table :is(.rpt-row-bold,.rpt-row-section) td { font-weight:700; }
+.reports-center-page .rc-table tr[data-ledger-id] td { font-weight:400; }
 .chart-accounts-page .coa-table tbody tr:hover td { background: var(--color-primary-soft); }
 .chart-accounts-page .coa-table td:nth-child(2) { white-space: normal; min-width: 220px; overflow-wrap: anywhere; }
 .chart-accounts-page .coa-table .mbw-pill { font-size: 11px; padding: 3px 8px; }

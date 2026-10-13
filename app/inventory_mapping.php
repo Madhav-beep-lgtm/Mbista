@@ -334,7 +334,7 @@ function inventory_mapping_autocreate(int $companyId, int $userId = 0): array
                 continue;
             }
             $code = 'INV-' . strtoupper(str_replace('_', '-', $purpose));
-            $byCode = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND code = :code LIMIT 1');
+            $byCode = db()->prepare('SELECT id FROM ledgers WHERE company_id = :cid AND :code IN (code, legacy_code) LIMIT 1');
             $byCode->execute(['cid' => $companyId, 'code' => $code]);
             $ledgerId = (int) ($byCode->fetchColumn() ?: 0);
 
@@ -345,11 +345,7 @@ function inventory_mapping_autocreate(int $companyId, int $userId = 0): array
                 $ledgerId = (int) ($byName->fetchColumn() ?: 0);
             }
             if ($ledgerId <= 0) {
-                db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, status)
-                    VALUES (:cid, :gid, :code, :name, :type, 'active')")
-                    ->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code, 'name' => $label,
-                        'type' => jw_ledger_type_for_master($masterKey)]);
-                $ledgerId = (int) db()->lastInsertId();
+                $ledgerId = coa_create_system_ledger($companyId, $groupId, $code, $label, jw_ledger_type_for_master($masterKey));
                 $result['created'][] = $label;
             }
 

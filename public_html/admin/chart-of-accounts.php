@@ -53,8 +53,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     // them would either double-post or be skipped, so writing numbers here
     // would only imply a round-trip that does not exist.
     fputcsv($out, COA_IMPORT_COLUMNS, ',', '"', '\\');
-    foreach ($masters as $masterKey => $master) {
-        fputcsv($out, ['Master', $masterKey, $master['label'], $masterKey, $master['nature'], '', '', '', 'Active'], ',', '"', '\\');
+    foreach (COA_NATURE_CODES as $nature => $digit) {
+        fputcsv($out, ['Master', coa_code_format($digit), $nature === 'revenue' ? 'Income' : ucfirst($nature), '', $nature, '', '', '', 'Active'], ',', '"', '\\');
     }
     foreach ($groups as $g) {
         fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')], ',', '"', '\\');
@@ -214,7 +214,7 @@ $coaBalanceError = $coaStaged !== null ? coa_import_balance_error($coaStaged) : 
 // ---------------------------------------------------------------------------
 // Hierarchy: nature (1-5) -> groups -> ledgers. Real validation checks.
 // ---------------------------------------------------------------------------
-$natureOrder = ['asset' => ['1', 'Assets'], 'liability' => ['2', 'Liabilities'], 'equity' => ['3', 'Equity'], 'revenue' => ['4', 'Revenue'], 'expense' => ['5', 'Expenses']];
+$natureOrder = ['asset' => ['1', 'Assets'], 'equity' => ['2', 'Equity'], 'liability' => ['3', 'Liabilities'], 'revenue' => ['4', 'Income'], 'expense' => ['5', 'Expenses']];
 $groupsByNature = ['asset' => [], 'liability' => [], 'equity' => [], 'revenue' => [], 'expense' => []];
 foreach ($groups as $g) {
     $nature = ledger_master_nature((string) $g['master_key']) ?? 'asset';
@@ -445,7 +445,7 @@ $coaRowPill = static function (string $status): string {
                 <tbody>
                 <?php foreach ($natureOrder as $nature => [$digit, $natureLabel]): ?>
                     <tr class="coa-node coa-master-row" data-name="<?= e(strtolower($natureLabel)) ?>">
-                        <td><button type="button" class="coa-tgl" data-parent="m<?= e($digit) ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <strong style="color:var(--mbw-heading)"><?= e($digit) ?></strong></td>
+                        <td><button type="button" class="coa-tgl" data-parent="m<?= e($digit) ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <strong style="color:var(--mbw-heading)"><?= e(coa_code_format((int) $digit)) ?></strong></td>
                         <td><strong style="color:var(--mbw-heading)"><?= e($natureLabel) ?></strong></td>
                         <td><span class="mbw-pill tone-blue">Master</span></td>
                         <td><?= e(ucfirst((string) $nature)) ?></td>

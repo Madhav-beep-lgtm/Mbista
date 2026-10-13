@@ -753,12 +753,13 @@ function coa_import_commit(int $companyId, int $importId, int $userId = 0): arra
                 continue;
             }
             $masterKey = (string) $row['master_key'];
-            $code = (string) $row['code'] !== '' ? (string) $row['code'] : coa_next_group_code($companyId, $masterKey);
+            $code = coa_next_group_code($companyId, $masterKey);
             $insertGroup->execute(['cid' => $companyId, 'code' => $code,
                 'name' => (string) $row['name'], 'mk' => $masterKey]);
             $groupId = (int) db()->lastInsertId();
             $groupsMade++;
             $resolved['code:' . mb_strtoupper($code)] = $groupId;
+            if ((string) $row['code'] !== '') $resolved['code:' . mb_strtoupper((string) $row['code'])] = $groupId;
             $resolved['name:' . mb_strtolower((string) $row['name'])] = $groupId;
             $markRow->execute(['gid' => $groupId, 'lid' => null, 'code' => $code, 'id' => (int) $row['id']]);
         }
@@ -783,7 +784,7 @@ function coa_import_commit(int $companyId, int $importId, int $userId = 0): arra
                 throw new RuntimeException('Row ' . $row['source_row_no'] . ': the group "' . $parent
                     . '" no longer exists. Upload the sheet again so it can be re-checked.');
             }
-            $code = (string) $row['code'] !== '' ? (string) $row['code'] : coa_next_ledger_code($companyId, $groupId);
+            $code = coa_next_ledger_code($companyId, $groupId, null, (string) $row['ledger_type']);
             $insertLedger->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code,
                 'name' => (string) $row['name'], 'type' => (string) $row['ledger_type']]);
             $ledgerId = (int) db()->lastInsertId();

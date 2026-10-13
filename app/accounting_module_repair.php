@@ -8,6 +8,7 @@ function accounting_repair_account_creation_schema(): void
         accounting_repair_add_index('ledgers', 'idx_ledgers_parent', 'KEY `idx_ledgers_parent` (`parent_ledger_id`)');
         accounting_repair_add_constraint('ledgers', 'fk_ledgers_parent', 'CONSTRAINT `fk_ledgers_parent` FOREIGN KEY (`parent_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE RESTRICT');
         foreach (['ledgers', 'ledger_groups'] as $table) {
+            accounting_repair_add_column($table, 'legacy_code', '`legacy_code` VARCHAR(80) DEFAULT NULL');
             foreach ([
                 'alias_name' => 'VARCHAR(160) DEFAULT NULL',
                 'account_details' => 'TEXT DEFAULT NULL',
@@ -217,6 +218,12 @@ function accounting_module_repair_database(): array
             $errors[] = $label . ': ' . $exception->getMessage();
         }
     };
+
+    $run('Account code aliases', static function (): void {
+        foreach (['ledgers', 'ledger_groups'] as $table) {
+            if (accounting_repair_table_exists($table)) accounting_repair_add_column($table, 'legacy_code', '`legacy_code` VARCHAR(80) DEFAULT NULL');
+        }
+    });
 
     $run('Restore company ledger mappings', static function (): void {
         // Migration 022 created this foundational table, but older databases
@@ -486,7 +493,8 @@ function accounting_module_repair_database(): array
         // is idempotent and only moves misclassified ledgers.
         require_once __DIR__ . '/payroll_engine.php';
         $companies = db()->query("SELECT DISTINCT company_id FROM ledgers
-                WHERE code IN ('SSF-EXP', 'SAL-EXP', 'TDS-PAY', 'RET-PAY', 'SAL-PAY', 'EMP-ADV')")
+                WHERE code IN ('SSF-EXP', 'SAL-EXP', 'TDS-PAY', 'RET-PAY', 'SAL-PAY', 'EMP-ADV')
+                   OR legacy_code IN ('SSF-EXP', 'SAL-EXP', 'TDS-PAY', 'RET-PAY', 'SAL-PAY', 'EMP-ADV')")
             ->fetchAll(PDO::FETCH_COLUMN);
         foreach ($companies as $repairCompanyId) {
             payroll_fix_ledger_groups((int) $repairCompanyId);
