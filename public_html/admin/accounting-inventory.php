@@ -60,7 +60,7 @@ function inv_back_url(string $extra = ''): string
     if (defined('ITEMS_WORKSPACE')) {
         return 'admin/items.php';
     }
-    $tasks = ['item', 'warehouses', 'purchase', 'sale', 'adjust', 'transfer', 'manufacturing', 'bom'];
+    $tasks = ['item', 'opening', 'warehouses', 'purchase', 'sale', 'adjust', 'transfer', 'manufacturing', 'bom'];
     $task = (string) ($_POST['task'] ?? $_GET['task'] ?? '');
     $views = ['inventory', 'valuation', 'manufacturing'];
     $view = (string) ($_POST['view'] ?? $_GET['view'] ?? '');
@@ -2000,6 +2000,7 @@ if (!in_array($invView, $allowedViews, true)) {
 $invTaskSections = $invView === 'inventory'
     ? [
         'item' => ['opening-import', 'create-item', 'item-ledgers', 'item-stock-summary'],
+        'opening' => ['opening-import'],
         'warehouses' => ['warehouses'],
         'purchase' => ['movement-purchase-entries'],
         'sale' => ['movement-sale'],
@@ -2515,7 +2516,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
     // Links, not buttons: each task is its own page, so it can be bookmarked,
     // opened in a tab, and reached with the back button.
     $invTaskLabels = $invView === 'inventory'
-        ? ['item' => ['Item Master', 'services'], 'warehouses' => ['Warehouses', 'companies'],
+        ? ['item' => ['Item Master', 'services'], 'opening' => ['Opening Stock', 'box'], 'warehouses' => ['Warehouses', 'companies'],
            'purchase' => ['Purchase Stock', 'cart'], 'sale' => ['Sales & Returns', 'invoices'],
            'adjust' => ['Adjustments', 'settings'], 'transfer' => ['Transfers', 'services']]
         : ['manufacturing' => ['Production Order', 'settings'], 'bom' => ['Bill of Materials', 'documents']];
