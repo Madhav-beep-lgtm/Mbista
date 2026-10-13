@@ -251,17 +251,6 @@ $statusPill = static fn (string $status): string => $status === 'active'
 ?>
 <?php if ($repairErrors !== []): ?><div class="notice error">Repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
-<div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
-    <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><?= icon('analytics') ?>Export COA</a>
-    <details class="action-menu">
-        <summary class="button"><?= icon('layers') ?>Create account <?= icon('chevron') ?></summary>
-        <div class="action-menu-options">
-            <a href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>Create group</a>
-            <a href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>Create ledger</a>
-        </div>
-    </details>
-</div>
-
 <form method="get" class="coa-filter-bar" style="display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin:14px 0">
     <label style="flex:0 1 180px;min-width:0">View
         <select id="coa-section" name="view" aria-controls="coa-tree-panel coa-posting-panel coa-audit-panel">
@@ -283,6 +272,16 @@ $statusPill = static fn (string $status): string => $status === 'active'
             <div class="action-menu-options">
                 <button type="button" id="coa-upload-trigger">Upload</button>
                 <a href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>">Download template</a>
+            </div>
+        </details>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto">
+        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><?= icon('analytics') ?>Export COA</a>
+        <details class="action-menu">
+            <summary class="button"><?= icon('layers') ?>Create account <?= icon('chevron') ?></summary>
+            <div class="action-menu-options">
+                <a href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>Create group</a>
+                <a href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>Create ledger</a>
             </div>
         </details>
     </div>
