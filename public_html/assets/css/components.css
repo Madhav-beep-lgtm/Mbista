@@ -613,3 +613,19 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .voucher-preview-toolbar { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; }
 .voucher-preview iframe { display:block; width:100%; height:calc(100% - 64px); border:0; }
 @media(max-width:640px) { .frm-grid.vch-header-grid { grid-template-columns:1fr; } }
+.bs-date-control { position:relative; display:block; width:100%; min-width:0; }
+.bs-date-control > input { padding-right:36px !important; width:100%; min-width:0; }
+.bs-date-open { position:absolute; right:2px; top:2px; bottom:2px; width:32px; border:0; background:transparent; color:inherit; cursor:pointer; }
+.bs-date-calendar { position:fixed; inset:auto; margin:0; width:310px; max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); overflow:auto; padding:12px; border:1px solid var(--color-border); border-radius:10px; background:var(--color-surface,#fff); color:var(--color-text,#16263e); box-shadow:0 8px 30px #0003; }
+.bs-date-nav { display:grid; grid-template-columns:28px 1fr 78px 28px; gap:4px; }
+.bs-date-nav select { min-width:0; min-height:32px; padding:2px; font-size:12px; }
+.bs-date-days { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; margin-top:10px; text-align:center; }
+.bs-date-days strong { font-size:11px; }
+.bs-date-calendar button { border:1px solid transparent; background:transparent; color:inherit; min-height:30px; border-radius:4px; cursor:pointer; }
+.bs-date-calendar button:hover, .bs-date-calendar button:focus-visible { border-color:var(--color-primary); background:var(--color-primary-soft); }
+.bs-date-calendar button[aria-current] { border-color:var(--color-primary); font-weight:bold; }
+.bs-date-calendar button:disabled { opacity:.35; cursor:default; }
+.bs-date-footer { display:flex; justify-content:space-between; margin-top:8px; }
+.voucher-register-filters > label { flex:0 1 155px; min-width:0; font-size:12px; }
+.voucher-register-filters > label.voucher-search-label { flex-basis:210px; }
+.voucher-register-filters > .button, .voucher-register-filters > .actions { align-self:flex-end; }

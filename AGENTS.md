@@ -12,5 +12,6 @@ These are the user's standing preferences for changes across this app:
 - Keep platform administration separate from individual company books; do not implicitly switch company context.
 - Apply these conventions to subsequent app changes. Do not claim that an app-wide migration has been completed without checking and updating those surfaces.
 - Date fields show one AD or BS control without a secondary converted-date hint; changing modes must preserve control size and alignment. Voucher type, number and date use a compact horizontal row.
+- BS date controls include a Nepali calendar picker. Voucher filter boxes have visible labels. Cost centre is required per entry line for journal, contra, payment and receipt, including cash/bank lines; do not remove it with header-level fields.
 - Voucher numbers open a read-only journal popup. All voucher types share a black-and-white print layout with company name/address, voucher type/date/number, financial year, bordered debit/credit entries, totals and maker/checker signature lines.
 - After completing and checking requested changes, commit the task's files and push to GitHub as the user requested. Preserve unrelated working-tree changes.

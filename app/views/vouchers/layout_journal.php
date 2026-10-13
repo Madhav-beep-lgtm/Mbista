@@ -19,6 +19,7 @@ declare(strict_types=1);
                     <tr>
                         <th style="width:36px">SN</th>
                         <th style="width:220px">Ledger <em>*</em></th>
+                        <th style="width:180px">Cost centre <em>*</em></th>
                         <th>Description</th>
                         <th class="is-numeric" style="width:140px">Debit (<?= e(trim($currency)) ?>)</th>
                         <th class="is-numeric" style="width:140px">Credit (<?= e(trim($currency)) ?>)</th>
@@ -45,13 +46,14 @@ declare(strict_types=1);
                         <?= $renderLedgerOptions($optionsAll, 0) ?>
                     </select>
                 </td>
+                <td><select name="line_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
                 <td><input type="text" name="memo[]" data-field="memo" maxlength="255" placeholder="What this line is for"></td>
                 <td class="is-numeric"><input type="number" data-field="debit" class="frm-num vch-dr" step="0.01" min="0" placeholder="0.00"></td>
                 <td class="is-numeric"><input type="number" data-field="credit" class="frm-num vch-cr" step="0.01" min="0" placeholder="0.00"></td>
                 <td hidden>
                     <input type="hidden" name="line_reference[]" data-field="reference">
                     <input type="hidden" name="line_tax[]" data-field="tax_code">
-                    <input type="hidden" name="line_cost_centre[]" data-field="cost_centre">
+
                     <input type="hidden" name="entry_type[]" data-field="entry_type" value="debit">
                     <input type="hidden" name="amount[]" data-field="amount" value="0">
                 </td>

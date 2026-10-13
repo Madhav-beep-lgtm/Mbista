@@ -169,6 +169,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $composed = voucher_compose($voucherType, $composeInput, $ledgerDirectory, $isDraft);
     $problems = array_merge($problems, $composed['errors']);
     $entries = $composed['entries'];
+    if (in_array($voucherType, ['journal', 'contra', 'payment', 'receipt'], true)) {
+        foreach ($entries as $lineIndex => $line) {
+            if (!in_array((string) ($line['cost_centre'] ?? ''), $costCentres, true)) {
+                $problems[] = 'Select a cost centre for line ' . ($lineIndex + 1) . '.';
+            }
+        }
+    }
     $billResult = voucher_validate_bill_details($entries, $ledgerDirectory, $_POST['bill_details'] ?? []);
     $problems = array_merge($problems, $billResult['errors']);
     if ($billResult['details'] !== [] && !column_exists('vouchers', 'bill_details_json')) {

@@ -494,6 +494,7 @@ function voucher_transfer_legs(array $input, array $ledgers, string $side, array
         $rows[] = [
             'ledger' => (int) voucher_input_row($input, $field . '_ledger', $index),
             'amount' => round((float) voucher_input_row($input, $field . '_amount', $index), 2),
+            'cost_centre' => voucher_input_row($input, $field . '_cost_centre', $index),
         ];
     }
 
@@ -520,7 +521,7 @@ function voucher_transfer_legs(array $input, array $ledgers, string $side, array
             $result['errors'][] = 'Enter how much ' . ($side === 'out' ? 'leaves' : 'arrives in') . ' "' . $ledger['name'] . '".';
             continue;
         }
-        $legs[] = ['ledger_id' => $ledgerId, 'amount' => $amount];
+        $legs[] = ['ledger_id' => $ledgerId, 'amount' => $amount, 'cost_centre' => $row['cost_centre'] ?? ''];
     }
     if ($legs === []) {
         $result['errors'][] = $side === 'out'
@@ -550,6 +551,7 @@ function voucher_compose_transfer(array $spec, array $input, array $ledgers, arr
         foreach (['in', 'out'] as $side) {
             $input['contra_' . $side . '_ledger'] = [];
             $input['contra_' . $side . '_amount'] = [];
+            $input['contra_' . $side . '_cost_centre'] = [];
         }
         foreach ($input['ledger_id'] as $index => $id) {
             $entryType = (string) ($input['entry_type'][$index] ?? '');
@@ -560,6 +562,7 @@ function voucher_compose_transfer(array $spec, array $input, array $ledgers, arr
             $side = $entryType === 'debit' ? 'in' : 'out';
             $input['contra_' . $side . '_ledger'][] = $id;
             $input['contra_' . $side . '_amount'][] = $input['amount'][$index] ?? 0;
+            $input['contra_' . $side . '_cost_centre'][] = voucher_input_row($input, 'line_cost_centre', $index);
         }
     }
     $outLegs = voucher_transfer_legs($input, $ledgers, 'out', $result);
@@ -605,11 +608,11 @@ function voucher_compose_transfer(array $spec, array $input, array $ledgers, arr
     $entries = [];
     foreach ($inLegs as $leg) {
         $entries[] = voucher_entry((int) $leg['ledger_id'], 'debit', (float) $leg['amount'],
-            'Transferred in from ' . $sideName($outLegs), '', '', $instrumentNo);
+            'Transferred in from ' . $sideName($outLegs), $leg['cost_centre'], '', $instrumentNo);
     }
     foreach ($outLegs as $leg) {
         $entries[] = voucher_entry((int) $leg['ledger_id'], 'credit', (float) $leg['amount'],
-            'Transferred out to ' . $sideName($inLegs), '', '', $instrumentNo);
+            'Transferred out to ' . $sideName($inLegs), $leg['cost_centre'], '', $instrumentNo);
     }
 
     if ($draft) {
@@ -668,7 +671,7 @@ function voucher_compose_tender(array $spec, array $input, array $ledgers, array
             $bankSide,
             $amount,
             $mode !== '' ? voucher_instrument_label($mode) : '',
-            '',
+            voucher_input_row($input, 'tender_cost_centre', $index),
             '',
             $instrumentNo
         );
@@ -1220,6 +1223,7 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
             }
             $leg = [
                 'ledger_id' => (string) (int) $entry['ledger_id'],
+                'cost_centre' => (string) ($entry['cost_centre'] ?? ''),
                 'amount' => (float) $entry['amount'],
             ];
             if ((string) $entry['entry_type'] === 'credit') {
@@ -1263,6 +1267,7 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
                     'mode' => voucher_instrument_key_for_label($memo) ?: ($tender === [] ? $headerMode : ''),
                     'amount' => (float) $entry['amount'],
                     'instrument_no' => (string) ($entry['line_reference'] ?? ''),
+                    'cost_centre' => (string) ($entry['cost_centre'] ?? ''),
                 ];
             } else {
                 $lines[] = [
@@ -1425,11 +1430,13 @@ function voucher_prefill_from_input(string $type, array $input): array
             foreach (['in', 'out'] as $side) {
                 $input['contra_' . $side . '_ledger'] = [];
                 $input['contra_' . $side . '_amount'] = [];
+                $input['contra_' . $side . '_cost_centre'] = [];
             }
             foreach ($input['ledger_id'] as $index => $id) {
                 $side = ($input['entry_type'][$index] ?? '') === 'credit' ? 'out' : 'in';
                 $input['contra_' . $side . '_ledger'][] = $id;
                 $input['contra_' . $side . '_amount'][] = $input['amount'][$index] ?? 0;
+                $input['contra_' . $side . '_cost_centre'][] = voucher_input_row($input, 'line_cost_centre', $index);
             }
         }
         $prefill['contra_from_ledger'] = (int) ($input['contra_from_ledger'] ?? 0);
@@ -1442,6 +1449,7 @@ function voucher_prefill_from_input(string $type, array $input): array
                 $prefill['contra_' . $legSide][] = [
                     'ledger_id' => voucher_input_row($input, 'contra_' . $legSide . '_ledger', $index),
                     'amount' => voucher_input_row($input, 'contra_' . $legSide . '_amount', $index),
+                    'cost_centre' => voucher_input_row($input, 'contra_' . $legSide . '_cost_centre', $index),
                 ];
             }
         }
@@ -1457,6 +1465,7 @@ function voucher_prefill_from_input(string $type, array $input): array
                 'ledger_id' => voucher_input_row($input, 'tender_ledger', $index),
                 'mode' => voucher_input_row($input, 'tender_mode', $index),
                 'instrument_no' => voucher_input_row($input, 'tender_instrument_no', $index),
+                'cost_centre' => voucher_input_row($input, 'tender_cost_centre', $index),
                 'amount' => voucher_input_row($input, 'tender_amount', $index),
             ];
         }

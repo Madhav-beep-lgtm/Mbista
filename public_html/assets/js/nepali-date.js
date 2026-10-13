@@ -107,7 +107,83 @@
     input.addEventListener('change', sync);
     input.type = 'hidden';
     input.required = false;
-    input.insertAdjacentElement('afterend', picker);
+    var wrap = document.createElement('span');
+    wrap.className = 'bs-date-control ' + input.className;
+    input.insertAdjacentElement('afterend', wrap);
+    wrap.appendChild(picker);
+    var toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'bs-date-open';
+    toggle.textContent = '▦';
+    toggle.setAttribute('aria-label', 'Open Nepali calendar');
+    toggle.setAttribute('aria-haspopup', 'dialog');
+    toggle.disabled = input.disabled || input.readOnly;
+    wrap.appendChild(toggle);
+    var calendar = document.createElement('div');
+    calendar.className = 'bs-date-calendar';
+    calendar.setAttribute('popover', 'auto');
+    calendar.setAttribute('role', 'dialog');
+    calendar.setAttribute('aria-label', 'Select Nepali date');
+    wrap.appendChild(calendar);
+    var shownYear, shownMonth;
+    function closeCalendar() { calendar.hidePopover(); toggle.focus(); }
+    function render() {
+      var years = '', months = '', days = '';
+      for (var y = FIRST_YEAR; y < FIRST_YEAR + DATA.length; y++) {
+        years += '<option value="' + y + '"' + (y === shownYear ? ' selected' : '') + '>' + y + '</option>';
+      }
+      MONTHS.forEach(function (name, i) { months += '<option value="' + (i + 1) + '"' + (i + 1 === shownMonth ? ' selected' : '') + '>' + name + '</option>'; });
+      var first = bsToAd(shownYear, shownMonth, 1);
+      var offset = new Date(first + 'T00:00:00Z').getUTCDay();
+      for (var blank = 0; blank < offset; blank++) { days += '<span></span>'; }
+      for (var d = 1; d <= monthDays(shownYear, shownMonth); d++) {
+        var ad = bsToAd(shownYear, shownMonth, d);
+        var disabled = (minimum && ad < minimum) || (maximum && ad > maximum);
+        days += '<button type="button" data-day="' + d + '" aria-label="' + d + ' ' + MONTHS[shownMonth - 1] + ' ' + shownYear + ' BS"' + (disabled ? ' disabled' : '') + (ad === input.value ? ' aria-current="date"' : '') + '>' + d + '</button>';
+      }
+      calendar.innerHTML = '<div class="bs-date-nav"><button type="button" data-prev aria-label="Previous month">‹</button><select data-month aria-label="Nepali month">' + months + '</select><select data-year aria-label="Nepali year">' + years + '</select><button type="button" data-next aria-label="Next month">›</button></div><div class="bs-date-days">' + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function (day) { return '<strong>' + day + '</strong>'; }).join('') + days + '</div><div class="bs-date-footer"><button type="button" data-clear>Clear</button><button type="button" data-close>Close</button></div>';
+    }
+    toggle.addEventListener('click', function () {
+      if (calendar.matches(':popover-open')) { closeCalendar(); return; }
+      var seed = adToBs(input.value || minimum || new Date().toISOString().slice(0, 10)) || {y:FIRST_YEAR, m:1};
+      shownYear = seed.y; shownMonth = seed.m;
+      render();
+      calendar.showPopover();
+      var rect = wrap.getBoundingClientRect();
+      calendar.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - calendar.offsetWidth - 8)) + 'px';
+      calendar.style.top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - calendar.offsetHeight - 8)) + 'px';
+      (calendar.querySelector('[aria-current="date"]') || calendar.querySelector('[data-day]:not(:disabled)'))?.focus();
+    });
+    calendar.addEventListener('change', function (event) {
+      var target = event.target.hasAttribute('data-month') ? '[data-month]' : '[data-year]';
+      if (event.target.matches('[data-month]')) { shownMonth = Number(event.target.value); }
+      if (event.target.matches('[data-year]')) { shownYear = Number(event.target.value); }
+      render();
+      calendar.querySelector(target).focus();
+    });
+    calendar.addEventListener('keydown', function (event) {
+      var day = Number(event.target.dataset.day);
+      var delta = {ArrowLeft:-1, ArrowRight:1, ArrowUp:-7, ArrowDown:7}[event.key];
+      if (day && delta) {
+        event.preventDefault();
+        calendar.querySelector('[data-day="' + (day + delta) + '"]:not(:disabled)')?.focus();
+      }
+    });
+    calendar.addEventListener('click', function (event) {
+      var button = event.target.closest('button');
+      if (!button) { return; }
+      if (button.hasAttribute('data-day') || button.hasAttribute('data-clear')) {
+        input.value = button.hasAttribute('data-clear') ? '' : bsToAd(shownYear, shownMonth, Number(button.dataset.day));
+        input.dispatchEvent(new Event('input', {bubbles:true}));
+        input.dispatchEvent(new Event('change', {bubbles:true}));
+        closeCalendar();
+      } else if (button.hasAttribute('data-close')) { closeCalendar(); }
+      else {
+        var next = (shownYear - FIRST_YEAR) * 12 + shownMonth - 1 + (button.hasAttribute('data-prev') ? -1 : 1);
+        if (next >= 0 && next < DATA.length * 12) { shownYear = FIRST_YEAR + Math.floor(next / 12); shownMonth = next % 12 + 1; render(); }
+      }
+    });
+    if (input.form) { input.form.addEventListener('reset', function () { setTimeout(sync, 0); }); }
     sync();
   }
 

@@ -4,14 +4,14 @@ declare(strict_types=1);
 $rows = [];
 foreach (['contra_in' => 'debit', 'contra_out' => 'credit'] as $key => $side) {
     foreach ($prefill[$key] ?? [] as $line) {
-        $rows[] = ['ledger_id' => $line['ledger_id'], $side => $line['amount'], 'entry_type' => $side, 'amount' => $line['amount']];
+        $rows[] = ['ledger_id' => $line['ledger_id'], $side => $line['amount'], 'cost_centre' => $line['cost_centre'] ?? '', 'entry_type' => $side, 'amount' => $line['amount']];
     }
 }
 ?>
 <section class="mbw-card frm-section vch-entry-panel">
     <div class="vch-grid" data-grid data-min-rows="2" data-prefill="<?= e(json_encode($rows, JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap"><table class="frm-entries vch-table">
-            <thead><tr><th>SN</th><th>Cash / bank account</th><th>Debit (<?= e(trim($currency)) ?>)</th><th>Credit (<?= e(trim($currency)) ?>)</th><th></th></tr></thead>
+            <thead><tr><th>SN</th><th>Cash / bank account</th><th>Cost centre <em>*</em></th><th>Debit (<?= e(trim($currency)) ?>)</th><th>Credit (<?= e(trim($currency)) ?>)</th><th></th></tr></thead>
             <tbody data-rows></tbody>
         </table></div>
         <div class="frm-entries-foot">
@@ -25,6 +25,7 @@ foreach (['contra_in' => 'debit', 'contra_out' => 'credit'] as $key => $side) {
         <template data-row-template><tr>
             <td data-sn></td>
             <td><select name="ledger_id[]" data-field="ledger_id" class="vch-ledger vch-journal-ledger"><option value="">Select cash / bank account</option><?= $renderLedgerOptions($optionsCashBank, 0) ?></select></td>
+            <td><select name="line_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
             <td><input type="number" data-field="debit" class="frm-num vch-dr" min="0" step="0.01" aria-label="Debit amount"></td>
             <td><input type="number" data-field="credit" class="frm-num vch-cr" min="0" step="0.01" aria-label="Credit amount">
                 <input type="hidden" name="entry_type[]" data-field="entry_type" value="debit">

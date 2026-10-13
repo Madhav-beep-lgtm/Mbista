@@ -28,7 +28,7 @@ $isMoneyIn = $bankSide === 'debit';
                     <tr>
                         <th style="width:36px">SN</th>
                         <th style="width:200px">Cash / bank account <em>*</em></th>
-                        <th>Cheque / transaction no.</th>
+                        <th style="width:180px">Cost centre <em>*</em></th><th>Cheque / transaction no.</th>
                         <th class="is-numeric" style="width:150px"><?= $isMoneyIn ? 'Received' : 'Paid' ?> (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
                     </tr>
@@ -51,6 +51,7 @@ $isMoneyIn = $bankSide === 'debit';
                         <?= $renderLedgerOptions($optionsCashBank, 0) ?>
                     </select>
                 </td>
+                <td><select name="tender_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
                 <td><input type="text" name="tender_instrument_no[]" data-field="instrument_no" maxlength="80" placeholder="Cheque / txn reference"></td>
                 <td class="is-numeric"><input type="number" name="tender_amount[]" data-field="amount" class="frm-num vch-amount" step="0.01" min="0" placeholder="0.00"></td>
                 <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this line">&#128465;</button></td>
@@ -72,7 +73,7 @@ $isMoneyIn = $bankSide === 'debit';
                     <tr>
                         <th style="width:36px">SN</th>
                         <th style="width:220px">Ledger <em>*</em></th>
-                        <th>Description</th>
+                        <th style="width:180px">Cost centre <em>*</em></th><th>Description</th>
                         <th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
                     </tr>
@@ -96,6 +97,7 @@ $isMoneyIn = $bankSide === 'debit';
                         <?= $renderLedgerOptions($optionsAll, 0) ?>
                     </select>
                 </td>
+                <td><select name="line_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
                 <td><input type="text" name="line_memo[]" data-field="memo" maxlength="255" placeholder="What this line is for"></td>
                 <td hidden><input type="hidden" name="line_reference[]" data-field="reference"></td>
                 <td class="is-numeric"><input type="number" name="line_amount[]" data-field="amount" class="frm-num vch-amount" step="0.01" min="0" placeholder="0.00"></td>

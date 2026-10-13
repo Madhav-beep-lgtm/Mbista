@@ -449,21 +449,21 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" aria-label="Voucher register">
     <form method="get" action="<?= e(url('admin/accounting.php')) ?>" class="voucher-register-filters" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
         <?php if (!empty($_GET['fiscal_year_id'])): ?><input type="hidden" name="fiscal_year_id" value="<?= (int) $_GET['fiscal_year_id'] ?>"><?php endif; ?>
-        <input type="date" name="from" value="<?= e($vDateOk($vFrom) ? $vFrom : '') ?>" class="field-compact" aria-label="From date">
-        <input type="date" name="to" value="<?= e($vDateOk($vTo) ? $vTo : '') ?>" class="field-compact" aria-label="To date">
-        <select name="vtype" class="field-compact" aria-label="Voucher type">
+        <label><span>From date</span><input type="date" name="from" value="<?= e($vDateOk($vFrom) ? $vFrom : '') ?>" class="field-compact" aria-label="From date"></label>
+        <label><span>To date</span><input type="date" name="to" value="<?= e($vDateOk($vTo) ? $vTo : '') ?>" class="field-compact" aria-label="To date"></label>
+        <label><span>Voucher type</span><select name="vtype" class="field-compact" aria-label="Voucher type">
             <option value="">All types</option>
             <?php foreach ($voucherTypeOptions as $voucherTypeOption): ?>
                 <option value="<?= e($voucherTypeOption) ?>" <?= $vType === $voucherTypeOption ? 'selected' : '' ?>><?= e(voucher_type_label((string) $voucherTypeOption)) ?></option>
             <?php endforeach; ?>
-        </select>
-        <select name="vstatus" class="field-compact" aria-label="Status">
+        </select></label>
+        <label><span>Status</span><select name="vstatus" class="field-compact" aria-label="Status">
             <option value="">All statuses</option>
             <option value="posted" <?= $vStatus === 'posted' ? 'selected' : '' ?>>Posted</option>
             <option value="draft" <?= $vStatus === 'draft' ? 'selected' : '' ?>>Draft</option>
             <option value="cancelled" <?= $vStatus === 'cancelled' ? 'selected' : '' ?>>Cancelled</option>
-        </select>
-        <input type="search" name="q" value="<?= e($vSearch) ?>" class="field-compact voucher-register-search" aria-label="Search vouchers" placeholder="Search vouchers…">
+        </select></label>
+        <label class="voucher-search-label"><span>Search vouchers</span><input type="search" name="q" value="<?= e($vSearch) ?>" class="field-compact voucher-register-search" aria-label="Search vouchers" placeholder="Search vouchers…"></label>
         <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
         <?php if ($vSearch !== '' || $vType !== '' || $vStatus !== '' || $vDateOk($vFrom) || $vDateOk($vTo)): ?><a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>">Clear</a><?php endif; ?>
         <div class="actions" style="margin-left:auto">
@@ -473,11 +473,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th class="is-numeric">Total</th><th>Status</th><th>Posted At</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?><th>Actions</th></tr>
+            <tr><th>Date</th><th>Voucher No</th><th>Type</th><th>Party</th><th>Reference</th><th class="is-numeric">Total</th><th>Status</th><?php if ($hasVoucherApprovals): ?><th>Approval</th><?php endif; ?><th>Actions</th></tr>
         </thead>
         <tbody>
             <?php if ($vouchers === []): ?>
-                <tr><td colspan="<?= $hasVoucherApprovals ? '10' : '9' ?>">No vouchers posted for selected context.</td></tr>
+                <tr><td colspan="<?= $hasVoucherApprovals ? '9' : '8' ?>">No vouchers posted for selected context.</td></tr>
             <?php endif; ?>
             <?php $canEditVouchers = user_can('edit') && user_can_do('accounting', 'edit'); ?>
             <?php $canDeleteVouchers = user_can('delete') && user_can_do('accounting', 'edit') && !staff_accountant_forces_approval(); ?>
@@ -493,7 +493,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         $voucherStatus = (string) $voucher['status'];
                         $statusTone = ['posted' => 'green', 'draft' => 'blue', 'cancelled' => 'red'][$voucherStatus] ?? 'gray';
                     ?><span class="mbw-pill tone-<?= e($statusTone) ?>"><?= e($voucherStatus) ?></span></td>
-                    <td><?= e($voucher['posted_at']) ?></td>
+
                     <?php if ($hasVoucherApprovals): ?>
                         <td>
                             <?php
