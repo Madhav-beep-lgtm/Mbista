@@ -269,6 +269,12 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
   min-width: 0; padding: var(--space-4); border: 1px solid var(--color-border);
   border-radius: var(--radius-panel); background: var(--color-surface);
 }
+/* A canvas with no CSS size keeps its intrinsic 300x150 whatever it is sitting
+   in, and mbw-charts.js draws to getBoundingClientRect() -- so in a container
+   narrower than 300px the chart drew straight out over the page instead of
+   shrinking. Fill the wrapper, and never exceed it. */
+.mbw-donut-box canvas, .mbw-chart-wrap canvas { display: block; width: 100%; height: 100%; }
+canvas { max-width: 100%; }
 .mbw-donut-row { display: grid; grid-template-columns: minmax(160px, .7fr) minmax(0, 1fr); gap: var(--space-5); align-items: center; }
 .mbw-row-charts, .mbw-row-tables { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
 .inventory-action-tabs, .reference-tabs { display: flex; padding: 5px; gap: 4px; overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
@@ -346,6 +352,11 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .hosp-pack-dialog { width: min(920px, calc(100vw - 28px)); max-height: calc(100vh - 28px); padding: 0; overflow: hidden; }
 .hosp-pack-dialog-body { max-height: calc(100vh - 150px); padding: var(--space-4); overflow: auto; }
 .admin-dashboard-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--space-4); }
+/* The grid is twelve columns and these are its only children. Without a span
+   each took ONE column -- about 100px -- so every heading wrapped a word to a
+   line and a 220px donut drew straight out over the page. min-width:0 as well,
+   or a wide table or canvas inside pushes the track open again. */
+.admin-chart-card, .admin-analysis-card { grid-column: span 6; min-width: 0; }
 .ov-range { color: var(--color-text-muted); font-size: var(--font-size-xs); }
 .ov-donut-center { display: grid; place-items: center; text-align: center; }
 .vch-type-key { display: inline-flex; min-width: 24px; min-height: 24px; align-items: center; justify-content: center; border-radius: 6px; background: var(--color-primary-soft); color: var(--color-primary); font-size: 10px; font-weight: 750; }
@@ -417,6 +428,10 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
   .workspace-form-grid, .frm-grid, .filter-grid, .filters-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .frm-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mbw-row-charts, .mbw-row-tables, .admin-dashboard-grid { grid-template-columns: 1fr; }
+  /* The span has to go with the track count. A child still spanning 6 of a
+     one-column grid makes grid invent five more columns to fit it, and the
+     page scrolls sideways on a narrow screen. */
+  .admin-chart-card, .admin-analysis-card { grid-column: auto; }
   .cr-kpis, .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
