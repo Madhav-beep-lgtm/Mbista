@@ -3,7 +3,10 @@
 <title><?= e((string) $voucher['voucher_no']) ?> — <?= e($voucherLabel) ?></title>
 <link rel="stylesheet" href="<?= e(asset_url('assets/css/voucher-print.css')) ?>">
 </head><body>
-<nav class="print-toolbar"><button type="button" onclick="window.print()">Print voucher</button></nav>
+<nav class="print-toolbar"><button type="button" onclick="window.print()">Print voucher</button>
+<?php if (in_array((string) ($voucher['voucher_type'] ?? ''), ['sales', 'purchase', 'debit_note', 'credit_note'], true)): ?>
+<a href="<?= e(url('admin/voucher-view.php?id=' . (int) $voucher['id'] . '&document=1')) ?>">Invoice / note</a>
+<?php endif; ?></nav>
 <main class="voucher-document">
     <header><h1><?= e((string) $company['name']) ?></h1><p><?= nl2br(e(trim((string) ($company['address'] ?? '')) ?: 'Address not recorded')) ?></p><h2><?= e($voucherLabel) ?></h2></header>
     <section class="voucher-meta">

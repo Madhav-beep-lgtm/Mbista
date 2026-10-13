@@ -12,7 +12,8 @@ require_staff_admin_or_client_books();
 require_company_context();
 
 $repairErrors = accounting_module_repair_database();
-$pageTitle = 'Unified Transaction and Party Master';
+$pageTitle = 'Unified Transactions';
+$pageHero = false;
 $pageSubtitle = 'One workspace for parties, sales, purchases, notes, payments and complete ledger history.';
 $company = current_company();
 $fiscalYear = current_fiscal_year();
@@ -1142,7 +1143,9 @@ if (table_exists('vouchers')) {
             'display_status' => $moduleOutstanding !== null
                 ? ($moduleOutstanding <= 0.004 ? 'Paid' : 'Open')
                 : 'Posted',
-            'document_url' => url('admin/voucher-form.php?edit=' . (int) $moduleSale['id']),
+            'document_url' => (string) ($moduleSale['source_type'] ?? '') === 'voucher_form'
+                ? url('admin/voucher-view.php?id=' . (int) $moduleSale['id'] . '&document=1')
+                : url('admin/voucher-form.php?edit=' . (int) $moduleSale['id']),
             'party_link_status' => (int) ($moduleSale['party_id'] ?? 0) > 0 ? 'linked' : 'direct',
             'opening_balance' => $moduleOutstanding ?? 0.0,
         ];
@@ -1643,20 +1646,14 @@ $showingTo = min($totalRows, $page * $perPage);
     <div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div>
 <?php endif; ?>
 
-<section class="party-master-link-banner" aria-label="Unified party identity">
-    <span class="party-master-link-banner-icon"><?= icon('users') ?></span>
-    <span class="party-master-link-banner-copy">
-        <strong>All transactions use one Party ID</strong>
-        
-    </span>
-</section>
+
 
 <div class="mbw-kpi-grid party-master-kpis">
     <a class="mbw-kpi" href="<?= e(parties_page_url(['tab' => 'directory', 'type' => null, 'classification' => null, 'link_status' => null, 'balance_status' => null, 'page' => null])) ?>">
         <div>
             <div class="mbw-kpi-label">Total Parties</div>
             <div class="mbw-kpi-value"><?= e((string) $partyDirectorySummary['total']) ?></div>
-            <span class="mbw-kpi-delta">Canonical party records</span>
+
         </div>
         <span class="mbw-chip is-square tone-green"><?= icon('users') ?></span>
     </a>
@@ -1665,7 +1662,7 @@ $showingTo = min($totalRows, $page * $perPage);
         <div>
             <div class="mbw-kpi-label">Customers</div>
             <div class="mbw-kpi-value"><?= e((string) $partyDirectorySummary['customers']) ?></div>
-            <span class="mbw-kpi-delta">Customer and both</span>
+
         </div>
         <span class="mbw-chip is-square tone-green"><?= icon('profile') ?></span>
     </a>
@@ -1674,7 +1671,7 @@ $showingTo = min($totalRows, $page * $perPage);
         <div>
             <div class="mbw-kpi-label">Suppliers</div>
             <div class="mbw-kpi-value"><?= e((string) $partyDirectorySummary['suppliers']) ?></div>
-            <span class="mbw-kpi-delta">Supplier and both</span>
+
         </div>
         <span class="mbw-chip is-square tone-blue"><?= icon('companies') ?></span>
     </a>
@@ -1683,7 +1680,7 @@ $showingTo = min($totalRows, $page * $perPage);
         <div>
             <div class="mbw-kpi-label">Unlinked Records</div>
             <div class="mbw-kpi-value"><?= e((string) $partyDirectorySummary['unlinked']) ?></div>
-            <span class="mbw-kpi-delta">Requires controlled review</span>
+
         </div>
         <span class="mbw-chip is-square tone-amber"><?= icon('portal') ?></span>
     </a>
@@ -1692,7 +1689,7 @@ $showingTo = min($totalRows, $page * $perPage);
         <div>
             <div class="mbw-kpi-label">Possible Duplicates</div>
             <div class="mbw-kpi-value"><?= e((string) $partyDirectorySummary['duplicates']) ?></div>
-            <span class="mbw-kpi-delta">Same normalized name</span>
+
         </div>
         <span class="mbw-chip is-square tone-red"><?= icon('compliance') ?></span>
     </a>
@@ -1722,8 +1719,6 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
 ?>
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
-        <a class="button<?= $primaryAction === 'invoice' ? '' : ' secondary' ?>" href="<?= e(url('admin/invoice.php')) ?>"><?= icon('invoices') ?>Create Invoice</a>
-        <a class="button<?= $primaryAction === 'purchase' ? '' : ' secondary' ?>" href="<?= e(parties_page_url(['panel' => 'purchase', 'edit_id' => null])) ?>"><?= icon('cart') ?>Record Purchase</a>
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=sales')) ?>"><?= icon('receipt-voucher') ?>Sales Voucher</a>
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=purchase')) ?>"><?= icon('documents') ?>Purchase Voucher</a>
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=debit_note')) ?>"><?= icon('trend-down') ?>Debit Note</a>

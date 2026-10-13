@@ -33,24 +33,18 @@ $settlementModeOptions['credit'] = voucher_settlement_modes()['credit'];
 $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
 ?>
 <section class="mbw-card frm-section vch-focus">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-<?= e((string) $spec['tone']) ?>"><?= icon('clients') ?></span>
-        <h2><?= e((string) $spec['party_label']) ?> &amp; document</h2>
-        <span class="frm-optional"><?= e((string) $spec['settlement_label']) ?></span>
-    </div>
-
     <div class="vch-settlement">
         <label class="vch-radio<?= $settlementMode === 'party' ? ' is-on' : '' ?>">
             <input type="radio" name="settlement_mode" value="party" <?= $settlementMode === 'party' ? 'checked' : '' ?>>
-            <span><strong>Against the <?= e(strtolower((string) $spec['party_label'])) ?></strong><small><?= $partyIsDebit ? 'They owe us until it is settled' : 'We owe them until it is settled' ?></small></span>
+            <span><strong>Against the <?= e(strtolower((string) $spec['party_label'])) ?></strong></span>
         </label>
         <label class="vch-radio<?= $settlementMode === 'cash' ? ' is-on' : '' ?>">
             <input type="radio" name="settlement_mode" value="cash" <?= $settlementMode === 'cash' ? 'checked' : '' ?>>
-            <span><strong>Straight to cash / bank</strong><small>Settled on the spot — nothing outstanding</small></span>
+            <span><strong>Straight to cash / bank</strong></span>
         </label>
         <label class="vch-radio<?= $settlementMode === 'split' ? ' is-on' : '' ?>">
             <input type="radio" name="settlement_mode" value="split" <?= $settlementMode === 'split' ? 'checked' : '' ?>>
-            <span><strong>Split across several ways</strong><small>Part cash, part Fonepay or QR, part on credit — as it really <?= $partyIsDebit ? 'came in' : 'went out' ?></small></span>
+            <span><strong>Split across several ways</strong></span>
         </label>
     </div>
 
@@ -58,24 +52,13 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
         <?php // Shown for a credit document and for a split alike: a split can
               // leave part of the bill on the party's account, and that part
               // has to be owed by somebody. ?>
-        <label data-settlement-field="party split"><?= e((string) $spec['party_label']) ?> <em>*</em>
-            <select name="party_id" id="vch-party">
-                <option value="0">Select <?= e(strtolower((string) $spec['party_label'])) ?></option>
-                <?php foreach ($partyOptions as $party): ?>
-                    <option value="<?= (int) $party['id'] ?>"
-                            data-ledger="<?= (int) $party['side_ledger_id'] ?>"
-                            <?= (int) ($prefill['party_id'] ?? 0) === (int) $party['id'] ? 'selected' : '' ?>><?= e((string) $party['name']) ?> (<?= e((string) $party['code']) ?>)</option>
-                <?php endforeach; ?>
-            </select>
-            <span class="frm-optional" data-settlement-field="split" hidden>Only needed if one of the settlement lines is on credit</span>
-        </label>
         <label data-settlement-field="cash" hidden>Cash / bank account <em>*</em>
             <select name="settlement_ledger_id" id="vch-settlement-ledger">
                 <option value="">Select cash / bank</option>
                 <?= $renderLedgerOptions($optionsCashBank, $settlementMode === 'cash' ? (int) ($prefill['settlement_ledger_id'] ?? 0) : 0) ?>
             </select>
         </label>
-        <input type="hidden" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
+        <label><?= e((string) $spec['reference_label']) ?><input type="text" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>"></label>
         <label><?= e((string) $spec['reference_date_label']) ?>
             <input type="date" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">
         </label>
@@ -178,11 +161,11 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                     <tr>
                         <th style="width:36px">SN</th>
                         <?php if ($itemOptions !== []): ?><th style="width:190px">Item</th><?php endif; ?>
-                        <th style="width:200px">Ledger <em>*</em></th>
+                        <th style="width:200px"><?= $spec['value_role'] === 'income' ? 'Sales ledger' : 'Purchase ledger' ?> <em>*</em></th>
                         <th>Description</th><th style="width:180px">Cost centre <em>*</em></th>
                         <th class="is-numeric" style="width:100px">Qty</th>
                         <th class="is-numeric" style="width:120px">Rate</th>
-                        <th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
+                        <th style="width:145px">Tax treatment</th><th style="width:85px">Tax %</th><th class="is-numeric" style="width:120px">Line total</th><th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
                     </tr>
                 </thead>
@@ -222,6 +205,9 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                 <td class="is-numeric"><input type="number" name="value_qty[]" data-field="qty" class="frm-num vch-qty" step="0.001" min="0" placeholder="0"></td>
                 <td class="is-numeric"><input type="number" name="value_rate[]" data-field="rate" class="frm-num vch-rate" step="0.01" min="0" placeholder="0.00"></td>
 
+                <td><select name="value_tax_mode[]" data-field="tax_mode" class="vch-line-tax-mode"><option value="exclusive" <?= $taxMode === 'exclusive' ? 'selected' : '' ?>>Exclusive</option><option value="inclusive" <?= $taxMode === 'inclusive' ? 'selected' : '' ?>>Inclusive</option><option value="none" <?= $taxMode === 'none' ? 'selected' : '' ?>>Exempt / no tax</option></select></td>
+                <td><input type="number" name="value_tax_rate[]" data-field="tax_rate" class="vch-line-tax-rate" min="0" max="100" step="0.01" value="<?= e((string) $taxRate) ?>"></td>
+                <td class="is-numeric" data-line-total>0.00</td>
                 <td class="is-numeric"><input type="number" name="value_amount[]" data-field="amount" class="frm-num vch-value-amount" step="0.01" min="0" placeholder="0.00"></td>
                 <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this line">&#128465;</button></td>
             </tr>
@@ -229,34 +215,14 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
     </div>
 </section>
 
-<section class="mbw-card frm-section">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-amber"><?= icon('scale') ?></span>
-        <h2>Tax</h2>
-        <span class="frm-optional">Worked out on the lines above and posted as its own entry</span>
-    </div>
-    <div class="frm-grid frm-grid-4">
-        <label>Tax treatment
-            <select name="tax_mode" id="vch-tax-mode">
-                <option value="exclusive" <?= $taxMode === 'exclusive' ? 'selected' : '' ?>>Added on top of the amounts</option>
-                <option value="inclusive" <?= $taxMode === 'inclusive' ? 'selected' : '' ?>>Already inside the amounts</option>
-                <option value="none" <?= $taxMode === 'none' ? 'selected' : '' ?>>No tax</option>
-            </select>
-        </label>
-        <label>Rate (%)
-            <input type="number" name="tax_rate" id="vch-tax-rate" step="0.01" min="0" max="100" value="<?= e(number_format($taxRate, 2, '.', '')) ?>">
-        </label>
-        <label data-tax-field>Tax ledger
-            <select name="tax_ledger_id" id="vch-tax-ledger">
-                <option value="">Select tax ledger</option>
-                <?= $renderLedgerOptions($optionsTax, (int) ($prefill['tax_ledger_id'] ?? 0)) ?>
-            </select>
-        </label>
-    </div>
-    <?php if ($optionsTax === []): ?>
-        <div class="notice">No Duties &amp; Taxes ledger exists for this company yet, so tax cannot be posted separately. Open one under <a href="<?= e(url('admin/chart-ledgers.php')) ?>">Ledgers</a>, or set the treatment to "No tax".</div>
-    <?php endif; ?>
-</section>
+<div class="frm-grid frm-grid-4">
+    <label data-tax-field>Tax ledger
+        <select name="tax_ledger_id" id="vch-tax-ledger">
+            <option value="">Select configured tax ledger</option>
+            <?= $renderLedgerOptions($optionsTax, (int) ($prefill['tax_ledger_id'] ?? 0)) ?>
+        </select>
+    </label>
+</div>
 
 <section class="mbw-card frm-section vch-summary-card">
     <div class="frm-section-head">
@@ -283,8 +249,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var form = document.getElementById('voucher-form');
     var partySelect = document.getElementById('vch-party');
     var settlementLedger = document.getElementById('vch-settlement-ledger');
-    var taxModeSelect = document.getElementById('vch-tax-mode');
-    var taxRateInput = document.getElementById('vch-tax-rate');
+
+
     var taxLedger = document.getElementById('vch-tax-ledger');
     var partyWord = <?= json_encode(strtolower((string) $spec['party_label'])) ?>;
     var lastTotal = 0;
@@ -312,6 +278,7 @@ document.addEventListener('DOMContentLoaded', function () {
         form.querySelectorAll('.vch-radio').forEach(function (radio) {
             radio.classList.toggle('is-on', radio.querySelector('input').checked);
         });
+        if (partySelect) { partySelect.required = settleWay === 'party'; }
         recalc();
     }
 
@@ -354,8 +321,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function recalc() {
-        var mode = taxModeSelect.value;
-        var rate = mode === 'none' ? 0 : (Number(taxRateInput.value) || 0);
+
         var taxable = 0;
         var tax = 0;
         var stockLines = 0;
@@ -373,11 +339,16 @@ document.addEventListener('DOMContentLoaded', function () {
             if (qty > 0 && unitRate > 0 && document.activeElement !== amountField) {
                 amountField.value = window.vchMoney(qty * unitRate);
             }
+            var mode = row.querySelector('.vch-line-tax-mode').value;
+            var rate = mode === 'none' ? 0 : Number(row.querySelector('.vch-line-tax-rate').value) || 0;
             var gross = Number(amountField.value) || 0;
+            row.querySelector('[data-line-total]').textContent = '0.00';
             if (gross <= 0) { return; }
             var lineTaxable = (mode === 'inclusive' && rate > 0) ? Math.round((gross / (1 + rate / 100)) * 100) / 100 : gross;
             taxable += lineTaxable;
-            tax += mode === 'none' ? 0 : Math.round(lineTaxable * (rate / 100) * 100) / 100;
+            var lineTax = mode === 'none' ? 0 : Math.round(lineTaxable * (rate / 100) * 100) / 100;
+            tax += lineTax;
+            row.querySelector('[data-line-total]').textContent = window.vchMoney(lineTaxable + lineTax);
         });
 
         taxable = Math.round(taxable * 100) / 100;
@@ -446,9 +417,9 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('vch-sum-party').textContent = name;
 
         var taxFields = form.querySelectorAll('[data-tax-field]');
-        taxFields.forEach(function (field) { field.hidden = mode === 'none'; });
-        taxRateInput.disabled = mode === 'none';
-        if (taxLedger) { taxLedger.required = mode !== 'none'; }
+        taxFields.forEach(function (field) { field.hidden = tax <= 0; });
+
+        if (taxLedger) { taxLedger.required = tax > 0; }
 
         var stockNote = document.getElementById('vch-stock-note');
         if (stockNote) {

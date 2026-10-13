@@ -43,11 +43,9 @@ $resolvePartyLedger = static function (int $companyId, int $partyId, string $sid
     if ($ledgerId > 0) {
         return $ledgerId;
     }
-    // No per-party ledger could be made — the generic AR/AP ledger still holds
-    // the balance, which is where this system kept it before parties existed.
-    $fallback = get_mapped_ledger($companyId, $side === 'payable' ? 'default_accounts_payable' : 'default_accounts_receivable');
-
-    return (int) ($fallback['id'] ?? 0);
+    // Never merge an unlinked party into a generic balance: each party must
+    // retain its independently viewable ledger. The composer reports the error.
+    return 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -539,9 +537,6 @@ $optionsValue = ($spec['layout'] ?? '') === 'trade'
 if ($optionsValue === []) {
     $optionsValue = $optionsAll;
 }
-if ($optionsTax === []) {
-    $optionsTax = array_values(array_filter($optionsAll, static fn (array $ledger): bool => !empty($ledger['roles']['liability']) || !empty($ledger['roles']['tax'])));
-}
 
 // The line ledger list, and which of them belong to a party, so that choosing a
 // party on a payment or receipt narrows the lines to that party's own ledgers
@@ -750,12 +745,12 @@ if (is_array($retry) && (string) ($retry['type'] ?? '') === $type) {
         'priority' => 'medium',
         'tax_mode' => 'exclusive',
         'tax_rate' => 13.0,
-        'tax_ledger_id' => (int) ($optionsTax[0]['id'] ?? 0),
+        'tax_ledger_id' => 0,
         'settlement_mode' => 'party',
         'settlements' => [],
     ];
     $mappedTax = get_mapped_ledger($companyId, 'default_tax_payable');
-    if ($mappedTax && isset($ledgerDirectory[(int) $mappedTax['id']])) {
+    if (($spec['value_role'] ?? '') === 'income' && $mappedTax && !empty($ledgerDirectory[(int) $mappedTax['id']]['roles']['tax'])) {
         $prefill['tax_ledger_id'] = (int) $mappedTax['id'];
     }
 }
@@ -798,6 +793,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <nav class="mbw-tabbar" aria-label="Voucher workspace">
     <a class="mbw-tab" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
     <a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a>
+    <?php if ($editVoucher && (string) $spec['layout'] === 'trade'): ?>
+    <a class="mbw-tab" target="_blank" rel="noopener" href="<?= e(url('admin/voucher-view.php?id=' . (int) $editVoucher['id'] . '&document=1')) ?>"><?= icon('documents') ?>Invoice / note</a>
+    <?php endif; ?>
 </nav>
 
 <?php if ($editIsAutoPosted): ?>
@@ -837,6 +835,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <label><span>Voucher date <em>*</em></span>
                     <input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($prefill['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required>
                 </label>
+                <?php if ((string) $spec['layout'] === 'trade'): ?>
+        <label ><?= e((string) $spec['party_label']) ?> <em>*</em>
+            <select name="party_id" id="vch-party" class="js-searchable">
+                <option value="0">Select <?= e(strtolower((string) $spec['party_label'])) ?></option>
+                <?php foreach ($partyOptions as $party): ?>
+                    <option value="<?= (int) $party['id'] ?>"
+                            data-ledger="<?= (int) $party['side_ledger_id'] ?>"
+                            <?= (int) ($prefill['party_id'] ?? 0) === (int) $party['id'] ? 'selected' : '' ?>><?= e((string) $party['name']) ?> (<?= e((string) $party['code']) ?>)</option>
+                <?php endforeach; ?>
+            </select>
+        </label>
+            <a class="button secondary" target="_blank" rel="noopener" href="<?= e(url('admin/accounting-parties.php?panel=party')) ?>">＋ Add party</a>
+                <?php endif; ?>
                 <label>Branch
                     <select name="location">
                         <option value="">Not assigned</option>

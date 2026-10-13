@@ -14,7 +14,7 @@ declare(strict_types=1);
 <label class="vch-type-picker"><span>Voucher type <em>*</em></span>
     <select id="vch-type-picker" aria-label="Voucher type">
         <?php foreach (voucher_entry_type_catalog() as $pickerKey => $pickerSpec): ?>
-            <option value="<?= e(url(voucher_type_url($pickerKey))) ?>" <?= $pickerKey === $type ? 'selected' : '' ?>><?= e((string) $pickerSpec['short']) ?></option>
+            <option value="<?= e(url(voucher_type_url($pickerKey))) ?>" <?= $pickerKey === (string) $spec['key'] ? 'selected' : '' ?>><?= e((string) $pickerSpec['short']) ?></option>
         <?php endforeach; ?>
     </select>
 </label>

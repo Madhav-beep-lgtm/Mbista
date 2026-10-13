@@ -244,7 +244,7 @@ function voucher_type_url(string $type): string
 /** Voucher types intentionally entered from the compact voucher workspace. */
 function voucher_entry_type_catalog(): array
 {
-    return array_intersect_key(voucher_type_catalog(), array_flip(['contra', 'payment', 'receipt', 'journal']));
+    return voucher_type_catalog();
 }
 
 // ---------------------------------------------------------------------------
@@ -795,19 +795,10 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
     }
 
     $taxMode = in_array((string) ($input['tax_mode'] ?? 'none'), ['none', 'exclusive', 'inclusive'], true)
-        ? (string) $input['tax_mode']
+        ? (string) ($input['tax_mode'] ?? 'none')
         : 'none';
     $taxRate = round((float) ($input['tax_rate'] ?? 0), 4);
     $taxLedgerId = (int) ($input['tax_ledger_id'] ?? 0);
-    if ($taxMode !== 'none') {
-        if ($taxRate <= 0) {
-            $result['errors'][] = 'Enter the tax rate, or set the tax to "No tax".';
-        }
-        if (!isset($ledgers[$taxLedgerId])) {
-            $result['errors'][] = 'Choose the tax ledger the VAT posts to.';
-        }
-    }
-
     $valueEntries = [];
     $taxableTotal = 0.0;
     $taxTotal = 0.0;
@@ -827,12 +818,20 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
             $result['errors'][] = 'Enter the amount against "' . $ledger['name'] . '".';
             continue;
         }
+        $lineMode = array_key_exists('value_tax_mode', $input) ? voucher_input_row($input, 'value_tax_mode', $index) : $taxMode;
+        $lineRate = array_key_exists('value_tax_rate', $input) ? (float) voucher_input_row($input, 'value_tax_rate', $index) : $taxRate;
+        if (!in_array($lineMode, ['none', 'exclusive', 'inclusive'], true)
+            || !is_finite($lineRate) || $lineRate < 0 || $lineRate > 100
+            || ($lineMode !== 'none' && $lineRate <= 0)) {
+            $result['errors'][] = 'Line ' . ($index + 1) . ': choose a valid tax treatment and rate.';
+            continue;
+        }
         // Inclusive: the amount typed already carries the tax, so it is peeled
         // back out. Exclusive: the tax is added on top.
-        $taxable = $taxMode === 'inclusive' && $taxRate > 0
-            ? round($gross / (1 + ($taxRate / 100)), 2)
+        $taxable = $lineMode === 'inclusive' && $lineRate > 0
+            ? round($gross / (1 + ($lineRate / 100)), 2)
             : $gross;
-        $lineTax = $taxMode === 'none' ? 0.0 : round($taxable * ($taxRate / 100), 2);
+        $lineTax = $lineMode === 'none' ? 0.0 : round($taxable * ($lineRate / 100), 2);
 
         $quantity = (float) voucher_input_row($input, 'value_qty', $index);
         $rate = (float) voucher_input_row($input, 'value_rate', $index);
@@ -853,13 +852,16 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
             $taxable,
             $description,
             voucher_input_row($input, 'value_cost_centre', $index),
-            $taxMode === 'none' ? '' : number_format($taxRate, 2) . '%',
+            'VAT:' . $lineMode . ':' . number_format($lineRate, 4, '.', ''),
             '',
             $itemId,
             $quantity
         );
         $taxableTotal += $taxable;
         $taxTotal += $lineTax;
+    }
+    if ($taxTotal > 0 && empty($ledgers[$taxLedgerId]['roles']['tax'])) {
+        $result['errors'][] = 'Choose a configured Duties & Taxes ledger for the tax amount.';
     }
     if ($valueEntries === []) {
         $result['errors'][] = 'List at least one line under "' . ($spec['value_label'] ?? 'Value') . '".';
@@ -884,7 +886,7 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
             $taxLedgerId,
             (string) $spec['tax_side'],
             $taxTotal,
-            'VAT @ ' . rtrim(rtrim(number_format($taxRate, 2), '0'), '.') . '% on ' . number_format($taxableTotal, 2),
+            'VAT on ' . number_format($taxableTotal, 2),
             '',
             number_format($taxRate, 2) . '%',
             (string) ($input['reference_no'] ?? '')
@@ -1326,6 +1328,19 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
             }
             $quantity = (float) ($entry['quantity'] ?? 0);
             $amount = (float) $entry['amount'];
+            $rowTaxMode = null;
+            $rowTaxRate = null;
+            if (preg_match('/^VAT:(none|exclusive|inclusive):([0-9.]+)$/', (string) ($entry['tax_code'] ?? ''), $taxMatch)) {
+                $rowTaxMode = $taxMatch[1];
+                $rowTaxRate = (float) $taxMatch[2];
+                if ($rowTaxMode === 'inclusive') {
+                    $amount = round($amount + round($amount * $rowTaxRate / 100, 2), 2);
+                }
+            } elseif (preg_match('/^([0-9.]+)%$/', (string) ($entry['tax_code'] ?? ''), $taxMatch)) {
+                $rowTaxMode = 'exclusive';
+                $rowTaxRate = (float) $taxMatch[1];
+            }
+
             // The memo carries "description — 4 × 500.00" only so the day book
             // reads well; the columns are what the screen reopens with.
             $description = (string) ($entry['memo'] ?? '');
@@ -1335,6 +1350,8 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
                 'item_id' => (int) ($entry['item_id'] ?? 0),
                 'qty' => $quantity > 0 ? rtrim(rtrim(number_format($quantity, 3, '.', ''), '0'), '.') : '',
                 'rate' => $quantity > 0 ? number_format($amount / $quantity, 2, '.', '') : '',
+                'tax_mode' => $rowTaxMode,
+                'tax_rate' => $rowTaxRate,
                 'amount' => $amount,
                 'description' => $splitAt !== false ? substr($description, 0, $splitAt) : $description,
                 'cost_centre' => (string) ($entry['cost_centre'] ?? ''),
@@ -1342,7 +1359,7 @@ function voucher_decompose(string $type, array $voucher, array $entries, array $
         }
         $taxable = 0.0;
         foreach ($values as $value) {
-            $taxable += $value['amount'];
+            $taxable += $value['tax_mode'] === 'inclusive' ? round($value['amount'] / (1 + $value['tax_rate'] / 100), 2) : $value['amount'];
         }
         $taxAmount = (float) ($tax['amount'] ?? 0);
         $settlement = $settlements[0] ?? null;
@@ -1529,6 +1546,8 @@ function voucher_prefill_from_input(string $type, array $input): array
         for ($index = 0; $index < $rowCount; $index++) {
             $prefill['values'][] = [
                 'ledger_id' => voucher_input_row($input, 'value_ledger', $index),
+                'tax_mode' => voucher_input_row($input, 'value_tax_mode', $index) ?: ($input['tax_mode'] ?? 'exclusive'),
+                'tax_rate' => array_key_exists('value_tax_rate', $input) ? voucher_input_row($input, 'value_tax_rate', $index) : ($input['tax_rate'] ?? 13),
                 'item_id' => voucher_input_row($input, 'value_item', $index),
                 'description' => voucher_input_row($input, 'value_description', $index),
                 'qty' => voucher_input_row($input, 'value_qty', $index),

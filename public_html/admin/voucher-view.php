@@ -33,4 +33,20 @@ foreach (['submitted_by', 'approved_by'] as $role) {
 $voucherLabel = (string) voucher_type_spec((string) $voucher['voucher_type'])['label'];
 $totalDebit = 0;
 $totalCredit = 0;
+if (isset($_GET['document']) && in_array((string) $voucher['voucher_type'], ['sales', 'purchase', 'debit_note', 'credit_note'], true)) {
+    $documentTitle = match ((string) $voucher['voucher_type']) {
+        'sales' => 'Sales Invoice', 'purchase' => 'Purchase Record',
+        'debit_note' => 'Debit Note', 'credit_note' => 'Credit Note',
+    };
+    $documentLines = voucher_decompose((string) $voucher['voucher_type'], $voucher, $entries, voucher_ledger_directory((int) $company['id']));
+    if (empty($documentLines['ok'])) {
+        http_response_code(422);
+        exit('This legacy voucher requires its original source document. Open the journal view for its accounting entries.');
+    }
+    $query = db()->prepare('SELECT name, billing_address AS address, pan_no AS pan FROM accounting_parties WHERE id = ? AND company_id = ?');
+    $query->execute([(int) ($voucher['party_id'] ?? 0), (int) $company['id']]);
+    $documentParty = $query->fetch(PDO::FETCH_ASSOC) ?: [];
+    require __DIR__ . '/../../app/views/vouchers/trade_document.php';
+    exit;
+}
 require __DIR__ . '/../../app/views/vouchers/print.php';
