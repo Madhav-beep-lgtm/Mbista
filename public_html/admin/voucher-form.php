@@ -4,6 +4,7 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/voucher_types.php';
 require_once __DIR__ . '/../../app/voucher_bills.php';
+require_once __DIR__ . '/../../app/purchase_line_import.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
@@ -30,6 +31,11 @@ $departments = ['Accounts & Finance', 'Administration', 'Operations', 'Consultin
 $locations = ['Head Office', 'Branch Office', 'Client Site'];
 $costCentres = ['General', 'Accounting Services', 'Advisory', 'Training', 'Administration'];
 $paymentTermsOptions = ['Due on receipt', 'Net 7', 'Net 15', 'Net 30', 'Net 45', 'Advance'];
+
+if (($_GET['template'] ?? '') === 'purchase-items') {
+    require_permission('accounting', 'create');
+    purchase_line_template_download(purchase_line_columns(), 'purchase-voucher-items');
+}
 
 /**
  * The party ledger a trade voucher settles against, creating it under Trade
@@ -105,6 +111,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/voucher-form.php');
     }
     $spec = voucher_type_spec($voucherType);
+
+    if (($_POST['grid_action'] ?? '') === 'import_purchase_lines' && $voucherType === 'purchase') {
+        $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
+        try {
+            $upload = $_FILES['purchase_lines'] ?? [];
+            $extension = strtolower(pathinfo((string) ($upload['name'] ?? ''), PATHINFO_EXTENSION));
+            if (($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
+                || !is_uploaded_file($upload['tmp_name'] ?? '') || ($upload['size'] ?? 0) > 10 * 1024 * 1024
+                || !in_array($extension, ['csv', 'xlsx'], true)) {
+                throw new RuntimeException('Choose a CSV or XLSX item file no larger than 10 MB.');
+            }
+            $stmt = db()->prepare("SELECT id, sku, name FROM inventory_items WHERE company_id = ? AND status = 'active'");
+            $stmt->execute([$companyId]);
+            $lines = purchase_line_parse(voucher_import_read_rows($upload['tmp_name'], $extension), $stmt->fetchAll(PDO::FETCH_ASSOC), $costCentres);
+            $_SESSION['voucher_retry']['input'] = array_replace($_POST, $lines);
+            flash('success', 'Item rows loaded for review. Complete supplier, dates, warehouse, tax ledger and settlement, then save the voucher. Nothing has been posted.');
+        } catch (Throwable $error) {
+            flash('error', $error->getMessage());
+        }
+        redirect($editVoucherId > 0 ? 'admin/voucher-form.php?edit=' . $editVoucherId : 'admin/voucher-form.php?type=purchase');
+    }
 
     $saveMode = (string) ($_POST['save_mode'] ?? 'submit');
     $isDraft = $saveMode === 'draft';
@@ -826,7 +853,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <nav class="mbw-tabbar" aria-label="Voucher workspace">
     <a class="mbw-tab" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
-    <a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a>
+    <?php if ($type !== 'purchase'): ?><a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a><?php endif; ?>
     <?php if ($editVoucher && (string) $spec['layout'] === 'trade'): ?>
     <a class="mbw-tab" target="_blank" rel="noopener" href="<?= e(url('admin/voucher-view.php?id=' . (int) $editVoucher['id'] . '&document=1')) ?>"><?= icon('documents') ?>Invoice / note</a>
     <?php endif; ?>
@@ -847,6 +874,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if ($editVoucher): ?><input type="hidden" name="voucher_id" value="<?= (int) $editVoucher['id'] ?>"><?php endif; ?>
 
     <div class="frm-main">
+        <?php if ($type === 'purchase'): ?>
+        <section class="mbw-card frm-section">
+            <details><summary class="button secondary is-square" aria-label="Upload and download template" title="Upload and download template"><?= icon('upload') ?></summary>
+                <a class="button secondary" href="<?= e(url('admin/voucher-form.php?template=purchase-items')) ?>">Download item template</a>
+                <label>Purchase items <input type="file" name="purchase_lines" accept=".csv,.xlsx"></label>
+                <button class="button secondary" type="submit" name="grid_action" value="import_purchase_lines" formnovalidate>Upload and review</button>
+            </details>
+            <small>One supplier bill per upload. Item, Quantity, Rate, Cost Centre, Tax Mode and Tax Rate match the item grid. Upload replaces the displayed item rows; saving uses the normal purchase voucher workflow.</small>
+        </section>
+        <?php endif; ?>
         <section class="mbw-card frm-section vch-head-card">
             <div class="frm-grid vch-header-grid<?= $spec['layout'] === 'trade' ? ' vch-trade-header-grid' : '' ?>">
                 <?php if ($editVoucher === null): ?>
@@ -981,6 +1018,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // A draft may be anything. A posting may not, and the server says so too —
     // this only saves the person the round trip.
     document.getElementById('voucher-form').addEventListener('submit', function (event) {
+        if (event.submitter && event.submitter.value === 'import_purchase_lines') { return; }
         if (document.getElementById('frm-save-mode').value === 'draft') { return; }
         if (this.getAttribute('data-balanced') !== '1') {
             event.preventDefault();

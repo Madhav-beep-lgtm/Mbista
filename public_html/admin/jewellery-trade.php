@@ -37,6 +37,12 @@ $canEdit = user_can_do('jewellery', 'edit');
 $canExport = user_can_do('jewellery', 'export');
 $canPost = user_can_do('jewellery', 'post');
 
+if (($_GET['template'] ?? '') === 'items') {
+    require_permission('jewellery', 'edit');
+    require_once __DIR__ . '/../../app/purchase_line_import.php';
+    purchase_line_template_download(jw_line_template_columns(), 'jewellery-voucher-items');
+}
+
 // Just come back from saving a draft. The document stays loaded so nothing is
 // lost, but the popup stays SHUT -- somebody who has just saved is done with
 // the form, and having it spring open again is the screen arguing with them.
@@ -364,11 +370,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect($back);
         }
         $extension = strtolower(pathinfo((string) $upload['name'], PATHINFO_EXTENSION));
-        if (!in_array($extension, ['csv', 'xlsx'], true)) {
-            flash('error', 'Only .csv and .xlsx files can be imported.');
+        if (!in_array($extension, ['csv', 'xlsx'], true) || ($upload['size'] ?? 0) > 10 * 1024 * 1024) {
+            flash('error', 'Choose a CSV or XLSX item file no larger than 10 MB.');
             redirect($back);
         }
         $imported = jw_import_lines($companyId, (string) $upload['tmp_name'], $extension);
+        if ($imported['errors'] !== []) {
+            flash('error', 'No item rows loaded. ' . implode(' ', array_slice($imported['errors'], 0, 5)));
+            redirect($back);
+        }
         if ($imported['rows'] !== []) {
             $_SESSION['jw_staged_lines'][$docType] = $imported['rows'];
         }
@@ -977,9 +987,13 @@ $renderGridToolbar = static function (string $docType) use ($lineTemplates): str
     <label class="sr-only" for="jw-tplname-<?= e($docType) ?>">Save these lines as</label>
     <input id="jw-tplname-<?= e($docType) ?>" type="text" name="template_name" maxlength="120" placeholder="Save as template…">
     <button type="submit" class="button soft" name="grid_action" value="save_template" formnovalidate>Save set</button>
+    <details><summary class="button soft is-square" aria-label="Upload and download item template" title="Upload and download item template"><?= icon('upload') ?></summary>
     <label class="sr-only" for="jw-imp-<?= e($docType) ?>">Spreadsheet of items</label>
     <input id="jw-imp-<?= e($docType) ?>" type="file" name="lines_file" accept=".csv,.xlsx">
     <button type="submit" class="button soft" name="grid_action" value="import_lines" formnovalidate><?= icon('upload') ?>Import</button>
+    <a class="button soft" href="<?= e(url('admin/jewellery-trade.php?template=items')) ?>">Download item template</a>
+    </details>
+    <small>Upload item rows for one document, then review and save. Supplier, dates, warehouse and settlement are entered on the voucher.</small>
     <?php
     return (string) ob_get_clean();
 };

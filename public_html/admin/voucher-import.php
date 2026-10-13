@@ -349,6 +349,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="vimp-help-heading"><h2 id="vimp-help-title">Import instructions</h2><button type="button" class="button secondary" id="vimp-close-instructions" autofocus>Close</button></div>
     <section class="mbw-card frm-section">
         <div class="frm-section-head"><h3>How the Sheet Works</h3></div>
+        <p>Purchase imports must contain items, not debit/credit ledger rows. Use <a href="<?= e(url('admin/voucher-form.php?type=purchase')) ?>">Purchase voucher → Upload / Download template</a> for hospitality items or <a href="<?= e(url('admin/jewellery-trade.php?view=purchases')) ?>">Jewellery purchases → Download item template</a>. Review and save through the respective voucher form.</p>
         <p>One row per ledger line. Rows are grouped into vouchers by the <strong>Voucher No</strong> column, set on the first line of each voucher or repeated on every line. Voucher Type, Date and Title are read from the first line. Your Voucher No is kept as the reference; voucher numbers are assigned on import.</p>
         <div style="overflow-x:auto">
         <table class="frm-entries vimp-columns-table">
@@ -380,6 +381,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <thead><tr><th>Voucher Type</th><th>Bank/Cash Group Requirement</th></tr></thead>
             <tbody>
                 <?php foreach (VOUCHER_IMPORT_TYPES as $typeKey => $typeLabel): ?>
+                    <?php if ($typeKey === 'purchase') continue; ?>
                     <tr><td><?= e($typeLabel) ?></td><td><?= e(voucher_import_cash_bank_rule($typeKey)['label']) ?></td></tr>
                 <?php endforeach; ?>
             </tbody>

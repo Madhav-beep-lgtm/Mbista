@@ -355,6 +355,9 @@ function voucher_import_parse(array $rows, int $companyId, int $fiscalYearId): a
         }
 
         $voucher['type'] = voucher_import_normalize_type($voucher['type_raw']);
+        if ($voucher['type'] === 'purchase') {
+            $voucher['errors'][] = 'Ledger-only purchase uploads are retired. Use the Purchase voucher item upload for hospitality/inventory, or Jewellery purchases for jewellery items.';
+        }
         if ($voucher['type'] === null) {
             $voucher['errors'][] = $voucher['type_raw'] === ''
                 ? 'Voucher Type is missing on the first row of this voucher.'

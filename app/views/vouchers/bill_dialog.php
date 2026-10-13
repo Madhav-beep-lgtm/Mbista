@@ -98,6 +98,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     // Saving the voucher must not bypass an account's required bill information.
     form.addEventListener('submit', function (event) {
+        if (event.submitter && event.submitter.value === 'import_purchase_lines') { return; }
         var missing = Array.from(form.querySelectorAll('select')).find(function (select) {
             var id = selectedAccount(select);
             var bill = saved[id];

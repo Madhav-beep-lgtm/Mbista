@@ -16,6 +16,14 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/voucher_import.php';
 
+function jw_line_template_columns(): array
+{
+    return ['Item', 'Purity', 'Unit', 'Pieces', 'Gross Weight', 'Stone Weight',
+        'Wastage %', 'Wastage Weight', 'Rate', 'Making Amount', 'Stone Amount',
+        'Stone Carat', 'Diamond Amount', 'Diamond Carat', 'Other Diamond',
+        'Other Diamond Carat', 'Notes'];
+}
+
 /**
  * A number out of a spreadsheet cell: thousands separators and stray spaces
  * removed, anything that is not a number treated as zero.
@@ -298,6 +306,11 @@ function jw_import_lines(int $companyId, string $path, string $extension): array
                 continue;
             }
             $value = $cell($line, $columns[$field]);
+            $number = str_replace([',', ' ', "\xc2\xa0"], '', $value);
+            if ($type !== 'string' && $number !== '' && (!is_numeric($number) || !is_finite((float) $number) || (float) $number < 0)) {
+                $errors[] = 'Row ' . $lineNo . ': ' . $field . ' must be a non-negative number.';
+                continue 2;
+            }
             $row[$field] = $type === 'string' ? $value : jw_import_number($value);
         }
         $rows[] = jw_line_io_clean($row);
