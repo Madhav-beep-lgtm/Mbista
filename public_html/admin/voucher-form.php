@@ -829,7 +829,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <input type="date" name="voucher_date" id="frm-date" value="<?= e((string) ($prefill['voucher_date'] ?? $defaultEntryDate)) ?>" <?= $fyStartBound !== '' ? 'min="' . e($fyStartBound) . '" max="' . e($fyEndBound) . '"' : '' ?> required>
                 </label>
                 <?php if ((string) $spec['layout'] === 'trade'): ?>
-        <label ><?= e((string) $spec['party_label']) ?> <em>*</em>
+        <label><span><?= e((string) $spec['party_label']) ?> <em>*</em></span>
             <select name="party_id" id="vch-party" class="js-searchable">
                 <option value="0">Select <?= e(strtolower((string) $spec['party_label'])) ?></option>
                 <?php foreach ($partyOptions as $party): ?>
@@ -848,6 +848,19 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endforeach; ?>
                     </select>
                 </label>
+                <?php if ((string) $spec['layout'] === 'trade'):
+                    $supportsServices = in_array($spec['key'], ['sales', 'credit_note'], true);
+                    $hasExistingValues = !empty($prefill['values']);
+                    $hasInventoryValues = count(array_filter($prefill['values'] ?? [], static fn (array $row): bool => (int) ($row['item_id'] ?? 0) > 0)) > 0;
+                    $tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? ($hasExistingValues && !$hasInventoryValues ? 'services' : 'goods')) : 'goods';
+                ?>
+                <label><span><?= $supportsServices ? 'Sales category' : 'Purchase category' ?></span>
+                    <select name="trade_mode" id="vch-trade-mode">
+                        <option value="goods" <?= $tradeMode === 'goods' ? 'selected' : '' ?>><?= $supportsServices ? 'Goods sales' : 'Goods purchase' ?></option>
+                        <?php if ($supportsServices): ?><option value="services" <?= $tradeMode === 'services' ? 'selected' : '' ?>>Service sales</option><?php endif; ?>
+                    </select>
+                </label>
+                <?php endif; ?>
                 <?php if ((string) $spec['layout'] === 'tender'): ?>
                     <?php
                     $selectedTenderBill = (string) ($prefill['reference_no'] ?? '');

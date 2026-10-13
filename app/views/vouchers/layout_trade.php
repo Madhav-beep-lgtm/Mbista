@@ -18,10 +18,6 @@ declare(strict_types=1);
  * customer's account — so the third mode below lets the money be split across
  * as many ways as it actually came in, each landing in its own ledger.
  */
-$supportsServices = in_array($spec['key'], ['sales', 'credit_note'], true);
-$hasExistingValues = !empty($prefill['values']);
-$hasInventoryValues = count(array_filter($prefill['values'] ?? [], static fn (array $row): bool => (int) ($row['item_id'] ?? 0) > 0)) > 0;
-$tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? ($hasExistingValues && !$hasInventoryValues ? 'services' : 'goods')) : 'goods';
 $partySide = (string) $spec['party_side'];
 $partyIsDebit = $partySide === 'debit';
 $settlementMode = (string) ($prefill['settlement_mode'] ?? 'party');
@@ -134,13 +130,6 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
 </section>
 
 <section class="frm-section vch-entry-panel">
-    <div class="frm-grid vch-header-grid" style="margin-bottom:16px">
-        <label><?= $supportsServices ? 'Sales category' : 'Purchase category' ?>
-        <select name="trade_mode" id="vch-trade-mode">
-            <option value="goods" <?= $tradeMode === 'goods' ? 'selected' : '' ?>><?= $supportsServices ? 'Goods sales' : 'Goods purchase' ?></option>
-            <?php if ($supportsServices): ?><option value="services" <?= $tradeMode === 'services' ? 'selected' : '' ?>>Service sales</option><?php endif; ?>
-        </select></label>
-    </div>
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['values'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">
