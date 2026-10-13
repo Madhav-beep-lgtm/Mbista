@@ -20,6 +20,7 @@ function accounting_repair_account_creation_schema(): void
                 'is_fixed_asset' => 'TINYINT(1) NOT NULL DEFAULT 0',
                 'maintain_bill_by_bill' => 'TINYINT(1) NOT NULL DEFAULT 0',
                 'use_cost_centre' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'is_cash_equivalent' => 'TINYINT(1) NOT NULL DEFAULT 0',
             ] as $column => $definition) {
                 accounting_repair_add_column($table, $column, '`' . $column . '` ' . $definition);
             }

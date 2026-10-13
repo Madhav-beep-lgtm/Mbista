@@ -6,7 +6,7 @@ require_staff_admin_or_client_books();
 require_company_context();
 require_permission('accounting', 'create');
 $repairErrors = accounting_module_repair_database();
-if (!column_exists('ledgers', 'parent_ledger_id') || !column_exists('ledger_groups', 'use_cost_centre')) {
+if (!column_exists('ledgers', 'parent_ledger_id') || !column_exists('ledger_groups', 'use_cost_centre') || !column_exists('ledgers', 'is_cash_equivalent') || !column_exists('ledger_groups', 'is_cash_equivalent')) {
     $pageTitle = 'Create account';
     $pageHero = false;
     include __DIR__ . '/../../app/views/partials/admin_header.php';
@@ -51,7 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $metadata[$field] = trim((string) ($values[$field] ?? ''));
             if (mb_strlen($metadata[$field]) > $limit) throw new InvalidArgumentException(ucwords(str_replace('_', ' ', $field)) . ' is too long.');
         }
-        foreach (['is_fixed_asset', 'maintain_bill_by_bill', 'use_cost_centre'] as $field) $metadata[$field] = empty($values[$field]) ? 0 : 1;
+        if (!empty($values['is_cash_equivalent']) && $nature !== 'asset') throw new InvalidArgumentException('Cash or cash equivalent is available for asset accounts only.');
+        foreach (['is_fixed_asset', 'maintain_bill_by_bill', 'use_cost_centre', 'is_cash_equivalent'] as $field) $metadata[$field] = empty($values[$field]) ? 0 : 1;
         db()->beginTransaction();
         // Serialize code allocation for this company's unified creation flow.
         $lock = db()->prepare('SELECT id FROM companies WHERE id = :cid FOR UPDATE');
@@ -144,7 +145,7 @@ $field = static fn (string $key): string => e((string) ($values[$key] ?? ''));
             <label>Side<select name="opening_side"><option value="debit">Debit (Dr)</option><option value="credit" <?= ($values['opening_side'] ?? '') === 'credit' ? 'selected' : '' ?>>Credit (Cr)</option></select></label>
         </div></fieldset>
         <fieldset><legend>Type</legend><div class="actions">
-            <?php foreach (['is_fixed_asset'=>'Fixed Asset','maintain_bill_by_bill'=>'Maintain bill by bill','use_cost_centre'=>'Cost centre','is_cash_or_bank'=>'Cash / bank group'] as $key=>$label): ?>
+            <?php foreach (['is_fixed_asset'=>'Fixed Asset','maintain_bill_by_bill'=>'Maintain bill by bill','use_cost_centre'=>'Cost centre','is_cash_equivalent'=>'Cash or cash equivalent','is_cash_or_bank'=>'Cash / bank group'] as $key=>$label): ?>
                 <label class="checkbox-line" <?= $key === 'is_cash_or_bank' ? 'id="account-bank-group"' : '' ?>><input type="checkbox" name="<?= $key ?>" value="1" <?= !empty($values[$key]) ? 'checked' : '' ?>><?= $label ?></label>
             <?php endforeach; ?>
         </div></fieldset>

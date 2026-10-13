@@ -299,7 +299,10 @@ function voucher_ledger_directory(int $companyId): array
     }
     $billFlag = column_exists('ledgers', 'maintain_bill_by_bill') ? 'l.maintain_bill_by_bill' : '0';
     $stmt = db()->prepare("SELECT l.id, l.code, l.name, l.group_id, l.bank_name, l.bank_account_no, {$billFlag} AS maintain_bill_by_bill,
-            COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank,
+            (COALESCE(g.is_cash_or_bank, 0) = 1"
+            . (column_exists('ledgers', 'is_cash_equivalent') ? " OR COALESCE(l.is_cash_equivalent, 0) = 1" : "")
+            . (column_exists('ledger_groups', 'is_cash_equivalent') ? " OR COALESCE(g.is_cash_equivalent, 0) = 1" : "")
+            . ") AS is_cash_or_bank,
             COALESCE(g.master_key, '') AS master_key,
             COALESCE(g.name, '') AS group_name,
             COALESCE(g.code, '') AS group_code

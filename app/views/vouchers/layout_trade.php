@@ -32,22 +32,10 @@ $settlementModeOptions = voucher_instrument_modes();
 $settlementModeOptions['credit'] = voucher_settlement_modes()['credit'];
 $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
 ?>
-<section class="mbw-card frm-section vch-focus">
-    <div class="vch-settlement">
-        <label class="vch-radio<?= $settlementMode === 'party' ? ' is-on' : '' ?>">
-            <input type="radio" name="settlement_mode" value="party" <?= $settlementMode === 'party' ? 'checked' : '' ?>>
-            <span><strong>Against the <?= e(strtolower((string) $spec['party_label'])) ?></strong></span>
-        </label>
-        <label class="vch-radio<?= $settlementMode === 'cash' ? ' is-on' : '' ?>">
-            <input type="radio" name="settlement_mode" value="cash" <?= $settlementMode === 'cash' ? 'checked' : '' ?>>
-            <span><strong>Straight to cash / bank</strong></span>
-        </label>
-        <label class="vch-radio<?= $settlementMode === 'split' ? ' is-on' : '' ?>">
-            <input type="radio" name="settlement_mode" value="split" <?= $settlementMode === 'split' ? 'checked' : '' ?>>
-            <span><strong>Split across several ways</strong></span>
-        </label>
-    </div>
-
+<input type="hidden" name="settlement_mode" value="<?= e($settlementMode) ?>">
+<input type="hidden" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
+<input type="hidden" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">
+<section class="mbw-card frm-section vch-focus" <?= $warehouseOptions === [] && empty($spec['needs_reason']) && $settlementMode !== 'cash' ? 'hidden' : '' ?>>
     <div class="frm-grid frm-grid-4">
         <?php // Shown for a credit document and for a split alike: a split can
               // leave part of the bill on the party's account, and that part
@@ -57,10 +45,6 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                 <option value="">Select cash / bank</option>
                 <?= $renderLedgerOptions($optionsCashBank, $settlementMode === 'cash' ? (int) ($prefill['settlement_ledger_id'] ?? 0) : 0) ?>
             </select>
-        </label>
-        <label><?= e((string) $spec['reference_label']) ?><input type="text" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>"></label>
-        <label><?= e((string) $spec['reference_date_label']) ?>
-            <input type="date" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">
         </label>
         <?php if ($warehouseOptions !== []): ?>
             <label>Warehouse
@@ -74,9 +58,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
         <?php endif; ?>
     </div>
 
-    <?php if ($partyOptions === []): ?>
-        <div class="notice">No <?= e(strtolower((string) $spec['party_label'])) ?>s are on file yet. Add one under <a href="<?= e(url('admin/accounting-parties.php')) ?>">Parties</a>, or settle this <?= e(strtolower((string) $spec['short'])) ?> straight to cash.</div>
-    <?php endif; ?>
+
 
     <?php if (!empty($spec['needs_reason'])): ?>
         <div class="frm-grid frm-grid-2">
@@ -256,7 +238,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var lastTotal = 0;
 
     function settlementMode() {
-        var checked = form.querySelector('input[name="settlement_mode"]:checked');
+        var checked = form.querySelector('input[name="settlement_mode"]');
         return checked ? checked.value : 'party';
     }
 

@@ -21,11 +21,15 @@ $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
 $hasReconColumns = column_exists('voucher_entries', 'reconciled_at');
 
+$cashAccountSql = '(COALESCE(g.is_cash_or_bank, 0) = 1'
+    . (column_exists('ledgers', 'is_cash_equivalent') ? ' OR COALESCE(l.is_cash_equivalent, 0) = 1' : '')
+    . (column_exists('ledger_groups', 'is_cash_equivalent') ? ' OR COALESCE(g.is_cash_equivalent, 0) = 1' : '') . ')';
+
 // Cash/bank ledgers for the picker.
 $ledgerStmt = db()->prepare('
     SELECT l.id, l.code, l.name
     FROM ledgers l
-    INNER JOIN ledger_groups g ON g.id = l.group_id AND COALESCE(g.is_cash_or_bank, 0) = 1
+    INNER JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id AND ' . $cashAccountSql . '
     WHERE l.company_id = :company_id
     ORDER BY l.name ASC
 ');
