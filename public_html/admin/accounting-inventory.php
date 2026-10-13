@@ -365,7 +365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'unit' => $unitName !== '' ? $unitName : 'pcs',
             'unit_id' => $unitId ?: null,
             'hs_code' => trim((string) ($_POST['hs_code'] ?? '')) ?: null,
-            'tax_rate' => max(0.0, round((float) ($_POST['tax_rate'] ?? 13), 2)),
+            'tax_rate' => (float)($existing['tax_rate'] ?? 0),
             'sales_rate' => max(0.0, round((float) ($_POST['sales_rate'] ?? 0), 2)),
             'purchase_rate' => max(0.0, round((float) ($_POST['purchase_rate'] ?? 0), 2)),
             'opening_qty' => max(0.0, round((float) ($_POST['opening_qty'] ?? 0), 3)),
@@ -373,7 +373,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // rate later — like the accounting opening balances (qty + amount).
             'opening_amount' => max(0.0, round((float) ($_POST['opening_amount'] ?? 0), 2)),
             'reorder_level' => max(0.0, round((float) ($_POST['reorder_level'] ?? 0), 3)),
-            'default_warehouse_id' => inventory_company_warehouse_id((int) ($_POST['default_warehouse_id'] ?? 0), $companyId),
+            'default_warehouse_id' => $existing['default_warehouse_id'] ?? null,
             'status' => $status,
             'notes' => $existing['notes'] ?? null,
         ];

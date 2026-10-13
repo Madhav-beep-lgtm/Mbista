@@ -155,6 +155,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
 
     $problems = [];
+    if ($voucherType === 'purchase') {
+        $warehouseCheck = db()->prepare('SELECT id FROM warehouses WHERE id = ? AND company_id = ? AND is_active = 1');
+        $warehouseCheck->execute([$warehouseId, $companyId]);
+        if ((!$isDraft || $warehouseId > 0) && !$warehouseCheck->fetchColumn()) {
+            $problems[] = 'Select an active warehouse for this purchase entry.';
+        }
+    }
     if ($narration === '') {
         $problems[] = 'Enter a narration for the voucher register.';
     }

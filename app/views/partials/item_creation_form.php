@@ -55,14 +55,12 @@
             </label>
             </div></fieldset><fieldset><legend>Rates and stock settings</legend><div class="workspace-form-grid">
             <label>HS code<input type="text" name="hs_code" value="<?= e($editItem['hs_code'] ?? '') ?>"></label>
-            <label>Tax rate %<input type="number" step="0.01" name="tax_rate" value="<?= e($editItem['tax_rate'] ?? '13.00') ?>"></label>
-            <label>Sales rate<input type="number" step="0.01" name="sales_rate" value="<?= e($editItem['sales_rate'] ?? '0.00') ?>"></label>
+            <label>Default selling rate<input type="number" step="0.01" min="0" name="sales_rate" value="<?= e($editItem['sales_rate'] ?? '0.00') ?>"></label>
             <label>Purchase rate<input type="number" step="0.01" name="purchase_rate" value="<?= e($editItem['purchase_rate'] ?? '0.00') ?>"></label>
             <label>Opening qty<input type="number" step="0.001" name="opening_qty" value="<?= e($editItem['opening_qty'] ?? '0.000') ?>"></label>
             <label>Opening value 
                 <input type="number" step="0.01" min="0" name="opening_amount" value="<?= e($editItem['opening_amount'] ?? '0.00') ?>" placeholder="qty × cost at opening"></label>
             <label>Reorder level<input type="number" step="0.001" name="reorder_level" value="<?= e($editItem['reorder_level'] ?? '0.000') ?>"></label>
-            <label>Default warehouse<select name="default_warehouse_id"><option value="0">— none —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>" <?= (int) ($editItem['default_warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e($warehouse['name'] . ($warehouse['code'] ? ' (' . $warehouse['code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
             </div></fieldset><fieldset><legend>Ledger mapping</legend><div class="workspace-form-grid">
             <?php
             // Per-item ledgers, exactly like the fixed-asset register form:

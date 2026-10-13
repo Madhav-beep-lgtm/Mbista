@@ -34,7 +34,6 @@ $stockTypes = inv_stock_types($companyId);
         </tbody></table>
     </div>
     <div id="items-panel-types" <?= !$showTypes ? 'hidden' : '' ?>>
-        <h2>Create stock type</h2>
         <form method="post" class="actions">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_stock_type">

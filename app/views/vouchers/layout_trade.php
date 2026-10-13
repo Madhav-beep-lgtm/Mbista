@@ -35,7 +35,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
 <input type="hidden" name="settlement_mode" value="<?= e($settlementMode) ?>">
 <input type="hidden" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
 <input type="hidden" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">
-<section class="frm-section vch-focus" <?= $warehouseOptions === [] && empty($spec['needs_reason']) && $settlementMode !== 'cash' ? 'hidden' : '' ?>>
+<section class="frm-section vch-focus" <?= $spec['key'] !== 'purchase' && $warehouseOptions === [] && empty($spec['needs_reason']) && $settlementMode !== 'cash' ? 'hidden' : '' ?>>
     <div class="frm-grid frm-grid-4">
         <?php // Shown for a credit document and for a split alike: a split can
               // leave part of the bill on the party's account, and that part
@@ -46,10 +46,10 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                 <?= $renderLedgerOptions($optionsCashBank, $settlementMode === 'cash' ? (int) ($prefill['settlement_ledger_id'] ?? 0) : 0) ?>
             </select>
         </label>
-        <?php if ($warehouseOptions !== []): ?>
+        <?php if ($warehouseOptions !== [] || $spec['key'] === 'purchase'): ?>
             <label>Warehouse
-                <select name="warehouse_id" title="Where the goods <?= $stockDirection === 'in' ? 'landed' : 'left from' ?>. Leave blank to use each item's own default.">
-                    <option value="0">Each item's own default</option>
+                <select name="warehouse_id" <?= $spec['key'] === 'purchase' ? 'required' : '' ?>>
+                    <option value="">Select warehouse</option>
                     <?php foreach ($warehouseOptions as $warehouse): ?>
                         <option value="<?= (int) $warehouse['id'] ?>" <?= (int) ($prefill['warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e((string) $warehouse['name']) ?></option>
                     <?php endforeach; ?>

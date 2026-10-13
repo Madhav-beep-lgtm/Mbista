@@ -18,6 +18,14 @@ foreach ([['unit_name'=>''], ['unit_name'=>'piece'], ['unit_name'=>str_repeat('x
     assert_items($rejected, 'Invalid unit accepted');
 }
 $form = file_get_contents(__DIR__ . '/../app/views/partials/item_creation_form.php');
+foreach (['name="tax_rate"', 'name="default_warehouse_id"', 'name="notes"'] as $removed) {
+    assert_items(!str_contains($form, $removed), 'Removed item field returned: ' . $removed);
+}
+assert_items(str_contains($form, 'Default selling rate'), 'Selling rate must be labelled as a default');
+$tradeForm = file_get_contents(__DIR__ . '/../app/views/vouchers/layout_trade.php');
+assert_items(str_contains($tradeForm, 'name="value_rate[]"') && str_contains($tradeForm, "option.getAttribute('data-rate')"), 'Sales rate must default into editable transaction field');
+$voucherForm = file_get_contents(__DIR__ . '/../public_html/admin/voucher-form.php');
+assert_items(str_contains($voucherForm, 'Select an active warehouse for this purchase entry.'), 'Purchase warehouse validation missing');
 foreach (['item_map[', 'purchases', 'sales_revenue', 'unit_id', 'inventory_asset', 'opening_equity'] as $required) {
     assert_items(str_contains($form, $required), 'Required item setting missing: ' . $required);
 }
