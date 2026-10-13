@@ -16,6 +16,7 @@ $companiesRoute = 'platform/companies.php';
 accounting_module_repair_database();
 $pageTitle = 'Companies & Fiscal Years';
 $pageSubtitle = 'Create companies, manage group relationships, and set up fiscal years.';
+$pageBreadcrumb = [['Platform', 'platform/index.php']];
 $currentAdmin = current_user();
 $parentColumnExists = false;
 if (table_exists('companies')) {
@@ -153,6 +154,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $companies = $parentColumnExists
     ? db()->query('SELECT c.*, p.name AS parent_company_name FROM companies c LEFT JOIN companies p ON p.id = c.parent_company_id ORDER BY c.name ASC')->fetchAll()
     : companies_list(false);
+$groupCompanies = array_values(array_filter(
+    $companies,
+    static fn (array $company): bool => (int) ($company['is_client_company'] ?? 0) !== 1
+));
 $fiscalYears = db()->query('SELECT fy.*, c.name AS company_name FROM fiscal_years fy INNER JOIN companies c ON c.id = fy.company_id ORDER BY c.name ASC, fy.start_date DESC')->fetchAll();
 
 $bankAccounts = table_exists('company_bank_accounts')
@@ -177,10 +182,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Name<input type="text" name="name" required></label>
             <label>Code<input type="text" name="code" maxlength="20" required></label>
             <?php if ($parentColumnExists): ?>
-                <label>Parent company (optional)
+                <label>Company group (optional)
                     <select name="parent_company_id">
-                        <option value="">Independent / parent company</option>
-                        <?php foreach ($companies as $company): ?>
+                        <option value="">Independent company</option>
+                        <?php foreach ($groupCompanies as $company): ?>
                             <option value="<?= e((int) $company['id']) ?>"><?= e($company['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -235,7 +240,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?php if (!empty($company['parent_company_name'])): ?>
                                 Subsidiary of <?= e($company['parent_company_name']) ?>
                             <?php else: ?>
-                                Independent / parent
+                                Independent company
                             <?php endif; ?>
                         </td>
                     <?php endif; ?>

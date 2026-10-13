@@ -289,7 +289,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
 <?php require __DIR__ . '/sidebar_boot.php'; ?>
 <div class="admin-shell">
     <aside class="admin-sidebar" id="adminSidebar">
-        <a class="brand brand-admin" href="<?= e(url('admin/accounting-dashboard.php')) ?>">
+        <a class="brand brand-admin" href="<?= e(url(!empty($platformShell) ? 'platform/index.php' : 'admin/accounting-dashboard.php')) ?>">
             <?= brand_logo('dark', 'mbw-logo mbw-logo-sidebar') ?>
         </a>
         <?php // The platform is above any one company, so naming a "current
@@ -326,6 +326,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'clients.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/clients.php')) ?>"><?= icon('clients') ?>Clients</a>
             <a class="<?= $headerScript === 'staff.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/staff.php')) ?>"><?= icon('users') ?>Staff</a>
             <a class="<?= $headerScript === 'work.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/work.php')) ?>"><?= icon('tasks') ?>Work Portal</a>
+            <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/insights.php')) ?>"><?= icon('insights') ?>Website Insights</a>
             <?php // Report emails are not a platform matter. A schedule belongs
                   // to the company whose figures it sends, so it lives in that
                   // company's Settings — reached by opening the company, which
@@ -459,10 +460,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             </div>
 
-            <?php if ($headerCompanyCode === 'MBAACA'): ?>
-                <span class="admin-nav-group">Website</span>
-                <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/insights.php')) ?>"><?= icon('insights') ?>Website Insights</a>
-            <?php endif; ?>
             <?php endif; ?>
         </nav>
     </aside>
@@ -478,18 +475,21 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             }
             echo '<strong>' . e($pageTitle) . '</strong>';
         } else {
-            echo '<a href="' . e(url('admin/index.php')) . '">Dashboard</a> <span aria-hidden="true">&#8250;</span> <strong>' . e($pageTitle) . '</strong>';
+            echo '<a href="' . e(url(!empty($platformShell) ? 'platform/index.php' : 'admin/index.php')) . '">' . (!empty($platformShell) ? 'Platform' : 'Dashboard') . '</a> <span aria-hidden="true">&#8250;</span> <strong>' . e($pageTitle) . '</strong>';
         }
         $headerBreadcrumbHtml = (string) ob_get_clean();
         ?>
         <header class="admin-topbar">
             <?php require __DIR__ . '/sidebar_toggle.php'; ?>
+            <?php if (empty($platformShell)): ?>
             <form method="get" action="<?= e(url('search.php')) ?>" class="admin-topbar-search" role="search">
                 <span class="mbw-search-glyph"><?= icon('search') ?></span>
                 <label class="sr-only" for="admin-global-search">Search</label>
                 <input id="admin-global-search" type="search" name="q" value="<?= e((string) ($_GET['q'] ?? '')) ?>">
                 <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
             </form>
+            <?php endif; ?>
+            <?php if (empty($platformShell)): ?>
             <a class="admin-icon-button" href="<?= e(url('admin/reports-center.php')) ?>" aria-label="Open Reports Center" title="Reports Center"><?= icon('analytics') ?></a>
             <?php /* Current company is already displayed persistently in the
                       sidebar portal card, so it is not duplicated here. */ ?>
@@ -546,6 +546,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 })();
                 </script>
             <?php endif; ?>
+            <?php endif; ?>
             <?php $headerBsToday = ad_to_bs(date('Y-m-d')); ?>
             <div class="topbar-bs-calendar">
                 <button type="button" class="topbar-bs-date" data-bs-calendar-toggle data-ad-today="<?= e(date('Y-m-d')) ?>" aria-expanded="false" title="Open Nepali calendar">
@@ -577,7 +578,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     </button>
                 </form>
 
-                <?php if (!$headerIsCustomer): ?>
+                <?php if (!$headerIsCustomer && empty($platformShell)): ?>
                 <?php if ($headerAltioraCompany): ?>
                     <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="topbar-icon-form">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -605,7 +606,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                     </form>
                 <?php endif; ?>
                 <?php endif; ?>
-                <?php include __DIR__ . '/attention_bell.php'; ?>
+                <?php if (empty($platformShell)): ?>
+                    <?php include __DIR__ . '/attention_bell.php'; ?>
+                <?php endif; ?>
                 <?php if (!$headerIsCustomer): ?>
                     <?php
                     $headerUserName = trim((string) ($currentUser['name'] ?? 'Super Admin')) ?: 'Super Admin';
@@ -626,9 +629,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                                 <span class="admin-profile-avatar is-large"><?= e($headerUserInitials) ?></span>
                                 <strong><?= e($headerUserName) ?></strong>
                             </div>
-                            <a href="<?= e(url('admin/profile.php')) ?>"><?= icon('profile') ?><strong>My profile</strong></a>
-                            <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><strong>Users</strong></a>
-                            <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><strong>Settings</strong></a>
+                            <a href="<?= e(url(!empty($platformShell) ? 'platform/profile.php' : 'admin/profile.php')) ?>"><?= icon('profile') ?><strong>My profile</strong></a>
+                            <a href="<?= e(url(!empty($platformShell) ? 'platform/users.php' : 'admin/users.php')) ?>"><?= icon('users') ?><strong>Users</strong></a>
+                            <a href="<?= e(url(!empty($platformShell) ? 'platform/settings.php' : 'admin/settings.php')) ?>"><?= icon('settings') ?><strong>Settings</strong></a>
                             <a class="is-logout" href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?><strong>Logout</strong></a>
                         </div>
                     </details>

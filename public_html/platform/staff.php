@@ -56,7 +56,7 @@ $clientsFor = static function (int $staffUserId): array {
 $platformShell = true;
 $pageTitle = 'Staff';
 $pageBreadcrumb = [['Platform', 'platform/index.php']];
-$pageHeadActions = '<a class="button secondary" href="' . e(url('admin/users.php')) . '">Manage users</a>';
+$pageHeadActions = '<a class="button secondary" href="' . e(url('platform/users.php')) . '">Manage users</a>';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 
@@ -90,7 +90,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?= $clients === [] ? '—' : e(implode(', ', array_slice($clients, 0, 3)) . (count($clients) > 3 ? ' +' . (count($clients) - 3) . ' more' : '')) ?>
                         </td>
                         <td><span class="mbw-pill <?= $isActive ? 'tone-green' : 'tone-gray' ?>"><?= $isActive ? 'Active' : 'Inactive' ?></span></td>
-                        <td><a class="button secondary" href="<?= e(url('admin/users.php?view=' . (int) $member['id'])) ?>">Open</a></td>
+                        <td><a class="button secondary" href="<?= e(url('platform/users.php?view=' . (int) $member['id'])) ?>">Open</a></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

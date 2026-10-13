@@ -837,6 +837,24 @@ function url(string $path = ''): string
 {
     $path = ltrim($path, '/');
 
+    // Platform wrappers reuse mature screens without allowing their links or
+    // POST redirects to fall back into a company's books URL.
+    if (defined('PLATFORM_WORK_PAGE') && str_starts_with($path, 'admin/workspace.php')) {
+        $path = 'platform/work.php' . substr($path, strlen('admin/workspace.php'));
+    }
+    if (defined('PLATFORM_INSIGHTS_PAGE') && str_starts_with($path, 'admin/insights.php')) {
+        $path = 'platform/insights.php' . substr($path, strlen('admin/insights.php'));
+    }
+    if (defined('PLATFORM_USERS_PAGE') && str_starts_with($path, 'admin/users.php')) {
+        $path = 'platform/users.php' . substr($path, strlen('admin/users.php'));
+    }
+    if (defined('PLATFORM_PROFILE_PAGE') && str_starts_with($path, 'admin/profile.php')) {
+        $path = 'platform/profile.php' . substr($path, strlen('admin/profile.php'));
+    }
+    if (defined('PLATFORM_SETTINGS_PAGE') && str_starts_with($path, 'admin/settings.php')) {
+        $path = 'platform/settings.php' . substr($path, strlen('admin/settings.php'));
+    }
+
     if (APP_URL !== '') {
         return APP_URL . ($path !== '' ? '/' . $path : '');
     }

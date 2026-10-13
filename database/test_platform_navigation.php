@@ -7,6 +7,8 @@ $clients = (string) file_get_contents($root . '/public_html/platform/clients.php
 $companies = (string) file_get_contents($root . '/public_html/admin/companies.php');
 $platformCompanies = (string) file_get_contents($root . '/public_html/platform/companies.php');
 $helpers = (string) file_get_contents($root . '/app/helpers.php');
+$platformWork = (string) file_get_contents($root . '/public_html/platform/work.php');
+$platformInsights = (string) file_get_contents($root . '/public_html/platform/insights.php');
 $failures = 0;
 
 $ok = static function (bool $condition, string $label) use (&$failures): void {
@@ -26,6 +28,8 @@ $ok(str_contains($platformNav, 'platform/clients.php') && str_contains($platform
     'Platform navigation owns the client directory');
 $ok(str_contains($platformNav, 'platform/work.php') && str_contains($platformNav, '>Work Portal</a>'),
     'Platform navigation owns the Work Portal');
+$ok(str_contains($platformNav, 'platform/insights.php') && str_contains($platformNav, '>Website Insights</a>'),
+    'Platform navigation owns Website Insights');
 $ok(substr_count($header, '>All companies</a>') === 1
     && strpos($header, '>All companies</a>') < strpos($header, '>Admin Overview</a>'),
     'All companies is the first company-shell destination for Super Admin');
@@ -45,6 +49,12 @@ $ok(str_contains($platformCompanies, "../admin/companies.php")
 $ok(!str_contains($companies, 'name="admin_pin"')
     && !str_contains($helpers, "redirect('admin/company-pin.php?company_id='"),
     'Authorized company opening has no PIN step');
+$ok(str_contains($platformWork, "define('PLATFORM_WORK_PAGE', true)")
+    && str_contains($helpers, "'platform/work.php' . substr"),
+    'Work Portal links and redirects retain the platform URL');
+$ok(str_contains($platformInsights, "define('PLATFORM_INSIGHTS_PAGE', true)")
+    && str_contains($helpers, "'platform/insights.php' . substr"),
+    'Website Insights links and redirects retain the platform URL');
 
 echo PHP_EOL . ($failures === 0 ? 'PASS' : 'FAIL') . ": platform navigation\n";
 exit($failures === 0 ? 0 : 1);

@@ -14,5 +14,6 @@ declare(strict_types=1);
  * this does is own the URL and ask for the platform navigation.
  */
 
+define('PLATFORM_SETTINGS_PAGE', true);
 $platformShell = true;
 require __DIR__ . '/../admin/settings.php';

@@ -99,7 +99,7 @@ include __DIR__ . '/../app/views/partials/header.php';
 
                             <div class="portal-card-topline">
                                 <span class="portal-icon-shell portal-icon-shell-blue" aria-hidden="true"><?= icon('companies') ?></span>
-                                <span class="portal-type-pill portal-type-pill-blue">Parent company</span>
+                                <span class="portal-type-pill portal-type-pill-blue">Company group</span>
                             </div>
 
                             <div class="portal-card-content">

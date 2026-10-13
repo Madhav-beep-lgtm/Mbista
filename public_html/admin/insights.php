@@ -3,14 +3,15 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 
 require_admin();
-require_company_context();
-
-// Website content is published from the M.Bista superadmin portal only.
-$company = current_company();
-if ((string) ($company['code'] ?? '') !== 'MBAACA') {
-    flash('error', 'Website insights are published from the M.Bista superadmin portal only.');
+if (!user_is_super_admin()) {
+    flash('error', 'Website insights are available to the platform administrator only.');
     redirect('admin/index.php');
 }
+if (!defined('PLATFORM_INSIGHTS_PAGE')) {
+    redirect('platform/insights.php');
+}
+
+$platformShell = true;
 
 // Self-repair: the page works before migration 032 has been run manually.
 db()->exec("CREATE TABLE IF NOT EXISTS `insight_posts` (
