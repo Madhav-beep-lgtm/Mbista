@@ -5,7 +5,7 @@ body :is(div,section,header,footer,main,article,aside,p,h1,h2,h3,span,table,thea
 body table { width:100%; border-collapse:collapse !important; border:1px solid #000 !important; }
 body table th, body table td { border:1px solid #000 !important; }
 body th, body .total-row, body .rpt-total { font-weight:700; }
-body :is(.rpt-row-bold, .rpt-row-section, .coa-master-row, .coa-group-row) td { font-weight:700; }
+body :is(.rpt-row-bold, .rpt-row-section, .rpt-row-total, .coa-master-row, .coa-group-row) td { font-weight:700; }
 body tr[data-ledger-id] td { font-weight:400; }
 thead { display:table-header-group; }
 tr { break-inside:avoid; }

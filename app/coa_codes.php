@@ -64,7 +64,7 @@ function coa_code_plan(array $groups, array $ledgers): array
             throw new RuntimeException('Missing parent or excessive group depth at group ID ' . $group['id']);
         }
         if (!isset(COA_NATURE_CODES[ledger_master_nature((string) $group['master_key']) ?? ''])) {
-            throw new RuntimeException('Unclassified group ID ' . $group['id']);
+            throw new RuntimeException('Unclassified group ID ' . $group['id'] . ' (company ' . ($group['company_id'] ?? '?') . ', name ' . json_encode($group['name'] ?? '') . ', master_key ' . json_encode($group['master_key']) . '). No codes changed. Inspect with --inspect-group=' . $group['id'] . ' before assigning its accounting classification.');
         }
     }
     foreach (COA_NATURE_CODES as $nature => $master) {

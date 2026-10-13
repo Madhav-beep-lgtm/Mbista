@@ -21,9 +21,9 @@ declare(strict_types=1);
  * a ledger may name a group that appears further down the sheet — so commit
  * creates every group first and only then hangs ledgers off them.
  *
- * On codes: they are optional. The app generates structured codes (nature digit
- * → group → ledger) and will do so for any row that leaves the column blank, so
- * a shop that has never used codes can upload names alone.
+ * Codes in a sheet are optional parent references. Saved codes always use
+ * M.GG.SS.LLL.UU. Parent Code accepts a group or ledger code/exact name;
+ * subgroup and subledger links are validated before anything is committed.
  *
  * On opening balances: this general ledger is PERPETUAL — an opening balance is
  * not a field on the ledger, it is a posted journal against Opening Balance
@@ -36,12 +36,13 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/export_engine.php';
+require_once __DIR__ . '/coa_import_hierarchy.php';
 
 /** A chart is big, but not unbounded — this is a guard against a runaway file. */
 const COA_IMPORT_MAX_ROWS = 5000;
 
 /** The column order of both the template and the Export COA file. */
-const COA_IMPORT_COLUMNS = ['Level', 'Code', 'Name', 'Master', 'Type', 'Group Code', 'Opening Dr', 'Opening Cr', 'Status'];
+const COA_IMPORT_COLUMNS = ['Level', 'Code', 'Name', 'Master', 'Nature', 'Parent Code', 'Opening Dr', 'Opening Cr', 'Status', 'PAN Number'];
 
 const COA_IMPORT_LEDGER_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'];
 
@@ -52,15 +53,15 @@ const COA_IMPORT_LEDGER_TYPES = ['asset', 'liability', 'equity', 'revenue', 'exp
  */
 function coa_import_template_rows(): array
 {
+    // Code is a reference for parents in this upload; saved codes are generated.
     return [
         COA_IMPORT_COLUMNS,
-        ['Group', '', 'Current Assets', 'current_asset', '', '', '', '', ''],
-        ['Ledger', '', 'Cash in Hand', '', 'asset', 'Current Assets', '150000.00', '', ''],
-        ['Ledger', '', 'Bank — Current A/c', '', 'asset', 'Current Assets', '45000.00', '', ''],
-        ['Group', '', 'Capital Account', 'equity', '', '', '', '', ''],
-        ['Ledger', '', 'Proprietor Capital', '', 'equity', 'Capital Account', '', '195000.00', ''],
-        ['Group', '', 'Indirect Expenses', 'indirect_expense', '', '', '', '', ''],
-        ['Ledger', '', 'Office Rent', '', 'expense', 'Indirect Expenses', '', '', ''],
+        ['Group','','Example Asset Group','current_asset','','','','','Active',''],
+        ['Subgroup','','Example Asset Subgroup','','','Example Asset Group','','','Active',''],
+        ['Ledger','','Example Customer','','asset','Example Asset Subgroup','','','Active',''],
+        ['Subledger','','Example Customer Branch','','asset','Example Customer','','','Active',''],
+        ['Group','','Example Capital Group','equity','','','','','Active',''],
+        ['Ledger','','Example Capital','','equity','Example Capital Group','','','Active',''],
     ];
 }
 
@@ -146,7 +147,7 @@ function coa_import_ledger_index(int $companyId): array
  *                    group code, opening dr, opening cr]]
  * @return array judged entries, one per row that is not padding
  */
-function coa_import_judge(int $companyId, array $rows): array
+function coa_import_judge_flat(int $companyId, array $rows): array
 {
     $masters = ledger_masters();
     $groupLookup = coa_import_group_lookup($companyId);
@@ -317,7 +318,7 @@ function coa_import_judge(int $companyId, array $rows): array
             $entry['code'] = $rawCode;
 
             $existing = $groupLookup['code:' . $upperCode] ?? null;
-            if ($rawCode === '') {
+            if ($existing === null) {
                 $existing = $groupLookup['name:' . mb_strtolower($rawName)] ?? null;
             }
             if ($existing !== null) {
@@ -405,7 +406,7 @@ function coa_import_judge(int $companyId, array $rows): array
         }
         // Scoped to the group, because the same account name under two different
         // headings is legitimate — "Opening Stock" can sit in more than one place.
-        if ($rawCode === '' && $entry['group_id'] !== null
+        if ($entry['group_id'] !== null
             && isset($ledgerIndex['names'][$entry['group_id'] . '|' . mb_strtolower($rawName)])) {
             $entry['status'] = 'skipped';
             $entry['error'] = 'A ledger called "' . $rawName . '" already exists in this group — it was left as it is.';
@@ -494,13 +495,14 @@ function coa_import_stage(int $companyId, ?int $fiscalYearId, int $userId, strin
     $importId = (int) db()->lastInsertId();
 
     $insert = db()->prepare('INSERT INTO coa_import_rows (import_id, company_id, source_row_no, level,
-            raw_level, raw_code, raw_name, raw_master, raw_type, raw_group_code, raw_opening_dr, raw_opening_cr,
+            raw_level, raw_code, raw_name, raw_master, raw_type, raw_group_code, raw_opening_dr, raw_opening_cr, raw_pan_no,
             group_id, code, name, master_key, ledger_type, parent_code, opening_dr, opening_cr, status, error_text)
-        VALUES (:imp, :cid, :n, :level, :rlevel, :rcode, :rname, :rmaster, :rtype, :rgroup, :rdr, :rcr,
+        VALUES (:imp, :cid, :n, :level, :rlevel, :rcode, :rname, :rmaster, :rtype, :rgroup, :rdr, :rcr, :pan,
             :gid, :code, :name, :mk, :ltype, :parent, :dr, :cr, :status, :err)');
     foreach ($staged as $entry) {
         $insert->execute([
             'imp' => $importId, 'cid' => $companyId, 'n' => $entry['n'], 'level' => $entry['level'],
+            'pan' => $entry['raw_pan_no'],
             'rlevel' => mb_substr($entry['raw_level'], 0, 60), 'rcode' => mb_substr($entry['raw_code'], 0, 120),
             'rname' => mb_substr($entry['raw_name'], 0, 255), 'rmaster' => mb_substr($entry['raw_master'], 0, 120),
             'rtype' => mb_substr($entry['raw_type'], 0, 60), 'rgroup' => mb_substr($entry['raw_group_code'], 0, 120),
@@ -557,6 +559,7 @@ function coa_import_revalidate(int $companyId, int $importId): void
             (string) $row['raw_level'], (string) $row['raw_code'], (string) $row['raw_name'],
             (string) $row['raw_master'], (string) $row['raw_type'], (string) $row['raw_group_code'],
             (string) $row['raw_opening_dr'], (string) $row['raw_opening_cr'],
+            '', (string) ($row['raw_pan_no'] ?? ''),
         ]];
     }
 
@@ -619,7 +622,7 @@ function coa_import_update_row(int $companyId, int $rowId, array $input): array
 
     db()->prepare('UPDATE coa_import_rows SET raw_level = :level, raw_code = :code, raw_name = :name,
             raw_master = :master, raw_type = :type, raw_group_code = :grp,
-            raw_opening_dr = :dr, raw_opening_cr = :cr
+            raw_opening_dr = :dr, raw_opening_cr = :cr, raw_pan_no = :pan
         WHERE id = :id AND company_id = :cid')
         ->execute([
             'level' => mb_substr($keep('level', 'raw_level'), 0, 60),
@@ -630,6 +633,7 @@ function coa_import_update_row(int $companyId, int $rowId, array $input): array
             'grp' => mb_substr($keep('group_code', 'raw_group_code'), 0, 120),
             'dr' => mb_substr($keep('opening_dr', 'raw_opening_dr'), 0, 60),
             'cr' => mb_substr($keep('opening_cr', 'raw_opening_cr'), 0, 60),
+            'pan' => mb_substr($keep('pan_no', 'raw_pan_no'), 0, 120),
             'id' => $rowId, 'cid' => $companyId,
         ]);
 
@@ -744,18 +748,33 @@ function coa_import_commit(int $companyId, int $importId, int $userId = 0): arra
     try {
         $markRow = db()->prepare("UPDATE coa_import_rows SET status = 'committed', group_id = :gid, ledger_id = :lid,
                 code = :code WHERE id = :id");
+        db()->prepare('SELECT id FROM companies WHERE id = ? FOR UPDATE')->execute([$companyId]);
+        $lockedBatch = db()->prepare('SELECT status FROM coa_imports WHERE id = ? AND company_id = ? FOR UPDATE');
+        $lockedBatch->execute([$importId, $companyId]);
+        if ($lockedBatch->fetchColumn() !== 'staged') throw new RuntimeException('This upload is no longer staged.');
+        coa_import_revalidate($companyId, $importId);
+        $freshBatch = coa_import_batch($companyId, $importId);
+        if ((int)$freshBatch['error_count'] > 0 || coa_import_balance_error($freshBatch) !== null) throw new RuntimeException('Correct all upload errors and balance the opening amounts before committing.');
+        $rows = coa_import_rows($companyId, $importId);
+        $order = ['group'=>0,'subgroup'=>1,'ledger'=>2,'subledger'=>3];
+        usort($rows, static fn($a,$b) => ($order[strtolower($a['raw_level'])] ?? 4) <=> ($order[strtolower($b['raw_level'])] ?? 4));
 
         // ---- Pass 1: groups ------------------------------------------------
-        $insertGroup = db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, is_cash_or_bank, is_system, is_active)
-            VALUES (:cid, :code, :name, :mk, 0, 0, 1)');
+        $insertGroup = db()->prepare('INSERT INTO ledger_groups (company_id, code, name, master_key, parent_group_id, is_cash_or_bank, is_system, is_active)
+            VALUES (:cid, :code, :name, :mk, :parent, 0, 0, 1)');
         foreach ($rows as $row) {
             if ((string) $row['level'] !== 'group' || (string) $row['status'] !== 'ready') {
                 continue;
             }
             $masterKey = (string) $row['master_key'];
-            $code = coa_next_group_code($companyId, $masterKey);
+            $parentId = null;
+            if (strtolower($row['raw_level']) === 'subgroup') {
+                $parentId = $resolved['code:' . mb_strtoupper($row['parent_code'])] ?? $resolved['name:' . mb_strtolower($row['parent_code'])] ?? null;
+                if (!$parentId) throw new RuntimeException('Subgroup parent was not found.');
+            }
+            $code = coa_next_group_code($companyId, $masterKey, $parentId);
             $insertGroup->execute(['cid' => $companyId, 'code' => $code,
-                'name' => (string) $row['name'], 'mk' => $masterKey]);
+                'name' => (string) $row['name'], 'mk' => $masterKey, 'parent' => $parentId]);
             $groupId = (int) db()->lastInsertId();
             $groupsMade++;
             $resolved['code:' . mb_strtoupper($code)] = $groupId;
@@ -765,8 +784,15 @@ function coa_import_commit(int $companyId, int $importId, int $userId = 0): arra
         }
 
         // ---- Pass 2: ledgers -----------------------------------------------
-        $insertLedger = db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, is_system, status)
-            VALUES (:cid, :gid, :code, :name, :type, 0, 'active')");
+        $insertLedger = db()->prepare("INSERT INTO ledgers (company_id, group_id, code, name, type, parent_ledger_id, pan_no, is_system, status)
+            VALUES (:cid, :gid, :code, :name, :type, :parent, :pan, 0, 'active')");
+        $ledgerParents = [];
+        $parentStmt = db()->prepare('SELECT id,code,name,group_id FROM ledgers WHERE company_id = ? AND parent_ledger_id IS NULL');
+        $parentStmt->execute([$companyId]);
+        foreach ($parentStmt->fetchAll(PDO::FETCH_ASSOC) as $p) {
+            $ledgerParents[mb_strtolower($p['code'])] = $p;
+            $ledgerParents[mb_strtolower($p['name'])] ??= $p;
+        }
         $openings = [];
         foreach ($rows as $row) {
             if ((string) $row['level'] !== 'ledger' || (string) $row['status'] !== 'ready') {
@@ -774,6 +800,13 @@ function coa_import_commit(int $companyId, int $importId, int $userId = 0): arra
             }
             $parent = (string) $row['parent_code'];
             $groupId = (int) ($row['group_id'] ?? 0);
+            $parentId = null;
+            if (strtolower($row['raw_level']) === 'subledger') {
+                $parentRow = $ledgerParents[mb_strtolower($parent)] ?? null;
+                if (!$parentRow) throw new RuntimeException('Subledger parent was not found.');
+                $parentId = (int)$parentRow['id'];
+                $groupId = (int)$parentRow['group_id'];
+            }
             if ($groupId <= 0) {
                 $groupId = (int) ($resolved['code:' . mb_strtoupper($parent)]
                     ?? $resolved['name:' . mb_strtolower($parent)] ?? 0);
@@ -784,10 +817,16 @@ function coa_import_commit(int $companyId, int $importId, int $userId = 0): arra
                 throw new RuntimeException('Row ' . $row['source_row_no'] . ': the group "' . $parent
                     . '" no longer exists. Upload the sheet again so it can be re-checked.');
             }
-            $code = coa_next_ledger_code($companyId, $groupId, null, (string) $row['ledger_type']);
+            $code = coa_next_ledger_code($companyId, $groupId, $parentId, (string) $row['ledger_type']);
             $insertLedger->execute(['cid' => $companyId, 'gid' => $groupId, 'code' => $code,
-                'name' => (string) $row['name'], 'type' => (string) $row['ledger_type']]);
+                'name' => (string) $row['name'], 'type' => (string) $row['ledger_type'], 'parent' => $parentId, 'pan' => trim((string)$row['raw_pan_no']) ?: null]);
             $ledgerId = (int) db()->lastInsertId();
+            if ($parentId === null) {
+                $parentRow = ['id'=>$ledgerId,'group_id'=>$groupId];
+                $ledgerParents[mb_strtolower($row['name'])] = $parentRow;
+                $ledgerParents[mb_strtolower($code)] = $parentRow;
+                if ($row['raw_code'] !== '') $ledgerParents[mb_strtolower($row['raw_code'])] = $parentRow;
+            }
             $ledgersMade++;
             $markRow->execute(['gid' => $groupId, 'lid' => $ledgerId, 'code' => $code, 'id' => (int) $row['id']]);
 

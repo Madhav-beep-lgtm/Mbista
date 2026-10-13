@@ -966,7 +966,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <span class="mbw-chip is-square tone-green"><?= icon('reports') ?></span>
             <div><strong>Financial Reports</strong></div>
         </a>
-        <a class="mbw-qa" href="<?= e(url('admin/chart-ledgers.php')) ?>">
+        <a class="mbw-qa" href="<?= e(url('admin/create-account.php')) ?>">
             <span class="mbw-chip is-square tone-teal"><?= icon('documents') ?></span>
             <div><strong>Add Ledger</strong></div>
         </a>

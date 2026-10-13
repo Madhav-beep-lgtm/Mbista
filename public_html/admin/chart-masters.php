@@ -30,8 +30,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <nav class="mbw-tabbar" aria-label="Chart of accounts sections">
     <a class="mbw-tab" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('tree') ?>Hierarchy View</a>
     <a class="mbw-tab is-active" href="<?= e(url('admin/chart-masters.php')) ?>"><?= icon('layers') ?>Masters</a>
-    <a class="mbw-tab" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('teams') ?>Groups</a>
-    <a class="mbw-tab" href="<?= e(url('admin/chart-ledgers.php')) ?>"><?= icon('journal') ?>Ledgers</a>
+    <a class="mbw-tab" href="<?= e(url('admin/chart-of-accounts.php?view=groups')) ?>"><?= icon('teams') ?>Groups</a>
+    <a class="mbw-tab" href="<?= e(url('admin/chart-of-accounts.php?view=ledgers')) ?>"><?= icon('journal') ?>Ledgers</a>
     <a class="mbw-tab" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><?= icon('settings') ?>Posting Accounts</a>
     <a class="mbw-tab" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Log</a>
 </nav>

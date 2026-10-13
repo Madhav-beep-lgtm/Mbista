@@ -5,6 +5,7 @@ function accounting_repair_account_creation_schema(): void
 {
         accounting_repair_add_column('ledger_groups', 'parent_group_id', '`parent_group_id` INT UNSIGNED DEFAULT NULL');
         accounting_repair_add_column('ledgers', 'parent_ledger_id', '`parent_ledger_id` INT UNSIGNED DEFAULT NULL');
+        accounting_repair_add_column('ledgers', 'pan_no', '`pan_no` VARCHAR(60) DEFAULT NULL');
         accounting_repair_add_index('ledgers', 'idx_ledgers_parent', 'KEY `idx_ledgers_parent` (`parent_ledger_id`)');
         accounting_repair_add_constraint('ledgers', 'fk_ledgers_parent', 'CONSTRAINT `fk_ledgers_parent` FOREIGN KEY (`parent_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE RESTRICT');
         foreach (['ledgers', 'ledger_groups'] as $table) {
@@ -2689,6 +2690,7 @@ function accounting_module_repair_database(): array
     $run('Chart of accounts import staging (migration 104)', static function (): void {
         accounting_repair_run_migration_file('104_coa_import.sql',
             ['coa_imports', 'coa_import_rows']);
+        accounting_repair_add_column('coa_import_rows', 'raw_pan_no', '`raw_pan_no` VARCHAR(120) DEFAULT NULL');
     });
 
     $run('Jewellery tag printing settings (migration 105)', static function (): void {

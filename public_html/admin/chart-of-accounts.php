@@ -57,15 +57,15 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         fputcsv($out, ['Master', coa_code_format($digit), $nature === 'revenue' ? 'Income' : ucfirst($nature), '', $nature, '', '', '', 'Active'], ',', '"', '\\');
     }
     foreach ($groups as $g) {
-        fputcsv($out, ['Group', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', '', '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive')], ',', '"', '\\');
+        fputcsv($out, [empty($g['parent_group_id']) ? 'Group' : 'Subgroup', $g['code'], $g['name'], $g['master_key'], ledger_master_nature((string) $g['master_key']) ?? '', $groupsById[(int)($g['parent_group_id'] ?? 0)]['code'] ?? '', '', '', ((int) $g['is_active'] === 1 ? 'Active' : 'Inactive'), ''], ',', '"', '\\');
     }
     // Stream the potentially large ledger set instead of retaining it in PHP
     // memory. CSV responses are consumed one row at a time by the browser.
-    $exportLedgers = db()->prepare('SELECT * FROM ledgers WHERE company_id = :cid ORDER BY code ASC');
+    $exportLedgers = db()->prepare('SELECT l.*, p.code AS parent_code FROM ledgers l LEFT JOIN ledgers p ON p.id = l.parent_ledger_id AND p.company_id = l.company_id WHERE l.company_id = :cid ORDER BY l.code ASC');
     $exportLedgers->execute(['cid' => $companyId]);
     while ($l = $exportLedgers->fetch(PDO::FETCH_ASSOC)) {
         $g = $groupsById[(int) ($l['group_id'] ?? 0)] ?? null;
-        fputcsv($out, ['Ledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $g['code'] ?? '', '', '', ucfirst((string) $l['status'])], ',', '"', '\\');
+        fputcsv($out, [empty($l['parent_ledger_id']) ? 'Ledger' : 'Subledger', $l['code'], $l['name'], $g['master_key'] ?? '', $l['type'], $l['parent_code'] ?? $g['code'] ?? '', '', '', ucfirst((string) $l['status']), $l['pan_no'] ?? ''], ',', '"', '\\');
     }
     fclose($out);
     exit;
@@ -119,7 +119,7 @@ if (($_GET['import_template'] ?? '') !== '') {
     if ((string) $_GET['import_template'] === 'csv') {
         export_csv('chart-of-accounts-template.csv', $tplRows);
     }
-    export_xlsx('chart-of-accounts-template.xlsx', $tplRows, 'Chart of Accounts');
+    export_xlsx('chart-of-accounts-template.xlsx', $tplRows, 'Chart of Accounts', [], ['column_formats'=>array_fill(0, count(COA_IMPORT_COLUMNS), 'text')]);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string) ($_POST['action']
                 'group_code' => (string) ($_POST['group_code'] ?? ''),
                 'opening_dr' => (string) ($_POST['opening_dr'] ?? ''),
                 'opening_cr' => (string) ($_POST['opening_cr'] ?? ''),
+                'pan_no' => (string) ($_POST['pan_no'] ?? ''),
             ]);
             if (!$rowResult['ok']) {
                 throw new RuntimeException((string) $rowResult['error']);
@@ -342,7 +343,7 @@ $coaRowPill = static function (string $status): string {
             <table class="mbw-table">
                 <thead><tr>
                     <th>Row</th><th>Level</th><th>Code</th><th>Name</th><th>Master / Type</th>
-                    <th>Group</th><th class="num">Opening Dr</th><th class="num">Opening Cr</th>
+                    <th>Parent</th><th class="num">Opening Dr</th><th class="num">Opening Cr</th><th>PAN Number</th>
                     <th>Verdict</th><th></th>
                 </tr></thead>
                 <tbody>
@@ -374,6 +375,7 @@ $coaRowPill = static function (string $status): string {
                             <td><?= $cell('group_code', (string) $row['raw_group_code'], 'group') ?></td>
                             <td class="num"><?= $cell('opening_dr', (string) $row['raw_opening_dr']) ?></td>
                             <td class="num"><?= $cell('opening_cr', (string) $row['raw_opening_cr']) ?></td>
+                            <td><?= $cell('pan_no', (string) ($row['raw_pan_no'] ?? '')) ?></td>
                         <?php else: ?>
                             <td><?= e(ucfirst((string) $row['raw_level'])) ?></td>
                             <td><?= e((string) $row['raw_code']) ?: '<span class="frm-optional">auto</span>' ?></td>
@@ -382,6 +384,7 @@ $coaRowPill = static function (string $status): string {
                             <td><?= e((string) $row['raw_group_code']) ?: '—' ?></td>
                             <td class="num"><?= (float) $row['opening_dr'] > 0 ? e(number_format((float) $row['opening_dr'], 2)) : '' ?></td>
                             <td class="num"><?= (float) $row['opening_cr'] > 0 ? e(number_format((float) $row['opening_cr'], 2)) : '' ?></td>
+                            <td><?= e((string) ($row['raw_pan_no'] ?? '')) ?></td>
                         <?php endif; ?>
                         <td>
                             <?= $coaRowPill((string) $row['status']) ?>
@@ -460,7 +463,7 @@ $coaRowPill = static function (string $status): string {
                             <td><span class="mbw-pill tone-purple"><?= !empty($g['parent_group_id']) ? 'Subgroup' : 'Group' ?></span></td>
                             <td><?= e(ucfirst((string) (ledger_master_nature((string) $g['master_key']) ?? ''))) ?></td>
                             <td><?= (int) $g['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
-                            <td><a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php?edit=' . $gid)) ?>">Edit</a></td>
+                            <td><div class="coa-row-actions"><a class="coa-action" href="<?= e(url('admin/create-account.php?edit_kind=group&edit_id=' . $gid)) ?>">Edit</a></div></td>
                         </tr>
                         <?php foreach ($ledgersByGroup[$gid] ?? [] as $l): ?>
                             <tr class="coa-node coa-child" data-parent-of="m<?= e($digit) ?> g<?= $gid ?>" data-name="<?= e(strtolower($l['name'] . ' ' . $l['code'])) ?>">
@@ -470,9 +473,9 @@ $coaRowPill = static function (string $status): string {
                                 <td><?= e(ucfirst((string) $l['type'])) ?></td>
                                 <td><?= $statusPill((string) $l['status']) ?></td>
                                 <td><div class="coa-row-actions">
-                                    <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $l['id'])) ?>" title="View statement"><?= icon('search') ?></a>
-                                    <a class="mbw-view-all" href="<?= e(url('admin/create-account.php?edit_id=' . (int) $l['id'])) ?>" title="Edit"><?= icon('settings') ?></a>
-                                    <a class="mbw-view-all" href="<?= e(url('admin/audit-trail.php')) ?>" title="History"><?= icon('admin') ?></a>
+                                    <a class="coa-action" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $l['id'])) ?>">View</a>
+                                    <a class="coa-action" href="<?= e(url('admin/create-account.php?edit_id=' . (int) $l['id'])) ?>">Edit</a>
+                                    <a class="coa-action" href="<?= e(url('admin/audit-trail.php')) ?>">History</a>
                                 </div></td>
                             </tr>
                         <?php endforeach; ?>

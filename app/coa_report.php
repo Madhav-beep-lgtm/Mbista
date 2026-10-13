@@ -10,7 +10,7 @@ function coa_report_data(array $company, array $fiscalYear, array $masters, arra
         ['Chart of Accounts'],
         ['Fiscal year: ' . ((string) ($fiscalYear['label'] ?? '') ?: 'Not selected')],
         [],
-        ['Code', 'Account name', 'Level', 'Nature', 'Status'],
+        ['Code', 'Account name', 'Level', 'Nature', 'Status', 'PAN Number'],
     ];
     $kinds = ['company', 'meta', 'title', 'meta', 'blank', 'header'];
     $indents = [];
@@ -30,7 +30,7 @@ function coa_report_data(array $company, array $fiscalYear, array $masters, arra
         $nature = (string) ($masters[(string) $group['master_key']]['nature'] ?? '');
         $add([(string) $group['code'], (string) $group['name'], !empty($group['parent_group_id']) ? 'Subgroup' : 'Group', ucfirst($nature), (int) $group['is_active'] === 1 ? 'Active' : 'Inactive'], 'bold', 1);
         foreach ($byGroup[$id] ?? [] as $ledger) {
-            $add([(string) $ledger['code'], (string) $ledger['name'], !empty($ledger['parent_ledger_id']) ? 'Subledger' : 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status'])], 'body', !empty($ledger['parent_ledger_id']) ? 3 : 2);
+            $add([(string) $ledger['code'], (string) $ledger['name'], !empty($ledger['parent_ledger_id']) ? 'Subledger' : 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status']), (string)($ledger['pan_no'] ?? '')], 'body', !empty($ledger['parent_ledger_id']) ? 3 : 2);
         }
     };
     foreach (COA_NATURE_CODES as $nature => $digit) {
@@ -45,17 +45,17 @@ function coa_report_data(array $company, array $fiscalYear, array $masters, arra
     foreach ($byGroup as $id => $items) {
         if (isset($seenGroups[$id])) continue;
         foreach ($items as $ledger) {
-            $add([(string) $ledger['code'], (string) $ledger['name'], 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status'])], 'body');
+            $add([(string) $ledger['code'], (string) $ledger['name'], 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status']), (string)($ledger['pan_no'] ?? '')], 'body');
         }
     }
     return [
         'rows' => $rows,
-        'widths' => [0 => 28, 1 => 56, 2 => 13, 3 => 16, 4 => 13],
+        'widths' => [0 => 28, 1 => 56, 2 => 13, 3 => 16, 4 => 13, 5 => 18],
         'options' => [
             'styled_table' => true, 'freeze_header' => true, 'header_row' => 5,
             'row_kinds' => $kinds, 'row_indents' => $indents,
-            'column_formats' => array_fill(0, 5, 'text'),
-            'merges' => ['A1:E1', 'A2:E2', 'A3:E3', 'A4:E4'],
+            'column_formats' => array_fill(0, 6, 'text'),
+            'merges' => ['A1:F1', 'A2:F2', 'A3:F3', 'A4:F4'],
             'print' => ['landscape' => true, 'repeat_rows' => 6],
         ],
     ];

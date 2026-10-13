@@ -240,12 +240,17 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .chart-accounts-page .coa-table .coa-master-row td { background: var(--color-primary-soft); font-weight: 650; }
 .chart-accounts-page .coa-table .coa-group-row td { background: var(--color-surface-muted); }
 .chart-accounts-page .coa-table :is(.coa-master-row,.coa-group-row) td { font-weight:700; }
-.reports-center-page .rc-table :is(.rpt-row-bold,.rpt-row-section) td { font-weight:700; }
+.reports-center-page .rc-table :is(.rpt-row-bold,.rpt-row-section,.rpt-row-total) td { font-weight:700; }
 .reports-center-page .rc-table tr[data-ledger-id] td { font-weight:400; }
 .chart-accounts-page .coa-table tbody tr:hover td { background: var(--color-primary-soft); }
 .chart-accounts-page .coa-table td:nth-child(2) { white-space: normal; min-width: 220px; overflow-wrap: anywhere; }
 .chart-accounts-page .coa-table .mbw-pill { font-size: 11px; padding: 3px 8px; }
-.chart-accounts-page .coa-row-actions { display: flex; align-items: center; gap: 10px; }
+.chart-accounts-page .coa-row-actions { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.reports-center-page .rc-profit-loss { table-layout:fixed; width:100%; }
+.reports-center-page .rc-profit-loss td { overflow-wrap:anywhere; }
+.chart-accounts-page .coa-action { display:inline-flex; align-items:center; justify-content:center; min-height:30px; padding:4px 8px; border:1px solid var(--color-border); border-radius:6px; color:var(--color-text); background:var(--color-surface); font-size:12px; font-weight:500; text-decoration:none; }
+.chart-accounts-page .coa-action:hover { background:var(--color-primary-soft); }
+.chart-accounts-page .coa-action:focus-visible { outline:2px solid var(--color-primary); outline-offset:2px; }
 .chart-accounts-page #account-create-form h3 { margin: 20px 0 12px; font-size: 14px; }
 .chart-accounts-page #account-create-form fieldset { margin: 20px 0 0; padding: 14px; border: 1px solid var(--color-border); border-radius: var(--radius-control); min-width: 0; }
 .chart-accounts-page #account-create-form legend { padding: 0 6px; font-size: 14px; font-weight: 650; }

@@ -705,9 +705,8 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             $prev = rc_pl_figures($scopeCompanyId, $prevFrom, $prevTo);
 
             $columns = [
-                ['Particulars', 'left', ''], ['Note', 'left', ''],
+                ['Code', 'left', ''], ['Particulars', 'left', ''],
                 ['Current Period (' . $sym . ')', 'right', ''], ['Previous Period (' . $sym . ')', 'right', ''],
-                ['Variance (' . $sym . ')', 'right', ''], ['Variance (%)', 'right', ''],
             ];
             $note = 0;
             $line = static function (string $label, float $c, float $p, string $style = '', bool $numbered = true, bool $negative = false) use (&$note): array {
@@ -717,7 +716,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $cs = $negative ? -$c : $c;
                 $ps = $negative ? -$p : $p;
                 [$var, $pct] = rc_variance_cells($c, $p);
-                return rc_row([$label, $numbered ? (string) $note : '', rc_fmt($cs), rc_fmt($ps), $var, $pct], $style);
+                return rc_row(['', $label, rc_fmt($cs), rc_fmt($ps)], $style);
             };
 
             $rows = [];
@@ -761,7 +760,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
 
                 $plCells = static function (string $label, string $note, float $c, float $p, float $budget = 0.0) use ($hasBudgets): array {
                     [$var, $pct] = rc_variance_cells($c, $p);
-                    $cells = [$label, $note, rc_fmt($c), rc_fmt($p), $var, $pct];
+                    $cells = [$note, $label, rc_fmt($c), rc_fmt($p)];
                     if ($hasBudgets) {
                         $cells[] = rc_fmt($budget);
                         $cells[] = abs($budget) > 0.004 ? rc_fmt($c - $budget) : '–';
@@ -769,10 +768,14 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                     return $cells;
                 };
                 $plSections = [
-                    ['no' => '1', 'label' => 'Revenue', 'masters' => ['direct_income', 'indirect_income'], 'revenue' => true],
+                    ['no' => '1', 'label' => 'Revenue', 'masters' => ['direct_income'], 'revenue' => true],
                     ['no' => '2', 'label' => 'Direct Costs', 'masters' => ['direct_expense'], 'revenue' => false],
                     ['no' => '3', 'label' => 'Operating and Administrative Expenses', 'masters' => ['indirect_expense'], 'revenue' => false],
+                    ['no' => '4', 'label' => 'Other Income', 'masters' => ['indirect_income'], 'revenue' => true],
                 ];
+                $plGroupStmt = db()->prepare('SELECT id, code FROM ledger_groups WHERE company_id = ?');
+                $plGroupStmt->execute([$scopeCompanyId]);
+                $plGroupCodes = $plGroupStmt->fetchAll(PDO::FETCH_KEY_PAIR);
                 $sectionTotals = [];
                 $sectionRows = [];
                 foreach ($plSections as $def) {
@@ -782,19 +785,20 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                             ? (float) $b['tx_cr'] - (float) $b['tx_dr']
                             : (float) $b['tx_dr'] - (float) $b['tx_cr'];
                         return [$curMove, (float) ($prevMovement[(int) $b['id']] ?? 0.0), (float) ($budgetById[(int) $b['id']] ?? 0.0)];
-                    });
+                    }, (bool)($ctx['hide_zero'] ?? false));
                     $sum = $section['sum'] + [0.0, 0.0, 0.0];
                     $node = 'p' . $def['no'];
-                    $secRows = [rc_row($plCells($def['no'] . '. ' . $def['label'], $def['no'], (float) $sum[0], (float) $sum[1], (float) $sum[2]), 'bold', ['level' => 0, 'node' => $node])];
+                    $secRows = [rc_row($plCells($def['label'], '', (float) $sum[0], (float) $sum[1], (float) $sum[2]), 'bold', ['level' => 0, 'node' => $node, 'label_cell'=>1])];
                     $gi = 0;
                     foreach ($section['groups'] as $groupName => $groupData) {
                         $gi++;
                         $gnode = $node . '.' . $gi;
                         $gsum = $groupData['sum'] + [0.0, 0.0, 0.0];
-                        $secRows[] = rc_row($plCells($def['no'] . '.' . $gi . ' ' . $groupName, '', (float) $gsum[0], (float) $gsum[1], (float) $gsum[2]), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node]);
+                        $groupCode = (string)($plGroupCodes[(int)($groupData['ledgers'][0]['b']['group_id'] ?? 0)] ?? '');
+                        $secRows[] = rc_row($plCells($groupName, $groupCode, (float) $gsum[0], (float) $gsum[1], (float) $gsum[2]), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node, 'label_cell'=>1]);
                         foreach ($groupData['ledgers'] as $ledgerLine) {
                             $ledgerVals = $ledgerLine['vals'] + [0.0, 0.0, 0.0];
-                            $secRows[] = rc_row($plCells((string) $ledgerLine['b']['name'], '', (float) $ledgerVals[0], (float) $ledgerVals[1], (float) $ledgerVals[2]), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id']]);
+                            $secRows[] = rc_row($plCells((string) $ledgerLine['b']['name'], (string)$ledgerLine['b']['code'], (float) $ledgerVals[0], (float) $ledgerVals[1], (float) $ledgerVals[2]), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id'], 'label_cell'=>1]);
                         }
                     }
                     $sectionTotals[$def['no']] = [(float) $sum[0], (float) $sum[1], (float) $sum[2]];
@@ -806,10 +810,10 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                 $grossPrev = $sectionTotals['1'][1] - $sectionTotals['2'][1];
                 $grossBudget = $sectionTotals['1'][2] - $sectionTotals['2'][2];
                 $rows[] = rc_row($plCells('GROSS PROFIT', '', $grossCur, $grossPrev, $grossBudget), 'total');
-                $rows = array_merge($rows, $sectionRows['3']);
-                $netCur = $grossCur - $sectionTotals['3'][0];
-                $netPrev = $grossPrev - $sectionTotals['3'][1];
-                $netBudget = $grossBudget - $sectionTotals['3'][2];
+                $rows = array_merge($rows, $sectionRows['4'], $sectionRows['3']);
+                $netCur = $grossCur + $sectionTotals['4'][0] - $sectionTotals['3'][0];
+                $netPrev = $grossPrev + $sectionTotals['4'][1] - $sectionTotals['3'][1];
+                $netBudget = $grossBudget + $sectionTotals['4'][2] - $sectionTotals['3'][2];
                 $rows[] = rc_row($plCells('NET PROFIT FOR THE PERIOD', '', $netCur, $netPrev, $netBudget), 'total');
             } else {
                 $number = $orgType === 'manufacturing' ? '2A' : '2B';
@@ -2756,10 +2760,14 @@ function rc_has_group_columns(array $report): bool
 function rc_render_table(array $report, bool $hasGroups, string $ledgerLinkBase = ''): void
 {
     $isTrialBalance = ($report['title'] ?? '') === 'Trial Balance';
+    $isProfitLoss = str_starts_with((string)($report['title'] ?? ''), 'Profit or Loss Statement');
     ?>
-    <table class="rc-table<?= $isTrialBalance ? ' rc-trial-balance' : '' ?>">
+    <table class="rc-table<?= $isTrialBalance ? ' rc-trial-balance' : ($isProfitLoss ? ' rc-profit-loss' : '') ?>">
         <?php if ($isTrialBalance): ?>
             <colgroup><col style="width:16%"><col style="width:24%"><?php for ($i = 0; $i < 6; $i++): ?><col style="width:10%"><?php endfor; ?></colgroup>
+        <?php endif; ?>
+        <?php if ($isProfitLoss): ?>
+            <colgroup><col style="width:16%"><col style="width:36%"><?php for ($i = 2; $i < count($report['columns']); $i++): ?><col style="width:<?= 48 / (count($report['columns']) - 2) ?>%"><?php endfor; ?></colgroup>
         <?php endif; ?>
         <thead>
             <?php if ($hasGroups): ?>

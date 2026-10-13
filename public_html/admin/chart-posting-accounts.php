@@ -115,8 +115,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
     <div class="accounting-actions">
         <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Overview</a>
-        <a class="button secondary" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('teams') ?>Groups</a>
-        <a class="button secondary" href="<?= e(url('admin/chart-ledgers.php')) ?>"><?= icon('documents') ?>Ledgers</a>
+        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?view=groups')) ?>"><?= icon('teams') ?>Groups</a>
+        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?view=ledgers')) ?>"><?= icon('documents') ?>Ledgers</a>
     </div>
 </div>
 
@@ -126,7 +126,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <section class="mbw-card">
         <div class="mbw-card-head">
             <h2>Posting map</h2>
-            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">View Ledgers</a></div>
+            <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php?view=ledgers')) ?>">View Ledgers</a></div>
         </div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
