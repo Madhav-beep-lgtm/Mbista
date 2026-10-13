@@ -426,9 +426,14 @@ canvas { max-width: 100%; }
 .reports-center-page .rc2-report-view select { flex:1; min-width:0; }
 .reports-center-page .rc2-filters { padding:16px 18px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface); margin-bottom:18px; }
 .reports-center-page .rc2-filters-head { margin-bottom:12px; }
-.reports-center-page .rc-filter-grid { display:grid; grid-template-columns:repeat(5,minmax(140px,1fr)); gap:14px; }
-.reports-center-page .rc-filter-grid label { display:flex; flex-direction:column; gap:6px; margin:0; min-width:0; }
-.reports-center-page .rc2-filter-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:16px; }
+.reports-center-page .rc2-filters-body { display:flex; flex-wrap:wrap; align-items:flex-end; gap:10px; }
+.reports-center-page .rc-filter-grid { display:contents; }
+.reports-center-page .rc-filter-grid label,
+.reports-center-page .rc2-view-select { display:flex; flex-direction:column; gap:5px; margin:0; min-width:0; width:150px; flex:0 0 150px; font-size:13px; }
+.reports-center-page .rc2-view-select { width:175px; flex-basis:175px; }
+.reports-center-page .rc2-filters :is(input:not([type="hidden"]),select,.ss-trigger) { min-height:36px; height:36px; padding:6px 9px; font-size:13px; }
+.reports-center-page .rc2-filter-actions { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:flex-start; gap:8px; margin:0; }
+.reports-center-page .rc2-filter-actions :is(.button,.rc2-export-btn) { min-height:36px; height:36px; padding:6px 10px; font-size:13px; }
 .reports-center-page :is(.rc2-apply,.rc2-reset,.rc2-export-btn,.rc2-collapse) { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:8px 14px; border:1px solid var(--color-border); border-radius:7px; font:inherit; font-weight:600; text-decoration:none; cursor:pointer; }
 .reports-center-page :is(.rc2-reset,.rc2-export-btn,.rc2-collapse) { background:var(--color-surface); color:var(--color-text); }
 .reports-center-page .rc2-export { position:relative; }
@@ -437,8 +442,7 @@ canvas { max-width: 100%; }
 .reports-center-page .rc2-export-menu a { display:flex; align-items:center; gap:9px; padding:10px; border-radius:5px; text-decoration:none; color:var(--color-text); }
 .reports-center-page .rc2-export-menu a:hover { background:var(--color-primary-soft); }
 .reports-center-page [hidden] { display:none !important; }
-@media (max-width:1100px) { .reports-center-page .rc-filter-grid { grid-template-columns:repeat(3,minmax(140px,1fr)); } }
-@media (max-width:640px) { .reports-center-page .rc-filter-grid { grid-template-columns:1fr; } }
+@media (max-width:640px) { .reports-center-page .rc-filter-grid label { flex:1 1 140px; } }
 .rc2-reset, .cr-dark-btn, .fa-back-link { color: var(--color-primary); }
 .cr-kpis, .ov-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .fa-revaluation-layout { display: grid; grid-template-columns: minmax(190px, 240px) minmax(0, 1fr); gap: var(--space-4); }

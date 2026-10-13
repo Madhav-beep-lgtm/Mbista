@@ -536,8 +536,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
     </div>
     <div class="rc2-filter-actions">
-        <button type="submit" class="rc2-apply"><?= icon('filter') ?>Apply Filters</button>
-        <a class="rc2-reset" href="<?= e(url('admin/reports-center.php?report=' . $reportId)) ?>"><?= icon('reconcile') ?>Reset</a>
+        <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
+        <a class="button secondary" href="<?= e(url('admin/reports-center.php?report=' . $reportId)) ?>">Clear</a>
+        <label class="rc2-view-select">Display Level
+            <select id="rc2Level" aria-label="Display level">
+                <option value="master">Summary — Masters</option>
+                <option value="group" selected>Group Summary</option>
+                <option value="ledger">Full Ledger Detail</option>
+                <option value="compact">Compact Detail</option>
+            </select>
+        </label>
         <div class="rc2-export" data-rc2-export>
             <button type="button" class="rc2-export-btn" aria-haspopup="true" aria-expanded="false"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
             <div class="rc2-export-menu" role="menu">
@@ -562,16 +570,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="search" id="rc2AcctSearch" class="rc2-acct-search rc2-hier-only" placeholder="Search account..." aria-label="Search accounts in this report">
             <button type="button" class="rc2-mini rc2-hier-only" id="rc2ExpandAll">Expand all</button>
             <button type="button" class="rc2-mini rc2-hier-only" id="rc2CollapseAll">Collapse all</button>
-            <span>Display Level</span>
-            <label class="rc2-view-select">
-                <select id="rc2Level" aria-label="Display level">
-                    <option value="master">Summary — Masters</option>
-                    <option value="group" selected>Group Summary</option>
-                    <option value="ledger">Full Ledger Detail</option>
-                    <option value="compact">Compact Detail</option>
-                </select>
-                <span class="rc2-caret"><?= icon('chevron') ?></span>
-            </label>
             <button type="button" id="rc2Expand" aria-label="Expand preview" title="Expand preview"><?= icon('maximize') ?></button>
         </div>
     </div>
