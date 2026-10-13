@@ -434,6 +434,8 @@ canvas { max-width: 100%; }
 .reports-center-page .rc2-filters :is(input:not([type="hidden"]),select,.ss-trigger) { min-height:36px; height:36px; padding:6px 9px; font-size:13px; }
 .reports-center-page .rc2-filter-actions { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:flex-start; gap:8px; margin:0; }
 .reports-center-page .rc2-filter-actions :is(.button,.rc2-export-btn) { min-height:36px; height:36px; padding:6px 10px; font-size:13px; }
+.reports-center-page .rc2-zero-toggle { display:inline-flex; align-items:center; gap:6px; min-height:36px; margin:0; font-size:13px; white-space:nowrap; }
+.reports-center-page .rc2-filters .rc2-zero-toggle input { width:16px; height:16px; min-height:16px; margin:0; padding:0; }
 .reports-center-page :is(.rc2-apply,.rc2-reset,.rc2-export-btn,.rc2-collapse) { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:8px 14px; border:1px solid var(--color-border); border-radius:7px; font:inherit; font-weight:600; text-decoration:none; cursor:pointer; }
 .reports-center-page :is(.rc2-reset,.rc2-export-btn,.rc2-collapse) { background:var(--color-surface); color:var(--color-text); }
 .reports-center-page .rc2-export { position:relative; }

@@ -75,7 +75,7 @@ function rc_row_meta(array $row): array
  * kept (zero-balance hiding). Returns
  * ['groups' => [name => ['ledgers' => [['b' =>, 'vals' =>]], 'sum' => []]], 'sum' => []].
  */
-function rc_group_balances(array $balances, array $masters, callable $valueFn): array
+function rc_group_balances(array $balances, array $masters, callable $valueFn, bool $hideZero = true): array
 {
     $groups = [];
     $sum = [];
@@ -91,7 +91,7 @@ function rc_group_balances(array $balances, array $masters, callable $valueFn): 
                 break;
             }
         }
-        if (!$nonZero) {
+        if ($hideZero && !$nonZero) {
             continue;
         }
         $groupName = (string) (($b['group_name'] ?? '') !== '' ? $b['group_name'] : 'Ungrouped');
@@ -707,7 +707,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             $mi = 0;
             foreach (array_merge($masterOrder, $strayMasters === [] ? [] : ['__unclassified__']) as $masterKey) {
                 $unclassified = $masterKey === '__unclassified__';
-                $section = rc_group_balances($balances, $unclassified ? $strayMasters : [$masterKey], $tbValue);
+                $section = rc_group_balances($balances, $unclassified ? $strayMasters : [$masterKey], $tbValue, (bool) ($ctx['hide_zero'] ?? false));
                 if ($section['groups'] === []) {
                     continue;
                 }

@@ -256,6 +256,7 @@ $generatorContext = [
     'biz' => $businessType,
     'company_id' => $scopeCompanyId,
     'dims' => $dimensionFilters,
+    'hide_zero' => ($_GET['hide_zero'] ?? '') === '1',
     'payroll_run' => $payrollRunFilter,
     // Temporary (income/expense) accounts reset at this boundary; prior
     // years' P&L reports as Retained Earnings b/f — see rc_ledger_balances.
@@ -538,6 +539,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="rc2-filter-actions">
         <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
         <a class="button secondary" href="<?= e(url('admin/reports-center.php?report=' . $reportId)) ?>">Clear</a>
+        <?php if ($reportId === 'trial-balance'): ?>
+            <label class="rc2-zero-toggle"><input type="checkbox" name="hide_zero" value="1" <?= ($_GET['hide_zero'] ?? '') === '1' ? 'checked' : '' ?>>Hide zero balances</label>
+        <?php endif; ?>
         <label class="rc2-view-select">Display Level
             <select id="rc2Level" aria-label="Display level">
                 <option value="master">Summary — Masters</option>
@@ -585,12 +589,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         <?php endif; ?>
         <?php rc_render_notes($reportNotes); ?>
-        <?php rc_render_report_foot(['generated_by' => $reportMeta['generated_by']]); ?>
-
-        <div class="rc-report-foot">
-            <span><?= e($report['subtitle']) ?></span>
-            <span>All amounts are in <?= e($reportMeta['currency_code']) ?>, rounded to 2 decimal places</span>
-        </div>
     </main>
 </div>
 </section>
