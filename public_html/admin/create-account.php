@@ -34,6 +34,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = trim((string) ($values['name'] ?? ''));
         if (!in_array($level, ['group', 'subgroup', 'ledger', 'subledger'], true)) throw new InvalidArgumentException('Select a valid level. Masters are system-defined.');
         if ($name === '' || mb_strlen($name) > 150 || !isset($natureLabels[$nature])) throw new InvalidArgumentException('Enter an account name (up to 150 characters) and select its nature.');
+        if (in_array($nature, ['revenue', 'expense'], true)) {
+            foreach (['email', 'contact_no', 'address', 'bank_name', 'bank_account_no', 'bank_branch'] as $field) $values[$field] = '';
+        }
         $email = trim((string) ($values['email'] ?? ''));
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) throw new InvalidArgumentException('Enter a valid email address.');
         $opening = trim((string) ($values['opening_balance'] ?? ''));
@@ -44,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ((float) $opening > 0 && ($isGroup || in_array($nature, ['revenue', 'expense'], true))) throw new InvalidArgumentException('Opening balances apply only to asset, liability and equity ledgers or subledgers.');
         if ((!empty($values['is_fixed_asset']) || !empty($values['is_cash_or_bank'])) && $nature !== 'asset') throw new InvalidArgumentException('Fixed Asset and Cash / bank are available for asset accounts only.');
         $metadata = [];
-        foreach (['alias_name' => 160, 'account_details' => 4000, 'email' => 190, 'contact_no' => 40, 'address' => 2000, 'bank_name' => 120, 'bank_account_no' => 40, 'bank_branch' => 120] as $field => $limit) {
+        foreach (['alias_name' => 160, 'email' => 190, 'contact_no' => 40, 'address' => 2000, 'bank_name' => 120, 'bank_account_no' => 40, 'bank_branch' => 120] as $field => $limit) {
             $metadata[$field] = trim((string) ($values[$field] ?? ''));
             if (mb_strlen($metadata[$field]) > $limit) throw new InvalidArgumentException(ucwords(str_replace('_', ' ', $field)) . ' is too long.');
         }
@@ -122,19 +125,20 @@ $field = static fn (string $key): string => e((string) ($values[$key] ?? ''));
             <label>Nature<select name="nature" id="account-nature"><?php foreach ($natureLabels as $key=>$label): ?><option value="<?= $key ?>" <?= ($values['nature'] ?? 'asset') === $key ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?></select></label>
             <label>Parent<select name="parent" id="account-parent" class="js-searchable" required></select></label>
         </div>
-        <h3>Details</h3>
+        <fieldset id="account-contact"><legend>Contact details</legend>
         <div class="workspace-form-grid">
             <label>Email<input type="email" name="email" maxlength="190" value="<?= $field('email') ?>"></label>
             <label>Contact No<input type="tel" name="contact_no" maxlength="40" value="<?= $field('contact_no') ?>"></label>
-            <label>Address<textarea name="address" maxlength="2000"><?= $field('address') ?></textarea></label>
-            <label>Details<textarea name="account_details" maxlength="4000"><?= $field('account_details') ?></textarea></label>
+            <label>Address<input name="address" maxlength="2000" value="<?= $field('address') ?>"></label>
         </div>
-        <h3>Bank Details</h3>
+        </fieldset>
+        <fieldset id="account-bank"><legend>Bank details</legend>
         <div class="workspace-form-grid">
             <label>Bank name<input name="bank_name" maxlength="120" value="<?= $field('bank_name') ?>"></label>
             <label>Account number<input name="bank_account_no" maxlength="40" value="<?= $field('bank_account_no') ?>"></label>
             <label>Branch<input name="bank_branch" maxlength="120" value="<?= $field('bank_branch') ?>"></label>
         </div>
+        </fieldset>
         <fieldset id="account-opening"><legend>Opening Balances</legend><div class="workspace-form-grid">
             <label>Amount<input type="number" name="opening_balance" min="0" step="0.01" value="<?= $field('opening_balance') ?>"></label>
             <label>Side<select name="opening_side"><option value="debit">Debit (Dr)</option><option value="credit" <?= ($values['opening_side'] ?? '') === 'credit' ? 'selected' : '' ?>>Credit (Cr)</option></select></label>
@@ -169,6 +173,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const opening = document.getElementById('account-opening');
         opening.disabled = group || ['revenue','expense'].includes(nature.value);
         opening.hidden = opening.disabled;
+        ['account-contact', 'account-bank'].forEach(function (id) {
+            const section = document.getElementById(id);
+            section.disabled = ['revenue','expense'].includes(nature.value);
+            section.hidden = section.disabled;
+        });
         const bank = document.getElementById('account-bank-group');
         bank.hidden = !group;
         bank.querySelector('input').disabled = !group;
