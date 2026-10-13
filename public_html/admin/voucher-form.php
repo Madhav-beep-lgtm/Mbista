@@ -114,7 +114,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $voucherDate = (string) ($_POST['voucher_date'] ?? date('Y-m-d'));
     $postingDate = (string) ($_POST['posting_date'] ?? $voucherDate);
     $narration = trim((string) ($_POST['narration'] ?? ''));
-    $title = trim((string) ($_POST['title'] ?? ''));
     $partyId = (int) ($_POST['party_id'] ?? 0);
     $priority = in_array((string) ($_POST['priority'] ?? ''), ['low', 'medium', 'high'], true) ? (string) $_POST['priority'] : 'medium';
     $department = in_array((string) ($_POST['department'] ?? ''), $departments, true) ? (string) $_POST['department'] : null;
@@ -130,8 +129,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
 
     $problems = [];
-    if ($title === '') {
-        $problems[] = 'Give the voucher a title — it is what the register shows.';
+    if ($narration === '') {
+        $problems[] = 'Enter a narration for the voucher register.';
     }
     if (is_period_locked($companyId, $fiscalYearId, $voucherDate !== '' ? $voucherDate : date('Y-m-d'))) {
         $problems[] = 'This transaction date is inside a locked accounting period.';
@@ -199,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $staffForcedApproval = $hasVoucherApprovals && staff_accountant_forces_approval();
     $needsApproval = $staffForcedApproval
         || ($hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve'));
-    $fullNarration = $title . ($narration !== '' ? ' — ' . $narration : '');
+    $fullNarration = $narration;
     $newStatus = $isDraft ? 'draft' : ($needsApproval ? 'draft' : 'posted');
     $newApprovalState = $isDraft ? 'draft' : ($needsApproval ? 'pending_approval' : 'approved');
 
@@ -691,13 +690,11 @@ if ($fyStartBound !== '' && $fyEndBound !== '' && ($defaultEntryDate < $fyStartB
     $defaultEntryDate = $fyEndBound;
 }
 
-$editTitle = '';
 $editNarration = '';
 $decomposeFailed = false;
 
 if (is_array($retry) && (string) ($retry['type'] ?? '') === $type) {
     $prefill = voucher_prefill_from_input($type, (array) ($retry['input'] ?? []));
-    $editTitle = (string) $prefill['title'];
     $editNarration = (string) $prefill['narration'];
 } elseif ($editVoucher !== null) {
     $prefill = voucher_decompose($type, $editVoucher, $editEntries, $ledgerDirectory);
@@ -726,13 +723,7 @@ if (is_array($retry) && (string) ($retry['type'] ?? '') === $type) {
     $prefill['payment_terms'] = (string) ($editVoucher['payment_terms'] ?? '');
     $prefill['warehouse_id'] = (int) ($editVoucher['warehouse_id'] ?? 0);
 
-    // The guided form stores "Title — narration" in one column; split it back.
-    $editTitle = (string) ($editVoucher['narration'] ?? '');
-    $splitAt = strpos($editTitle, ' — ');
-    if ($splitAt !== false) {
-        $editNarration = substr($editTitle, $splitAt + strlen(' — '));
-        $editTitle = substr($editTitle, 0, $splitAt);
-    }
+    $editNarration = (string) ($editVoucher['narration'] ?? '');
 } else {
     $prefill = [
         'voucher_date' => $defaultEntryDate,
@@ -779,9 +770,7 @@ $renderLedgerOptions = static function (array $ledgers, int $selectedId = 0): st
 };
 
 $pageTitle = $editVoucher ? 'Edit ' . $spec['label'] . ' ' . (string) $editVoucher['voucher_no'] : 'New ' . $spec['label'];
-$pageSubtitle = $editVoucher
-    ? 'Editing replaces the voucher\'s lines and re-applies the posting and approval rules.'
-    : (string) $spec['blurb'];
+$pageSubtitle = '';
 $bodyClass = 'admin-layout accounting-module-page voucher-entry-page voucher-type-' . $spec['key'];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
@@ -845,9 +834,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $selectedTenderBillFound = false;
                     ?>
                     <input type="hidden" name="party_id" id="vch-party" value="<?= (int) ($prefill['party_id'] ?? 0) ?>">
-                    <label>Against bill
+                    <label class="vch-against-bill-field">Against bill
                         <select name="reference_no" id="vch-bill">
-                            <option value="">Not against a specific bill</option>
+                            <option value=""></option>
                             <?php foreach ($partyOptions as $billParty): ?>
                                 <?php $billsForParty = $partyBills[(int) $billParty['id']] ?? []; ?>
                                 <?php if ($billsForParty !== []): ?>
@@ -890,43 +879,27 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endforeach; ?>
                     </select>
                 </label>
-                <label class="vch-title-field"><span>Title <em>*</em></span>
-                    <input type="text" name="title" id="frm-title" maxlength="180" placeholder="<?= e((string) $spec['title_hint']) ?>" value="<?= e($editTitle) ?>" required>
-                </label>
             </div>
         </section>
 
         <?php include __DIR__ . '/../../app/views/vouchers/layout_' . $spec['layout'] . '.php'; ?>
 
-        <?php
-        // The organisation-context fields this card used to carry — posting
-        // date, priority, department, location, cost centre, exchange rate,
-        // payment terms — asked every voucher to answer questions almost
-        // nobody answered. What each type genuinely needs is on its own screen
-        // above, and every screen already shows its own running total in
-        // context. What is left is the one thing a voucher really does want
-        // beside it: the bill, the cheque, the delivery note.
-        //
-        // A narration already on a voucher is carried through hidden so that
-        // editing one never silently drops the sentence somebody wrote.
-        ?>
         <section class="mbw-card frm-section vch-support-card">
-            <div class="frm-section-head">
-                <span class="mbw-chip is-square tone-purple"><?= icon('documents') ?></span>
-                <h2>Narration &amp; supporting documents</h2>
-            </div>
             <div class="vch-support-grid">
-                <label>Narration
-                    <textarea name="narration" rows="4" placeholder="Additional description for this voucher"><?= e($editNarration) ?></textarea>
+                <label><span>Narration <em>*</em></span>
+                    <textarea name="narration" rows="2" placeholder="Additional description for this voucher" required><?= e($editNarration) ?></textarea>
                 </label>
-                <div>
-            <span class="frm-dropzone" id="frm-dropzone">
-                <?= icon('documents') ?>
-                <strong>Drag &amp; drop files here <u>or click to upload</u></strong>
-                <small>PDF, Excel, JPG, PNG (max. 10MB each)</small>
-                <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">
-                <span id="frm-file-list">No files selected</span>
-            </span>
+                <div class="vch-attachment-field">
+                    <label class="frm-dropzone" id="frm-dropzone" for="frm-attachments">
+                        <span class="vch-upload-icon"><?= icon('documents') ?></span>
+                        <span class="vch-upload-copy">
+                            <strong>Attach supporting files</strong>
+                            <small>PDF, Excel, JPG or PNG · maximum 10MB each</small>
+                        </span>
+                        <span class="vch-upload-action">Choose files</span>
+                        <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">
+                    </label>
+                    <span id="frm-file-list">No files selected</span>
                 </div>
             </div>
         </section>
@@ -946,7 +919,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (attach) {
         attach.addEventListener('change', function () {
             var names = Array.prototype.map.call(attach.files, function (file) { return file.name; });
-            document.getElementById('frm-file-list').textContent = names.length ? names.join(', ') : '';
+            document.getElementById('frm-file-list').textContent = names.length ? names.join(', ') : 'No files selected';
         });
     }
 

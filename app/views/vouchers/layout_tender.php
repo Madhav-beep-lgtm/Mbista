@@ -28,7 +28,6 @@ $isMoneyIn = $bankSide === 'debit';
                     <tr>
                         <th style="width:36px">SN</th>
                         <th style="width:200px">Cash / bank account <em>*</em></th>
-                        <th style="width:150px">Mode</th>
                         <th>Cheque / transaction no.</th>
                         <th class="is-numeric" style="width:150px"><?= $isMoneyIn ? 'Received' : 'Paid' ?> (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
@@ -38,7 +37,7 @@ $isMoneyIn = $bankSide === 'debit';
             </table>
         </div>
         <div class="frm-entries-foot">
-            <button type="button" class="button soft" data-add-row>＋ Add another <?= $isMoneyIn ? 'receipt' : 'payment' ?> mode</button>
+            <button type="button" class="button soft" data-add-row>＋ Add row</button>
             <div class="frm-entry-totals">
                 <span><?= e((string) $spec['bank_label']) ?> (<?= e(trim($currency)) ?>) <strong id="vch-tender-total">0.00</strong></span>
             </div>
@@ -50,13 +49,6 @@ $isMoneyIn = $bankSide === 'debit';
                     <select name="tender_ledger[]" data-field="ledger_id" class="vch-ledger">
                         <option value="">Select cash / bank</option>
                         <?= $renderLedgerOptions($optionsCashBank, 0) ?>
-                    </select>
-                </td>
-                <td>
-                    <select name="tender_mode[]" data-field="mode">
-                        <?php foreach (voucher_instrument_modes() as $modeKey => $modeLabel): ?>
-                            <option value="<?= e($modeKey) ?>"><?= e($modeLabel) ?></option>
-                        <?php endforeach; ?>
                     </select>
                 </td>
                 <td><input type="text" name="tender_instrument_no[]" data-field="instrument_no" maxlength="80" placeholder="Cheque / txn reference"></td>
@@ -81,7 +73,6 @@ $isMoneyIn = $bankSide === 'debit';
                         <th style="width:36px">SN</th>
                         <th style="width:220px">Ledger <em>*</em></th>
                         <th>Description</th>
-                        <th style="width:150px">Cost centre</th>
                         <th style="width:140px">Bill / reference</th>
                         <th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
                         <th style="width:40px"></th>
@@ -107,12 +98,6 @@ $isMoneyIn = $bankSide === 'debit';
                     </select>
                 </td>
                 <td><input type="text" name="line_memo[]" data-field="memo" maxlength="255" placeholder="What this line is for"></td>
-                <td>
-                    <select name="line_cost_centre[]" data-field="cost_centre">
-                        <option value="">—</option>
-                        <?php foreach ($costCentres as $costCentre): ?><option value="<?= e($costCentre) ?>"><?= e($costCentre) ?></option><?php endforeach; ?>
-                    </select>
-                </td>
                 <td><input type="text" name="line_reference[]" data-field="reference" maxlength="120" placeholder="Invoice / bill"></td>
                 <td class="is-numeric"><input type="number" name="line_amount[]" data-field="amount" class="frm-num vch-amount" step="0.01" min="0" placeholder="0.00"></td>
                 <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this line">&#128465;</button></td>

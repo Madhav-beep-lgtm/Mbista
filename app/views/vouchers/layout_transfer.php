@@ -32,7 +32,6 @@ $renderContraLegs = static function (string $side, array $rows) use ($optionsCas
     <div class="vch-leg">
         <div class="vch-leg-head">
             <strong><?= $isOut ? 'Money out of' : 'Money into' ?></strong>
-            <span><?= $isOut ? 'These accounts are credited' : 'These accounts are debited' ?></span>
         </div>
         <div class="vch-grid" data-grid data-min-rows="1" id="vch-<?= e($side) ?>-grid"
              data-prefill="<?= e(json_encode($rows, JSON_UNESCAPED_SLASHES)) ?>">
@@ -74,36 +73,13 @@ $renderContraLegs = static function (string $side, array $rows) use ($optionsCas
 };
 ?>
 <section class="mbw-card frm-section vch-focus vch-entry-panel">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-teal"><?= icon('reconcile') ?></span>
-        <h2>The transfer</h2>
-        <span class="frm-optional">Every account on both sides must be a cash or bank account, and the two sides must agree</span>
-    </div>
-
     <div class="vch-legs">
         <?php $renderContraLegs('out', $contraOut); ?>
         <span class="vch-transfer-arrow" aria-hidden="true"><?= icon('chevron-right') ?></span>
         <?php $renderContraLegs('in', $contraIn); ?>
     </div>
 
-    <?php if (count($optionsCashBank) < 2): ?>
-        <div class="notice">This company has fewer than two cash or bank accounts, so there is nothing to transfer between yet. Open one under <a href="<?= e(url('admin/chart-ledgers.php')) ?>">Ledgers</a> first.</div>
-    <?php endif; ?>
-
-    <div class="vch-preview" id="vch-preview" hidden>
-        <span class="vch-preview-label">This will post</span>
-        <span class="vch-preview-line"><em>Dr</em> <strong data-preview-debit>—</strong> <b data-preview-in>0.00</b></span>
-        <span class="vch-preview-line"><em>Cr</em> <strong data-preview-credit>—</strong> <b data-preview-out>0.00</b></span>
-    </div>
-</section>
-
-<section class="mbw-card frm-section">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-blue"><?= icon('bank') ?></span>
-        <h2>How it moved</h2>
-        <span class="frm-optional">Optional — the cheque or transfer that carried it</span>
-    </div>
-    <div class="frm-grid frm-grid-4">
+    <div class="frm-grid frm-grid-4 vch-transfer-meta">
         <label>Mode
             <select name="instrument_type">
                 <option value="">Not recorded</option>
@@ -113,11 +89,17 @@ $renderContraLegs = static function (string $side, array $rows) use ($optionsCas
             </select>
         </label>
         <label>Cheque / transaction no.
-            <input type="text" name="instrument_no" maxlength="80" placeholder="e.g. 004312" value="<?= e((string) ($prefill['instrument_no'] ?? '')) ?>">
+            <input type="text" name="instrument_no" maxlength="80" value="<?= e((string) ($prefill['instrument_no'] ?? '')) ?>">
         </label>
         <label>Instrument date
             <input type="date" name="instrument_date" value="<?= e((string) ($prefill['instrument_date'] ?? '')) ?>">
         </label>
+    </div>
+
+    <div class="vch-preview" id="vch-preview" hidden>
+        <span class="vch-preview-label">This will post</span>
+        <span class="vch-preview-line"><em>Dr</em> <strong data-preview-debit>—</strong> <b data-preview-in>0.00</b></span>
+        <span class="vch-preview-line"><em>Cr</em> <strong data-preview-credit>—</strong> <b data-preview-out>0.00</b></span>
     </div>
 </section>
 
