@@ -407,10 +407,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php // The fiscal-year switcher lives in the topbar — no duplicate card here. ?>
 <nav class="mbw-tabbar" aria-label="Voucher workspace">
     <a class="mbw-tab is-active" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
-    <a class="mbw-tab" href="<?= e(url('admin/voucher-form.php')) ?>"><?= icon('receipt-voucher') ?>New Voucher</a>
     <a class="mbw-tab" href="<?= e(url('admin/voucher-import.php')) ?>"><?= icon('upload') ?>Import from Excel</a>
     <a class="mbw-tab" href="<?= e(url('admin/ledgers.php')) ?>"><?= icon('contracts') ?>Ledgers</a>
-    <a class="mbw-tab" href="<?= e(url('admin/day-book.php')) ?>"><?= icon('calendar') ?>Day Book</a>
 </nav>
 
 <section class="mbw-kpi-grid">
@@ -469,8 +467,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
         <?php if ($vSearch !== '' || $vType !== '' || $vStatus !== '' || $vDateOk($vFrom) || $vDateOk($vTo)): ?><a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>">Clear</a><?php endif; ?>
         <div class="actions" style="margin-left:auto">
-            <a class="button secondary" href="<?= e(url('admin/ledgers.php')) ?>">Ledgers</a>
-            <a class="button secondary" href="<?= e(url('admin/day-book.php')) ?>">Day Book</a>
             <a class="button" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a>
         </div>
     </form>

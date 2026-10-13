@@ -40,11 +40,10 @@ if ($headerCompanyCode !== 'MBAACA') {
 }
 $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Chart of Accounts', 'admin/chart-of-accounts.php', 'tree', in_array($headerScript, $headerChartPages, true)],
-    ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php'], true)],
+    ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php', 'voucher-import.php'], true)],
     ['Ledgers', 'admin/ledgers.php', 'contracts', $headerScript === 'ledgers.php'],
     ['Opening Balances', 'admin/opening-balances.php', 'reconcile', $headerScript === 'opening-balances.php'],
     ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
-    ['Voucher Import (Excel)', 'admin/voucher-import.php', 'upload', $headerScript === 'voucher-import.php'],
     ['Unified Transaction and Party Master', 'admin/accounting-parties.php', 'users', $headerScript === 'accounting-parties.php'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
