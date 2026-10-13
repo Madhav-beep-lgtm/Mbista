@@ -43,7 +43,6 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Vouchers', 'admin/accounting.php', 'journal', in_array($headerScript, ['accounting.php', 'voucher-form.php', 'voucher-import.php'], true)],
     ['Ledgers', 'admin/ledgers.php', 'contracts', $headerScript === 'ledgers.php'],
     ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
-    ['Unified Transaction and Party Master', 'admin/accounting-parties.php', 'users', $headerScript === 'accounting-parties.php'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
@@ -197,7 +196,6 @@ if ($headerJewellery) {
         ]],
         ['Masters &amp; Setup', 'sliders', [
             ['jewellery.php', 'rates', 'Daily Rates', 'pie'],
-            ['accounting-parties.php', 'directory', 'Party Master', 'users'],
             ['jewellery.php', 'masters', 'Metals &amp; Units', 'scale'],
             ['jewellery.php', 'settings', 'Settings', 'sliders'],
         ]],

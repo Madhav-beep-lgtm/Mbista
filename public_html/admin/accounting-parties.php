@@ -11,8 +11,16 @@ require_once __DIR__ . '/../../app/export_engine.php';
 require_staff_admin_or_client_books();
 require_company_context();
 
+// Retire the standalone directory. Keep targeted party forms, statements and
+// existing document links operational without deleting their accounting data.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET'
+    && empty($_GET['panel']) && empty($_GET['edit_id'])
+    && empty($_GET['party_id']) && empty($_GET['statement']) && !$partyExportRequested) {
+    redirect('admin/ledgers.php');
+}
+
 $repairErrors = accounting_module_repair_database();
-$pageTitle = 'Unified Transactions';
+$pageTitle = 'Party Details';
 $pageHero = false;
 $pageSubtitle = 'One workspace for parties, sales, purchases, notes, payments and complete ledger history.';
 $company = current_company();
@@ -1648,6 +1656,7 @@ $showingTo = min($totalRows, $page * $perPage);
 
 
 
+<?php if ($panel !== 'party' && !$editParty): ?>
 <div class="mbw-kpi-grid party-master-kpis">
     <a class="mbw-kpi" href="<?= e(parties_page_url(['tab' => 'directory', 'type' => null, 'classification' => null, 'link_status' => null, 'balance_status' => null, 'page' => null])) ?>">
         <div>
@@ -1699,6 +1708,7 @@ $showingTo = min($totalRows, $page * $perPage);
         <a class="<?= $tab === $tabKey ? 'is-active' : '' ?>" href="<?= e($tabUrl) ?>"><?= e($tabLabel) ?></a>
     <?php endforeach; ?>
 </nav>
+<?php endif; ?>
 
 
 <?php
@@ -1717,6 +1727,7 @@ $primaryAction = match ($tab) {
 };
 $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($selectedParty['id'] ?? 0) > 0;
 ?>
+<?php if ($panel !== 'party' && !$editParty): ?>
 <div class="reference-toolbar">
     <div class="reference-toolbar-actions">
         <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=sales')) ?>"><?= icon('receipt-voucher') ?>Sales Voucher</a>
@@ -1789,6 +1800,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
     </form>
 </div>
 
+<?php endif; ?>
 <?php if ($panel === 'party' || $editParty): ?>
     <?php
     // Party create/edit lives in a proper panel card (it used to hide inside a
@@ -1966,7 +1978,7 @@ $tabHeadings = [
     'purchases' => 'Purchases & Payments',
 ];
 ?>
-<?php if ($tab !== 'aging'): ?>
+<?php if ($tab !== 'aging' && $panel !== 'party' && !$editParty): ?>
 <div class="reference-workspace<?= $partyPicked ? '' : ' is-full-width' ?>">
     <main id="documents" class="mbw-card reference-table-card">
         <div class="mbw-card-head">
