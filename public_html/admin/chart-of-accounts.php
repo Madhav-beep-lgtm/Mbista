@@ -25,8 +25,18 @@ foreach ($groups as $g) {
 }
 
 // ---------------------------------------------------------------------------
-// Export COA as CSV.
+// Presentation export is Excel; CSV remains the round-trip import format.
 // ---------------------------------------------------------------------------
+if (($_GET['export'] ?? '') === 'xlsx') {
+    require_permission('reports', 'export');
+    require_once __DIR__ . '/../../app/coa_report.php';
+    $reportLedgers = db()->prepare('SELECT * FROM ledgers WHERE company_id = :cid ORDER BY code ASC');
+    $reportLedgers->execute(['cid' => $companyId]);
+    $report = coa_report_data($company, current_fiscal_year() ?? [], $masters, $groups, $reportLedgers->fetchAll(PDO::FETCH_ASSOC));
+    security_event('report_exported', 'success', 'Chart of accounts exported to Excel.', $companyId, $userId ?: null);
+    export_xlsx('chart-of-accounts-' . preg_replace('/[^A-Za-z0-9]+/', '-', (string) ($company['name'] ?? 'company')) . '.xlsx',
+        $report['rows'], 'Chart of Accounts', $report['widths'], $report['options']);
+}
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     require_permission('reports', 'export');
     security_event('report_exported', 'success', 'Chart of accounts exported to CSV.', $companyId, $userId ?: null);
@@ -276,7 +286,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
         </details>
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto">
-        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><?= icon('analytics') ?>Export COA</a>
+        <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=xlsx')) ?>"><?= icon('analytics') ?>Export COA</a>
         <details class="action-menu">
             <summary class="button"><?= icon('layers') ?>Create account <?= icon('chevron') ?></summary>
             <div class="action-menu-options">
