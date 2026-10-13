@@ -256,7 +256,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
         </select>
     </label>
     <label>Ledger or group
-        <input type="search" name="q" value="<?= e($coaSearch) ?>">
+        <input type="search" id="coa-search" name="q" value="<?= e($coaSearch) ?>" placeholder="Search ledgers or groups...">
     </label>
     <div style="align-self:end;display:flex;gap:10px">
         <button class="button" type="submit"><?= icon('search') ?>Filter</button>
@@ -430,12 +430,6 @@ $coaRowPill = static function (string $status): string {
 
 
     <section class="mbw-card" aria-label="Chart of accounts hierarchy">
-        <div class="mbw-card-head">
-            <h2>Chart of Accounts Hierarchy</h2>
-            <div class="mbw-card-tools">
-                <input type="search" id="coa-search" placeholder="Search in hierarchy..." style="min-height:34px;padding:5px 10px;font-size:12.5px;border:1px solid var(--mbw-border);border-radius:8px;background:var(--mbw-card);color:var(--mbw-text)">
-            </div>
-        </div>
         <div style="overflow-x:auto">
             <table id="coa-tree">
                 <thead><tr><th style="width:120px">Code</th><th>Name</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th style="width:140px">Actions</th></tr></thead>
