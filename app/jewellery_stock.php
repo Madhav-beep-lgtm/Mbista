@@ -342,8 +342,15 @@ function jewellery_save_item(int $companyId, array $input, int $userId = 0): int
     $itemId = (int) ($input['id'] ?? 0);
     $code = strtoupper(trim((string) ($input['code'] ?? '')));
     $name = trim((string) ($input['name'] ?? ''));
-    if ($code === '' || $name === '') {
-        throw new RuntimeException('Item code and name are required.');
+    // A jewellery item IS an inventory item -- same table, same sku column,
+    // same uniqueness index -- so it answers to the same rule about what a
+    // code may contain. Checked through the shared definition rather than a
+    // second copy, or the two screens drift and only one of them is right.
+    require_once __DIR__ . '/inventory_coding.php';
+    foreach ([inv_item_code_error($code), inv_item_name_error($name)] as $codingError) {
+        if ($codingError !== null) {
+            throw new RuntimeException($codingError);
+        }
     }
 
     $metalId = (int) ($input['metal_id'] ?? 0);

@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../app/jewellery_stock.php';
 // The ledger-mapping catalogue lives in app/ so Hospitality and Jewellery can
 // show the SAME table rather than each keeping a copy of the list.
 require_once __DIR__ . '/../../app/inventory_mapping.php';
+require_once __DIR__ . '/../../app/inventory_coding.php';
 require_once __DIR__ . '/../../app/opening_stock_import.php';
 // An inventory item can also BE a recipe ingredient. Pure definitions — the
 // kitchen list is only touched for a company that has hospitality switched on
@@ -268,9 +269,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $allowedTypes[] = (string) $existing['item_type'];
             }
         }
-        if ($sku === '' || $name === '' || !in_array($itemType, $allowedTypes, true) || !in_array($status, ['active', 'inactive'], true)) {
-            flash('error', 'SKU, item name, type, and status are required.');
+        if (!in_array($itemType, $allowedTypes, true) || !in_array($status, ['active', 'inactive'], true)) {
+            flash('error', 'Item type and status are required.');
             redirect(inv_back_url());
+        }
+        // The code goes on to be a barcode payload, a spreadsheet column and a
+        // URL parameter, so what may be in it is settled in one place rather
+        // than by whatever each of those happens to tolerate.
+        foreach ([inv_item_code_error($sku), inv_item_name_error($name),
+                  inv_hs_code_error((string) ($_POST['hs_code'] ?? ''))] as $codingError) {
+            if ($codingError !== null) {
+                flash('error', $codingError);
+                redirect(inv_back_url());
+            }
         }
 
         $validMethods = ['fifo', 'weighted_average', 'specific'];
@@ -1889,7 +1900,7 @@ $itemStmt = db()->prepare('
         ? 'LEFT JOIN jewellery_item_profiles jwp ON jwp.inventory_item_id = i.id' : '') . '
     WHERE i.company_id = :company_id
     GROUP BY i.id
-    ORDER BY i.status ASC, i.name ASC
+    ORDER BY i.status ASC, i.sku ASC
 ');
 $itemStmt->execute(['company_id' => $companyId]);
 $items = $itemStmt->fetchAll();
@@ -2722,8 +2733,10 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="save_item">
             <input type="hidden" name="item_id" value="<?= e((int) ($editItem['id'] ?? 0)) ?>">
-            <label>SKU<input type="text" name="sku" maxlength="80" value="<?= e($editItem['sku'] ?? '') ?>" required></label>
-            <label>Name<input type="text" name="name" maxlength="190" value="<?= e($editItem['name'] ?? '') ?>" required></label>
+            <label>Code<input type="text" name="sku" maxlength="<?= inv_item_code_max() ?>"
+                   pattern="[A-Za-z0-9][A-Za-z0-9.\-]*"
+                   value="<?= e($editItem['sku'] ?? inv_next_item_code($companyId)) ?>" required></label>
+            <label>Name<input type="text" name="name" maxlength="<?= inv_item_name_max() ?>" value="<?= e($editItem['name'] ?? '') ?>" required></label>
             <?php
             $formItemTypes = $itemTypes;
             if ($editItem && !in_array((string) $editItem['item_type'], $formItemTypes, true)) {
