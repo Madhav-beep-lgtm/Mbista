@@ -155,7 +155,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 if (in_array($selectedLedgerId, sr_inventory_ledger_ids((int) $company['id']), true)): ?>
                     <a class="mbw-view-all" href="<?= e(url('admin/stock-summary-report.php?ledger=' . $selectedLedgerId . '&applied=1')) ?>" title="The item-wise stock that makes up this GL balance"><?= icon('box') ?>Items behind this balance</a>
                 <?php endif; ?>
-                <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . $selectedLedgerId)) ?>">Edit / Reclassify</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . $selectedLedgerId . '&fy=' . $fiscalYearId)) ?>">Reports Center view</a>
                 <a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">All ledgers</a>
             <?php endif; ?>
@@ -254,7 +253,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="is-numeric"><?= e($fmtMoney((float) $row['debit_total'])) ?></td>
                         <td class="is-numeric"><?= e($fmtMoney((float) $row['credit_total'])) ?></td>
                         <td class="is-numeric <?= $rowBalance < 0 ? 'text-danger' : '' ?>"><?= e($fmtMoney(abs($rowBalance))) ?> <?= $rowBalance >= 0 ? 'Dr' : 'Cr' ?></td>
-                        <td><div style="display:flex;gap:6px"><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $row['id'])) ?>">Open</a><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . (int) $row['id'])) ?>" title="Rename or move to another group">Edit</a></div></td>
+                        <td><div style="display:flex;gap:6px"><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/ledgers.php?ledger_id=' . (int) $row['id'])) ?>">Open</a><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/create-account.php?edit_id=' . (int) $row['id'])) ?>" title="Edit account details">Edit</a></div></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

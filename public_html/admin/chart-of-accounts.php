@@ -471,7 +471,7 @@ $coaRowPill = static function (string $status): string {
                                 <td><?= $statusPill((string) $l['status']) ?></td>
                                 <td><div class="coa-row-actions">
                                     <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $l['id'])) ?>" title="View statement"><?= icon('search') ?></a>
-                                    <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . (int) $l['id'])) ?>" title="Edit"><?= icon('settings') ?></a>
+                                    <a class="mbw-view-all" href="<?= e(url('admin/create-account.php?edit_id=' . (int) $l['id'])) ?>" title="Edit"><?= icon('settings') ?></a>
                                     <a class="mbw-view-all" href="<?= e(url('admin/audit-trail.php')) ?>" title="History"><?= icon('admin') ?></a>
                                 </div></td>
                             </tr>
@@ -485,7 +485,7 @@ $coaRowPill = static function (string $status): string {
                         <td><span class="mbw-pill tone-teal">Ledger</span></td>
                         <td><?= e(ucfirst((string) $l['type'])) ?></td>
                         <td><?= $statusPill((string) $l['status']) ?></td>
-                        <td><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . (int) $l['id'])) ?>">Assign group</a></td>
+                        <td><a class="mbw-view-all" href="<?= e(url('admin/create-account.php?edit_id=' . (int) $l['id'])) ?>">Assign group</a></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>

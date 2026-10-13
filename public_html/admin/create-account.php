@@ -4,10 +4,11 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_staff_admin_or_client_books();
 require_company_context();
-require_permission('accounting', 'create');
+$editId = max(0, (int) ($_GET['edit_id'] ?? $_POST['edit_id'] ?? 0));
+require_permission('accounting', $editId > 0 ? 'edit' : 'create');
 $repairErrors = accounting_module_repair_database();
 if (!column_exists('ledgers', 'parent_ledger_id') || !column_exists('ledger_groups', 'use_cost_centre') || !column_exists('ledgers', 'is_cash_equivalent') || !column_exists('ledger_groups', 'is_cash_equivalent')) {
-    $pageTitle = 'Create account';
+    $pageTitle = $editId > 0 ? 'Edit account' : 'Create account';
     $pageHero = false;
     include __DIR__ . '/../../app/views/partials/admin_header.php';
     echo '<div class="notice error">Account creation requires the latest database upgrade. Run the deployment schema repair before continuing.</div>';
@@ -15,6 +16,18 @@ if (!column_exists('ledgers', 'parent_ledger_id') || !column_exists('ledger_grou
     exit;
 }
 $companyId = (int) current_company()['id'];
+$editAccount = null;
+if ($editId > 0) {
+    $editStmt = db()->prepare('SELECT * FROM ledgers WHERE id = ? AND company_id = ?');
+    $editStmt->execute([$editId, $companyId]);
+    $editAccount = $editStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$editAccount) { http_response_code(404); exit('Account not found.'); }
+}
+$editDefaults = $editAccount ? array_merge($editAccount, [
+    'level' => empty($editAccount['parent_ledger_id']) ? 'ledger' : 'subledger',
+    'nature' => $editAccount['type'],
+    'parent' => empty($editAccount['parent_ledger_id']) ? 'group:' . $editAccount['group_id'] : 'ledger:' . $editAccount['parent_ledger_id'],
+]) : null;
 $masters = ledger_masters();
 $natureLabels = ['asset' => 'Assets', 'liability' => 'Liabilities', 'equity' => 'Equity', 'expense' => 'Expenses', 'revenue' => 'Income'];
 $stmt = db()->prepare('SELECT * FROM ledger_groups WHERE company_id = :cid AND is_active = 1 ORDER BY name');
@@ -23,7 +36,7 @@ $groups = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $stmt = db()->prepare('SELECT id, code, name, group_id, type FROM ledgers WHERE company_id = :cid AND status = \'active\' AND parent_ledger_id IS NULL ORDER BY name');
 $stmt->execute(['cid' => $companyId]);
 $parents = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$values = $_SERVER['REQUEST_METHOD'] === 'POST' ? $_POST : ['level' => ($_GET['level'] ?? '') === 'group' ? 'group' : 'ledger', 'nature' => 'asset'];
+$values = $_SERVER['REQUEST_METHOD'] === 'POST' ? $_POST : ($editDefaults ?? ['level' => ($_GET['level'] ?? '') === 'group' ? 'group' : 'ledger', 'nature' => 'asset']);
 $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
@@ -31,6 +44,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($repairErrors !== []) throw new InvalidArgumentException('Account setup needs repair before saving.');
         $level = (string) ($values['level'] ?? '');
         $nature = (string) ($values['nature'] ?? '');
+        if ($editAccount && ($level !== $editDefaults['level'] || $nature !== $editDefaults['nature'] || ($values['parent'] ?? '') !== $editDefaults['parent'])) {
+            throw new InvalidArgumentException('Account level, nature and parent cannot be changed while editing.');
+        }
         $name = trim((string) ($values['name'] ?? ''));
         if (!in_array($level, ['group', 'subgroup', 'ledger', 'subledger'], true)) throw new InvalidArgumentException('Select a valid level. Masters are system-defined.');
         if ($name === '' || mb_strlen($name) > 150 || !isset($natureLabels[$nature])) throw new InvalidArgumentException('Enter an account name (up to 150 characters) and select its nature.');
@@ -80,16 +96,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($masterKey === '' || ledger_master_nature($masterKey) !== $nature) throw new InvalidArgumentException('Select a parent of the same nature and correct level.');
         $table = $isGroup ? 'ledger_groups' : 'ledgers';
-        $duplicate = db()->prepare("SELECT id FROM $table WHERE company_id = :cid AND LOWER(TRIM(name)) = LOWER(:name) LIMIT 1");
-        $duplicate->execute(['cid' => $companyId, 'name' => $name]);
+        $duplicate = db()->prepare("SELECT id FROM $table WHERE company_id = :cid AND LOWER(TRIM(name)) = LOWER(:name) AND id <> :edit_id LIMIT 1");
+        $duplicate->execute(['cid' => $companyId, 'name' => $name, 'edit_id' => $editId]);
         if ($duplicate->fetchColumn()) throw new InvalidArgumentException('An account with this name already exists at this level.');
-        $code = $isGroup ? coa_next_group_code($companyId, $masterKey) : coa_next_ledger_code($companyId, (int) $groupId);
+        $code = $editAccount ? (string) $editAccount['code'] : ($isGroup ? coa_next_group_code($companyId, $masterKey) : coa_next_ledger_code($companyId, (int) $groupId));
         $data = ['company_id' => $companyId, 'code' => $code, 'name' => $name, 'is_system' => 0] + $metadata;
         if ($isGroup) $data += ['master_key' => $masterKey, 'parent_group_id' => $groupId, 'is_active' => 1, 'is_cash_or_bank' => empty($values['is_cash_or_bank']) ? 0 : 1];
         else $data += ['group_id' => $groupId, 'parent_ledger_id' => $ledgerParent, 'type' => $nature, 'status' => 'active'];
+        if ($editAccount) {
+            $locked = db()->prepare('SELECT * FROM ledgers WHERE id = ? AND company_id = ? FOR UPDATE');
+            $locked->execute([$editId, $companyId]);
+            $current = $locked->fetch(PDO::FETCH_ASSOC);
+            if (!$current || $current['type'] !== $nature || (int) $current['group_id'] !== (int) $groupId || (int) $current['parent_ledger_id'] !== (int) $ledgerParent) {
+                throw new InvalidArgumentException('Account structure changed. Reload before saving.');
+            }
+            // Preserve code, status, hierarchy and system ownership.
+            $updates = ['name' => $name] + $metadata;
+            $sets = array_map(static fn (string $key): string => "`$key` = :$key", array_keys($updates));
+            db()->prepare('UPDATE ledgers SET ' . implode(', ', $sets) . ' WHERE id = :edit_id AND company_id = :cid')
+                ->execute($updates + ['edit_id' => $editId, 'cid' => $companyId]);
+            $id = $editId;
+        } else {
         $columns = array_keys($data);
         db()->prepare('INSERT INTO ' . $table . ' (`' . implode('`,`', $columns) . '`) VALUES (:' . implode(',:', $columns) . ')')->execute($data);
         $id = (int) db()->lastInsertId();
+        }
         if (!$isGroup) {
             sync_party_from_chart_ledger($companyId, $id, (int) current_user()['id']);
             if ($opening !== '' && in_array($nature, ['asset', 'liability', 'equity'], true)) {
@@ -97,10 +128,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($openingError !== null) throw new InvalidArgumentException($openingError);
             }
         }
-        log_activity($isGroup ? 'ledger_group' : 'ledger', $id, 'created', 'Created ' . $level . ' ' . $code . ': ' . $name, (int) current_user()['id']);
+        log_activity($isGroup ? 'ledger_group' : 'ledger', $id, $editAccount ? 'updated' : 'created', ($editAccount ? 'Updated ' : 'Created ') . $level . ' ' . $code . ': ' . $name, (int) current_user()['id']);
         db()->commit();
-        flash('success', 'Account ' . $code . ' created.');
-        redirect('admin/create-account.php');
+        flash('success', 'Account ' . $code . ($editAccount ? ' updated.' : ' created.'));
+        redirect($editAccount ? 'admin/create-account.php?edit_id=' . $editId : 'admin/create-account.php');
     } catch (Throwable $exception) {
         if (db()->inTransaction()) db()->rollBack();
         $error = $exception instanceof InvalidArgumentException ? $exception->getMessage() : 'Account could not be saved. Please retry or check the accounting setup.';
@@ -115,16 +146,20 @@ $field = static fn (string $key): string => e((string) ($values[$key] ?? ''));
 <?php if ($error): ?><div class="notice error" role="alert"><?= e($error) ?></div><?php endif; ?>
 <?php if ($repairErrors): ?><div class="notice error">Account setup needs repair before saving.</div><?php endif; ?>
 <section class="mbw-card">
-    <div class="mbw-card-head"><h2>Create account</h2></div>
+    <div class="mbw-card-head"><h2><?= e($pageTitle) ?></h2></div>
     <form method="post" id="account-create-form">
+        <?php if ($editAccount): ?>
+        <input type="hidden" name="edit_id" value="<?= $editId ?>">
+        <?php foreach (['level', 'nature', 'parent'] as $fixedField): ?><input type="hidden" name="<?= $fixedField ?>" value="<?= e((string) $editDefaults[$fixedField]) ?>"><?php endforeach; ?>
+        <?php endif; ?>
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <div class="workspace-form-grid">
-            <label>Account code<input value="Auto-generated on save" readonly></label>
+            <label>Account code<input value="<?= e((string) ($editAccount['code'] ?? 'Auto-generated on save')) ?>" readonly></label>
             <label>Account name<input name="name" maxlength="150" value="<?= $field('name') ?>" required></label>
             <label>Alias name<input name="alias_name" maxlength="160" value="<?= $field('alias_name') ?>"></label>
-            <label>Level<select name="level" id="account-level"><option disabled>Master (system-defined)</option><?php foreach (['group'=>'Group','subgroup'=>'Subgroup','ledger'=>'Ledger','subledger'=>'Subledger'] as $key=>$label): ?><option value="<?= $key ?>" <?= ($values['level'] ?? 'ledger') === $key ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?></select></label>
-            <label>Nature<select name="nature" id="account-nature"><?php foreach ($natureLabels as $key=>$label): ?><option value="<?= $key ?>" <?= ($values['nature'] ?? 'asset') === $key ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?></select></label>
-            <label>Parent<select name="parent" id="account-parent" class="js-searchable" required></select></label>
+            <label>Level<select name="level" id="account-level" <?= $editAccount ? 'disabled' : '' ?>><option disabled>Master (system-defined)</option><?php foreach (['group'=>'Group','subgroup'=>'Subgroup','ledger'=>'Ledger','subledger'=>'Subledger'] as $key=>$label): ?><option value="<?= $key ?>" <?= ($values['level'] ?? 'ledger') === $key ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?></select></label>
+            <label>Nature<select name="nature" id="account-nature" <?= $editAccount ? 'disabled' : '' ?>><?php foreach ($natureLabels as $key=>$label): ?><option value="<?= $key ?>" <?= ($values['nature'] ?? 'asset') === $key ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?></select></label>
+            <label>Parent<select name="parent" id="account-parent" <?= $editAccount ? 'disabled' : '' ?> class="js-searchable" required></select></label>
         </div>
         <fieldset id="account-contact"><legend>Contact details</legend>
         <div class="workspace-form-grid">
@@ -149,7 +184,7 @@ $field = static fn (string $key): string => e((string) ($values[$key] ?? ''));
                 <label class="checkbox-line" <?= $key === 'is_cash_or_bank' ? 'id="account-bank-group"' : '' ?>><input type="checkbox" name="<?= $key ?>" value="1" <?= !empty($values[$key]) ? 'checked' : '' ?>><?= $label ?></label>
             <?php endforeach; ?>
         </div></fieldset>
-        <div class="actions" style="margin-top:16px"><button class="button" type="submit" <?= $repairErrors ? 'disabled' : '' ?>>Create account</button><a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Cancel</a></div>
+        <div class="actions" style="margin-top:16px"><button class="button" type="submit" <?= $repairErrors ? 'disabled' : '' ?>><?= $editAccount ? 'Save changes' : 'Create account' ?></button><a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Cancel</a></div>
     </form>
 </section>
 <?php

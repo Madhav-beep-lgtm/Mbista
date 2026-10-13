@@ -5,6 +5,9 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && (int) ($_GET['edit_id'] ?? 0) > 0) {
+    redirect('admin/create-account.php?edit_id=' . (int) $_GET['edit_id']);
+}
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' && (int) ($_GET['edit_id'] ?? 0) <= 0) {
     redirect('admin/create-account.php');
 }
