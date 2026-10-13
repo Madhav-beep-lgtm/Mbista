@@ -72,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $companyId = (int) db()->lastInsertId();
+        db()->prepare("UPDATE companies SET inventory_accounting = 'periodic' WHERE id = ?")->execute([$companyId]);
         log_activity('company', $companyId, 'created', 'Company created from platform workflow.', (int) ($currentAdmin['id'] ?? 0));
         flash('success', 'Company created.');
         redirect($companiesRoute);

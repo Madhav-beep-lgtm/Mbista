@@ -7391,6 +7391,9 @@ function provision_client_books(int $clientProfileId): int
     db()->prepare('INSERT INTO companies (name, code, is_active, is_client_company) VALUES (:name, :code, 1, 1)')
         ->execute(['name' => (string) $profile['organization_name'] . ' (Client Books)', 'code' => $code]);
     $booksCompanyId = (int) db()->lastInsertId();
+    if (column_exists('companies', 'inventory_accounting')) {
+        db()->prepare("UPDATE companies SET inventory_accounting = 'periodic' WHERE id = ?")->execute([$booksCompanyId]);
+    }
 
     // Fiscal year mirrors the serving company's default/active year.
     $servingCompanyId = (int) ($profile['company_id'] ?? 0);

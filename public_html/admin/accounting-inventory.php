@@ -325,6 +325,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $validMethods = ['fifo', 'weighted_average', 'specific'];
+        $existingStockLedgerId = 0;
+        if ($itemId > 0) {
+            $stockLink = db()->prepare('SELECT ledger_id FROM inventory_items WHERE id = ? AND company_id = ?');
+            $stockLink->execute([$itemId, $companyId]);
+            $existingStockLedgerId = (int)$stockLink->fetchColumn();
+        }
         $valuationMethod = (string) ($_POST['valuation_method'] ?? 'weighted_average');
         if (!in_array($valuationMethod, $validMethods, true)) {
             $valuationMethod = 'weighted_average';
@@ -333,7 +339,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'company_id' => $companyId,
             // The legacy linked-ledger column follows the item's chosen
             // Inventory Asset ledger so older reads stay consistent.
-            'ledger_id' => (int) ($_POST['item_map']['inventory_asset'] ?? ($_POST['ledger_id'] ?? 0)) ?: null,
+            'ledger_id' => (int) ($_POST['item_map']['inventory_asset'] ?? ($_POST['ledger_id'] ?? $existingStockLedgerId)) ?: null,
             'sku' => $sku,
             'name' => $name,
             'category' => $categoryName !== '' ? $categoryName : null,

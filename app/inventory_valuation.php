@@ -872,16 +872,18 @@ function inv_periodic_trading_figures(int $companyId, string $from, string $to):
 
     /** Net movement on a mapped purpose over a window, debits positive. */
     $movement = static function (string $purpose, ?string $since, string $until) use ($companyId): float {
-        $row = inv_resolve_mapping($companyId, $purpose);
-        if (!$row) {
+        $mapped = db()->prepare('SELECT DISTINCT m.ledger_id FROM inventory_ledger_mappings m INNER JOIN ledgers l ON l.id = m.ledger_id AND l.company_id = m.company_id WHERE m.company_id = ? AND m.purpose = ?');
+        $mapped->execute([$companyId, $purpose]);
+        $ledgerIds = array_map('intval', $mapped->fetchAll(PDO::FETCH_COLUMN));
+        if (!$ledgerIds) {
             return 0.0;
         }
         $sql = "SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
             FROM voucher_entries ve
             INNER JOIN vouchers v ON v.id = ve.voucher_id
-            WHERE v.company_id = :cid AND ve.ledger_id = :lid AND v.status = 'posted'
+            WHERE v.company_id = :cid AND ve.ledger_id IN (" . implode(',', $ledgerIds) . ") AND v.status = 'posted'
               AND v.voucher_date <= :until";
-        $params = ['cid' => $companyId, 'lid' => (int) $row['id'], 'until' => $until];
+        $params = ['cid' => $companyId, 'until' => $until];
         if ($since !== null) {
             $sql .= ' AND v.voucher_date >= :since';
             $params['since'] = $since;
