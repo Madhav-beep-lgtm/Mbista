@@ -177,14 +177,22 @@ if ! php "$REPO_DIR/deploy/repair-schema.php" "$APP_BASE"; then
     die "database schema repair failed"
 fi
 echo "deploy: database schema is current"
-if [ -n "${ACCOUNT_CODE_MIGRATION:-}" ]; then
-    case "$ACCOUNT_CODE_MIGRATION" in
-        --dry-run|--apply) ;;
-        *) die "ACCOUNT_CODE_MIGRATION must be --dry-run or --apply" ;;
-    esac
-    php "$REPO_DIR/deploy/migrate-account-codes.php" "$APP_BASE" "$ACCOUNT_CODE_MIGRATION" \
-        || die "account code migration failed"
-fi
+# Account codes are part of this release, not a separate manual SQL step.
+# The migrator saves an audit and is transactional and idempotent.
+ACCOUNT_CODE_MODE="${ACCOUNT_CODE_MIGRATION:---apply}"
+case "$ACCOUNT_CODE_MODE" in
+    --dry-run|--apply) ;;
+    *) die "ACCOUNT_CODE_MIGRATION must be --dry-run or --apply" ;;
+esac
+php "$REPO_DIR/deploy/migrate-account-codes.php" "$APP_BASE" "$ACCOUNT_CODE_MODE" \
+    || die "account code migration failed"
+
+for ACCOUNT_SOURCE in app/coa_codes.php app/reports_engine.php; do
+    cmp -s "$REPO_DIR/$ACCOUNT_SOURCE" "$APP_BASE/$ACCOUNT_SOURCE" \
+        || die "$ACCOUNT_SOURCE does not match the deployed version"
+done
+cmp -s "$REPO_DIR/public_html/admin/chart-of-accounts.php" "$DOCROOT/admin/chart-of-accounts.php" \
+    || die "Chart of Accounts page does not match the deployed version"
 
 # Prove the copy actually landed, rather than trusting that it did.
 #

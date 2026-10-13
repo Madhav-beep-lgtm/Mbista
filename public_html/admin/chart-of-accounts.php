@@ -444,8 +444,8 @@ $coaRowPill = static function (string $status): string {
                 <thead><tr><th scope="col" style="width:240px">Code</th><th scope="col">Account name</th><th scope="col" style="width:100px">Level</th><th scope="col" style="width:110px">Nature</th><th scope="col" style="width:110px">Status</th><th scope="col" style="width:140px">Actions</th></tr></thead>
                 <tbody>
                 <?php foreach ($natureOrder as $nature => [$digit, $natureLabel]): ?>
-                    <tr class="coa-node coa-master-row" data-name="<?= e(strtolower($natureLabel)) ?>">
-                        <td><button type="button" class="coa-tgl" data-parent="m<?= e($digit) ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <strong style="color:var(--mbw-heading)"><?= e(coa_code_format((int) $digit)) ?></strong></td>
+                    <tr class="coa-node coa-master-row" data-branch="m<?= e($digit) ?>" data-name="<?= e(strtolower($natureLabel . ' ' . coa_code_format((int) $digit))) ?>">
+                        <td><?= e(coa_code_format((int) $digit)) ?></td>
                         <td><strong style="color:var(--mbw-heading)"><?= e($natureLabel) ?></strong></td>
                         <td><span class="mbw-pill tone-blue">Master</span></td>
                         <td><?= e(ucfirst((string) $nature)) ?></td>
@@ -454,8 +454,8 @@ $coaRowPill = static function (string $status): string {
                     </tr>
                     <?php foreach ($groupsByNature[$nature] as $g): ?>
                         <?php $gid = (int) $g['id']; ?>
-                        <tr class="coa-node coa-child coa-group-row" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
-                            <td style="padding-left:32px"><button type="button" class="coa-tgl" data-parent="g<?= $gid ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <?= e($g['code']) ?></td>
+                        <tr class="coa-node coa-child coa-group-row" data-branch="g<?= $gid ?>" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
+                            <td><?= e($g['code']) ?></td>
                             <td style="padding-left:18px"><?= e($g['name']) ?></td>
                             <td><span class="mbw-pill tone-purple"><?= !empty($g['parent_group_id']) ? 'Subgroup' : 'Group' ?></span></td>
                             <td><?= e(ucfirst((string) (ledger_master_nature((string) $g['master_key']) ?? ''))) ?></td>
@@ -464,7 +464,7 @@ $coaRowPill = static function (string $status): string {
                         </tr>
                         <?php foreach ($ledgersByGroup[$gid] ?? [] as $l): ?>
                             <tr class="coa-node coa-child" data-parent-of="m<?= e($digit) ?> g<?= $gid ?>" data-name="<?= e(strtolower($l['name'] . ' ' . $l['code'])) ?>">
-                                <td style="padding-left:64px"><?= e($l['code']) ?></td>
+                                <td><?= e($l['code']) ?></td>
                                 <td style="padding-left:36px"><?= e($l['name']) ?></td>
                                 <td><span class="mbw-pill tone-teal"><?= !empty($l['parent_ledger_id']) ? 'Subledger' : 'Ledger' ?></span></td>
                                 <td><?= e(ucfirst((string) $l['type'])) ?></td>
@@ -556,8 +556,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var rows = Array.from(document.querySelectorAll('#coa-tree .coa-node'));
     var branches = {};
     rows.forEach(function (row) {
-        var toggle = row.querySelector('.coa-tgl');
-        if (toggle) branches[toggle.getAttribute('data-parent')] = row;
+        var branch = row.getAttribute('data-branch');
+        if (branch) branches[branch] = row;
     });
     function updateView() {
         var kind = view.value;
@@ -582,13 +582,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
         rows.forEach(function (row) {
-            var parents = (row.getAttribute('data-parent-of') || '').split(' ').filter(Boolean);
-            var collapsed = kind === 'hierarchy' && !q && parents.some(function (key) {
-                return branches[key] && branches[key].dataset.collapsed === 'true';
-            });
-            row.style.display = matches.has(row) && !collapsed ? '' : 'none';
-            var toggle = row.querySelector('.coa-tgl');
-            if (toggle) toggle.hidden = kind !== 'hierarchy';
+            row.style.display = matches.has(row) ? '' : 'none';
         });
         document.getElementById('coa-no-matches').hidden = matches.size !== 0;
         ['coa-posting-panel', 'coa-audit-panel'].forEach(function (id) {
@@ -605,16 +599,6 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     view.addEventListener('change', updateView);
     search.addEventListener('input', updateView);
-    // Collapse/expand branches.
-    document.querySelectorAll('.coa-tgl').forEach(function (toggle) {
-        toggle.addEventListener('click', function () {
-            var key = toggle.getAttribute('data-parent');
-            var open = toggle.textContent.trim() === '▾';
-            toggle.textContent = open ? '▸' : '▾';
-            branches[key].dataset.collapsed = open ? 'true' : 'false';
-            updateView();
-        });
-    });
     updateView();
 });
 </script>
