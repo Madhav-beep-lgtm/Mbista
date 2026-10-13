@@ -16,7 +16,7 @@ $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
 $headerScript = $headerScript === 'create-account.php' ? 'chart-ledgers.php' : $headerScript;
 $headerTab = (string) ($_GET['tab'] ?? '');
 $headerView = (string) ($_GET['view'] ?? '');
-$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php', 'day-book.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php'], true);
+$headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php', 'day-book.php', 'accounting-parties.php', 'accounting-dashboard.php', 'items.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php'], true);
 $headerCompanyId = (int) ($headerCompany['id'] ?? 0);
 $headerCompanyCode = (string) ($headerCompany['code'] ?? '');
 $headerIsClientBooks = (int) ($headerCompany['is_client_company'] ?? 0) === 1;
@@ -66,7 +66,7 @@ $headerPageIcons = [
     'index.php' => 'home', 'accounting-dashboard.php' => 'dashboard', 'consolidated-report.php' => 'layers',
     'accounting.php' => 'journal', 'voucher-form.php' => 'journal', 'voucher-import.php' => 'upload',
     'ledgers.php' => 'contracts', 'day-book.php' => 'calendar',
-    'accounting-parties.php' => 'receipt-voucher', 'accounting-inventory.php' => 'box', 'fixed-assets.php' => 'tag', 'banking.php' => 'bank',
+    'accounting-parties.php' => 'receipt-voucher', 'items.php' => 'box', 'accounting-inventory.php' => 'box', 'fixed-assets.php' => 'tag', 'banking.php' => 'bank',
     'reconciliation.php' => 'reconcile', 'chart-of-accounts.php' => 'tree', 'chart-groups.php' => 'tree',
     'chart-ledgers.php' => 'tree', 'chart-posting-accounts.php' => 'tree', 'chart-masters.php' => 'tree',
     'invoice.php' => 'invoices', 'reports-center.php' => 'reports', 'report-schedules.php' => 'calendar',
@@ -90,12 +90,12 @@ if ($pageBreadcrumb === null) {
     $headerTrailHome = [['Home', $headerIsClientBooks ? 'admin/accounting-dashboard.php' : 'admin/index.php']];
     $headerTrailReports = [['Home', 'admin/index.php'], ['Reports', 'admin/reports-center.php']];
     $headerTrailAccounting = [['Home', 'admin/index.php'], ['Accounting', 'admin/accounting-dashboard.php']];
-    $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'payment-gateways.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
+    $headerAccountingScripts = ['accounting.php', 'ledgers.php', 'day-book.php', 'voucher-form.php', 'voucher-import.php', 'accounting-parties.php', 'payment-gateways.php', 'items.php', 'accounting-inventory.php', 'fixed-assets.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'chart-masters.php', 'invoice.php', 'budgets.php'];
     if (in_array($headerScript, ['report-schedules.php', 'consolidated-report.php'], true)) {
         $pageBreadcrumb = $headerTrailReports;
     } elseif (in_array($headerScript, $headerPayrollScripts, true)) {
         $pageBreadcrumb = [['Home', 'admin/index.php'], ['Payroll', 'admin/payroll.php']];
-    } elseif (in_array($headerScript, ['accounting-inventory.php', 'stock-summary-report.php', 'stock-ledger.php'], true)) {
+    } elseif (in_array($headerScript, ['items.php', 'accounting-inventory.php', 'stock-summary-report.php', 'stock-ledger.php'], true)) {
         $pageBreadcrumb = array_merge($headerTrailHome, [['Inventory Management', 'admin/accounting-inventory.php']]);
     } elseif ($headerScript === 'fixed-assets.php') {
         $pageBreadcrumb = $headerView === 'leases'

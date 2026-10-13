@@ -1,6 +1,6 @@
 <?php
 // Shared company-books navigation for admin, staff and client users.
-$inventoryNavActive = in_array($headerScript, ['accounting-inventory.php', 'stock-summary-report.php', 'stock-ledger.php'], true);
+$inventoryNavActive = in_array($headerScript, ['items.php', 'accounting-inventory.php', 'stock-summary-report.php', 'stock-ledger.php'], true);
 ?>
 <span class="admin-nav-group">Management</span>
 <div class="mbw-nav-parent<?= $inventoryNavActive ? ' is-open' : '' ?>" data-nav-parent="inventory-management">
@@ -9,7 +9,7 @@ $inventoryNavActive = in_array($headerScript, ['accounting-inventory.php', 'stoc
         <span class="mbw-nav-caret"><?= icon('chevron') ?></span>
     </a>
     <div class="mbw-subnav">
-        <a class="<?= $headerScript === 'accounting-inventory.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('box') ?>Items &amp; Manufacturing</a>
+        <a class="<?= $headerScript === 'items.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/items.php')) ?>"><?= icon('box') ?>Items</a>
         <a class="<?= in_array($headerScript, ['stock-summary-report.php', 'stock-ledger.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/stock-summary-report.php')) ?>"><?= icon('reports') ?>Inventory Summary</a>
     </div>
 </div>
