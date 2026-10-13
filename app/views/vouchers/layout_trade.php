@@ -137,7 +137,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                     <tr>
                         <th style="width:36px">SN</th>
                         <th style="width:190px" data-goods-field>Inventory item <em>*</em></th>
-                        <?php if ($spec['value_role'] === 'income'): ?><th style="width:200px">Sales ledger <em>*</em></th><?php endif; ?>
+                        <?php if ($spec['value_role'] === 'income'): ?><th style="width:200px" data-service-ledger>Sales ledger <em>*</em></th><?php endif; ?>
                         <th data-description-heading data-service-field>Service</th><th style="width:180px">Cost centre <em>*</em></th>
                         <th class="is-numeric" style="width:100px" data-goods-field>Qty</th>
                         <th class="is-numeric" style="width:120px" data-goods-field>Rate</th>
@@ -165,12 +165,12 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                                     data-name="<?= e((string) $item['name']) ?>"
                                     data-unit="<?= e((string) $item['unit']) ?>"
                                     data-rate="<?= e(number_format((float) $item[$spec['key'] === 'sales' || $spec['key'] === 'credit_note' ? 'sales_rate' : 'purchase_rate'], 2, '.', '')) ?>"
-                                    data-ledger="<?= (int) $item['stock_ledger_id'] ?>"><?= e((string) $item['name']) ?> (<?= e((string) $item['sku']) ?>)</option>
+                                    data-ledger="<?= (int) ($spec['value_role'] === 'income' ? $item['sales_ledger_id'] : $item['stock_ledger_id']) ?>"><?= e((string) $item['name']) ?> (<?= e((string) $item['sku']) ?>)</option>
                         <?php endforeach; ?>
                     </select>
                 </td>
                 <?php if ($spec['value_role'] === 'income'): ?>
-                <td>
+                <td data-service-ledger>
                     <select name="value_ledger[]" data-field="ledger_id" class="vch-ledger">
                         <option value="">Select ledger</option>
                         <?= $renderLedgerOptions($optionsValue, 0) ?>
@@ -290,6 +290,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (rateField && (Number(rateField.value) || 0) === 0) { rateField.value = option.getAttribute('data-rate') || ''; }
         if (qtyField && (Number(qtyField.value) || 0) === 0) { qtyField.value = '1'; }
         var stockLedger = option.getAttribute('data-ledger');
+        if (document.getElementById('vch-trade-mode').value === 'goods' && ledgerField) {
+            ledgerField.value = stockLedger || '';
+        }
         if (ledgerField && ledgerField.type === 'hidden') { ledgerField.value = stockLedger || ''; }
         if (stockDirection === 'in' && ledgerField && ledgerField.value === '' && stockLedger && stockLedger !== '0'
             && ledgerField.querySelector('option[value="' + stockLedger + '"]')) {
@@ -307,6 +310,7 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
         form.querySelectorAll('[data-service-field]').forEach(function (cell) { cell.hidden = goods; });
+        form.querySelectorAll('[data-service-ledger]').forEach(function (cell) { cell.hidden = goods; });
         var title = form.querySelector('[data-description-heading]');
         if (title) title.textContent = goods ? 'Description' : 'Service';
     }

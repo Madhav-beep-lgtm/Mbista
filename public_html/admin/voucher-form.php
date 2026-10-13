@@ -175,6 +175,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 continue;
             }
             $composeInput['value_description'][$index] = (string) $selectedItem['name'];
+            if (in_array($voucherType, ['sales', 'credit_note'], true)) {
+                $salesLedger = inv_resolve_mapping($companyId, 'sales_revenue', (int) $selectedItem['id'], (string) ($selectedItem['category'] ?? ''));
+                $salesLedgerId = (int) ($salesLedger['id'] ?? 0);
+                $composeInput['value_ledger'][$index] = $salesLedgerId;
+                if ($salesLedgerId <= 0 || empty($ledgerDirectory[$salesLedgerId]['roles']['income'])) {
+                    $problems[] = 'Configure an active sales revenue ledger on item "' . $selectedItem['name'] . '" before saving.';
+                }
+            }
             if (in_array($voucherType, ['purchase', 'debit_note'], true)) {
                 $purchaseLedgerId = inv_accounting_method($companyId) === 'periodic'
                     ? (int) (inv_resolve_mapping($companyId, 'purchases', (int) $selectedItem['id'], (string) ($selectedItem['category'] ?? ''))['id'] ?? 0)
@@ -616,6 +624,7 @@ if ($stockMovementType !== null && voucher_stock_ready()) {
     $itemStmt->execute(['company_id' => $companyId]);
     foreach ($itemStmt->fetchAll() as $item) {
         $item['stock_ledger_id'] = inv_item_stock_ledger_id($companyId, $item);
+        $item['sales_ledger_id'] = (int) (inv_resolve_mapping($companyId, 'sales_revenue', (int) $item['id'], (string) ($item['category'] ?? ''))['id'] ?? 0);
         if (in_array($spec['key'], ['purchase', 'debit_note'], true) && inv_accounting_method($companyId) === 'periodic') {
             $item['stock_ledger_id'] = (int) (inv_resolve_mapping($companyId, 'purchases', (int) $item['id'], (string) ($item['category'] ?? ''))['id'] ?? 0);
         }

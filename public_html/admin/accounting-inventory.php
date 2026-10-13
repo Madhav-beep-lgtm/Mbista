@@ -2857,8 +2857,8 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             // every item in the company and every purchase would still land in
             // one shared account, which is not a mapping anybody chose.
             $itemFormPurposes = inv_accounting_method($companyId) === 'periodic'
-                ? ['purchases', 'purchase_clearing', 'inventory_asset', 'cogs', 'opening_equity']
-                : ['inventory_asset', 'purchase_clearing', 'cogs', 'opening_equity'];
+                ? ['purchases', 'sales_revenue', 'purchase_clearing', 'inventory_asset', 'cogs', 'opening_equity']
+                : ['inventory_asset', 'sales_revenue', 'purchase_clearing', 'cogs', 'opening_equity'];
             $itemPurposeMeta = inventory_mapping_purposes();
             ?>
             <?php foreach ($itemFormPurposes as $itemFormPurpose): ?>
