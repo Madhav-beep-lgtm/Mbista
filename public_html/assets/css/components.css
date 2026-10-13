@@ -606,3 +606,10 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .vch-bill-dialog .frm-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
 .vch-bill-actions { display:flex; justify-content:flex-end; gap:10px; margin:12px 0; }
 @media(max-width:480px) { .vch-bill-dialog .frm-grid { grid-template-columns:1fr; } }
+.frm-grid.vch-header-grid { grid-template-columns:repeat(3,minmax(0,260px)); align-items:start; justify-content:start; gap:16px; }
+.vch-header-grid input:not([type="hidden"]), .vch-header-grid select { width:100%; min-width:0; height:40px; min-height:40px; }
+.voucher-preview { width:min(1000px,95vw); height:90vh; max-height:90vh; padding:0; border:1px solid #000; border-radius:8px; }
+.voucher-preview::backdrop { background:rgba(0,0,0,.45); }
+.voucher-preview-toolbar { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; }
+.voucher-preview iframe { display:block; width:100%; height:calc(100% - 64px); border:0; }
+@media(max-width:640px) { .frm-grid.vch-header-grid { grid-template-columns:1fr; } }

@@ -1,7 +1,7 @@
 /*
  * Bikram Sambat conversion for the browser — mirrors app/nepali_date.php
  * (same canonical BS 2000-2090 table, digit = month days - 28).
- * Adds a live BS hint under every date input on portal pages.
+ * Uses a single same-sized date control in either AD or BS mode.
  */
 (function () {
   'use strict';
@@ -70,61 +70,48 @@
 
   // Build a BS Y/M/D picker bound to a native (AD) date input.
   function buildBsPicker(input) {
-    var wrap = document.createElement('span');
-    wrap.className = 'bs-picker';
-    wrap.style.cssText = 'display:inline-flex;gap:4px';
-    var ySel = document.createElement('select');
-    var mSel = document.createElement('select');
-    var dSel = document.createElement('select');
-    [ySel, mSel, dSel].forEach(function (sel) {
-      sel.style.cssText = 'min-height:38px;border:1px solid var(--mbw-border,#e3e9f2);border-radius:8px;background:var(--mbw-card,#fff);color:var(--mbw-heading,#16263e);font-size:12.5px;padding:4px 6px';
-    });
-    var y;
-    for (y = FIRST_YEAR + DATA.length - 1; y >= FIRST_YEAR; y--) {
-      ySel.insertAdjacentHTML('beforeend', '<option value="' + y + '">' + y + '</option>');
+    var picker = document.createElement('input');
+    picker.type = 'text';
+    picker.className = input.className;
+    picker.style.cssText = input.style.cssText;
+    picker.placeholder = 'YYYY-MM-DD (BS)';
+    picker.inputMode = 'numeric';
+    picker.pattern = '[0-9]{4}-[0-9]{2}-[0-9]{2}';
+    picker.required = input.required;
+    picker.disabled = input.disabled;
+    picker.readOnly = input.readOnly;
+    picker.setAttribute('aria-label', (input.getAttribute('aria-label') || 'Date') + ' (BS, YYYY-MM-DD)');
+    var minimum = input.min, maximum = input.max;
+    function sync() {
+      var bs = input.value ? adToBs(input.value) : null;
+      picker.value = bs ? bs.y + '-' + pad(bs.m) + '-' + pad(bs.d) : '';
+      picker.setCustomValidity(input.value && !bs ? 'Date is outside the supported BS calendar.' : '');
     }
-    MONTHS.forEach(function (name, i) {
-      mSel.insertAdjacentHTML('beforeend', '<option value="' + (i + 1) + '">' + name + '</option>');
-    });
-
-    function fillDays() {
-      var dim = monthDays(+ySel.value, +mSel.value);
-      var cur = +dSel.value || 1;
-      dSel.innerHTML = '';
-      for (var d = 1; d <= dim; d++) {
-        dSel.insertAdjacentHTML('beforeend', '<option value="' + d + '">' + d + '</option>');
+    picker.addEventListener('input', function () {
+      var parts = picker.value.split('-').map(Number);
+      var valid = /^\d{4}-\d{2}-\d{2}$/.test(picker.value) && parts[1] >= 1 && parts[1] <= 12 &&
+        parts[2] >= 1 && parts[2] <= monthDays(parts[0], parts[1]);
+      var ad = valid ? bsToAd(parts[0], parts[1], parts[2]) : null;
+      var message = picker.value && !ad ? 'Enter a valid BS date (YYYY-MM-DD).' : '';
+      if (ad && ((minimum && ad < minimum) || (maximum && ad > maximum))) {
+        message = 'Date must be within the permitted date range.';
       }
-      dSel.value = Math.min(cur, dim);
-    }
-
-    function pushToInput() {
-      var ad = bsToAd(+ySel.value, +mSel.value, +dSel.value);
-      if (ad) {
-        input.value = ad;
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    }
-
-    // Seed from the input's current AD value, else today.
-    var seed = input.value ? adToBs(input.value) : adToBs(new Date().toISOString().slice(0, 10));
-    if (seed) { ySel.value = seed.y; mSel.value = seed.m; }
-    fillDays();
-    if (seed) { dSel.value = seed.d; }
-    if (!input.value) { pushToInput(); }
-
-    ySel.addEventListener('change', function () { fillDays(); pushToInput(); });
-    mSel.addEventListener('change', function () { fillDays(); pushToInput(); });
-    dSel.addEventListener('change', pushToInput);
-
-    wrap.appendChild(ySel);
-    wrap.appendChild(mSel);
-    wrap.appendChild(dSel);
-    input.style.display = 'none';
-    input.insertAdjacentElement('afterend', wrap);
+      picker.setCustomValidity(message);
+      input.value = ad || '';
+      // Do not replace a partially typed date with a converted value.
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    picker.addEventListener('change', function () {
+      if (picker.validity.valid) { input.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
+    input.addEventListener('change', sync);
+    input.type = 'hidden';
+    input.required = false;
+    input.insertAdjacentElement('afterend', picker);
+    sync();
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    if (!document.body.classList.contains('admin-layout')) { return; }
     document.querySelectorAll('[data-bs-calendar-toggle]').forEach(function (toggle) {
       var panel = toggle.parentElement.querySelector('[data-bs-calendar-panel]');
       var today = adToBs(toggle.getAttribute('data-ad-today'));
@@ -170,31 +157,8 @@
       });
     });
     var mode = document.body.getAttribute('data-date-mode') || 'both';
-    if (mode === 'ad') { return; }
-
-    document.querySelectorAll('input[type="date"]').forEach(function (input) {
-      if (mode === 'bs') {
-        buildBsPicker(input);
-        return;
-      }
-      // 'both': keep the native AD input, add a live BS hint underneath.
-      var hint = document.createElement('small');
-      hint.className = 'bs-date-hint';
-      hint.style.cssText = 'display:block;margin-top:3px;font-size:10.5px;font-weight:500;letter-spacing:0.02em;color:var(--mbw-muted,#64748b)';
-      // Keep the input and its hint in one grid item. A third label child
-      // otherwise stretches sibling controls and misaligns the whole row.
-      var field = document.createElement('span');
-      field.className = 'dual-date-field';
-      input.parentNode.insertBefore(field, input);
-      field.appendChild(input);
-      field.appendChild(hint);
-      var update = function () {
-        var bs = input.value ? adToBs(input.value) : null;
-        hint.textContent = bs ? bs.str + ' BS' : '';
-      };
-      input.addEventListener('change', update);
-      input.addEventListener('input', update);
-      update();
-    });
+    // AD and Both use one AD control; no secondary converted-date line.
+    if (mode !== 'bs') { return; }
+    document.querySelectorAll('input[type="date"]').forEach(buildBsPicker);
   });
 })();

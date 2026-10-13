@@ -215,7 +215,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     ?>
                     <tr>
                         <td><?= e(date('d M Y', strtotime((string) $row['entry_date']))) ?></td>
-                        <td><a class="reference-link" href="<?= e(url('admin/voucher-form.php?edit=' . (int) $row['voucher_id'])) ?>"><?= e($row['voucher_no']) ?></a></td>
+                        <td><a class="reference-link" data-voucher-preview href="<?= e(url('admin/voucher-view.php?id=' . (int) $row['voucher_id'])) ?>"><?= e($row['voucher_no']) ?></a></td>
                         <td><?= e($row['voucher_type']) ?></td>
                         <td><?= e($row['party_name'] ?? '—') ?></td>
                         <td><?= e((string) ($row['memo'] ?: $row['narration'] ?: $row['reference_no'] ?: '')) ?></td>
@@ -259,4 +259,5 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 </section>
 
+<?php include __DIR__ . '/../../app/views/vouchers/preview_dialog.php'; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

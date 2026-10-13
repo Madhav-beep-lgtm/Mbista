@@ -11,4 +11,6 @@ These are the user's standing preferences for changes across this app:
 - Use one creation-only Create account flow for groups, subgroups, ledgers and subledgers. Masters remain system-defined. Subledgers belong to ledgers; groups/subgroups belong to masters/groups. Keep account listings and filters in Chart of Accounts, not on the creation form. Type is the section for Fixed Asset, Maintain bill by bill and Cost centre settings; Nature is the accounting classification.
 - Keep platform administration separate from individual company books; do not implicitly switch company context.
 - Apply these conventions to subsequent app changes. Do not claim that an app-wide migration has been completed without checking and updating those surfaces.
+- Date fields show one AD or BS control without a secondary converted-date hint; changing modes must preserve control size and alignment. Voucher type, number and date use a compact horizontal row.
+- Voucher numbers open a read-only journal popup. All voucher types share a black-and-white print layout with company name/address, voucher type/date/number, financial year, bordered debit/credit entries, totals and maker/checker signature lines.
 - After completing and checking requested changes, commit the task's files and push to GitHub as the user requested. Preserve unrelated working-tree changes.

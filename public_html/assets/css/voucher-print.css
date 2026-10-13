@@ -1,0 +1,18 @@
+* { box-sizing:border-box; }
+body { margin:0; background:#fff; color:#000; font:13px/1.5 Arial,sans-serif; }
+.print-toolbar { padding:12px; text-align:right; border-bottom:1px solid #000; }
+.print-toolbar button { padding:8px 18px; color:#000; background:#fff; border:1px solid #000; cursor:pointer; }
+.voucher-document { max-width:210mm; margin:0 auto; padding:16mm 12mm; }
+header { text-align:center; margin-bottom:20px; }
+h1 { margin:0; font-size:22px; } h2 { margin:12px 0 0; font-size:18px; } p { margin:4px 0; }
+.voucher-meta { display:grid; grid-template-columns:1fr 1fr; gap:8px 20px; margin-bottom:16px; }
+table { width:100%; border-collapse:collapse; table-layout:fixed; }
+th,td { border:1px solid #000; padding:8px; vertical-align:top; text-align:left; overflow-wrap:anywhere; }
+thead { display:table-header-group; } tr { break-inside:avoid; }
+.serial { width:7%; } .amount { width:17%; text-align:right; font-variant-numeric:tabular-nums; }
+.narration { padding:12px 0; white-space:normal; overflow-wrap:anywhere; }
+.signatures { display:flex; justify-content:space-between; gap:40px; margin-top:65px; break-inside:avoid; }
+.signatures>div { width:42%; } .signature-line { border-top:1px solid #000; margin-bottom:8px; }
+@page { size:A4; margin:14mm; }
+@media print { .print-toolbar { display:none; } .voucher-document { max-width:none; padding:0; } body { color:#000; background:#fff; } }
+@media screen and (max-width:540px) { .voucher-document { padding:16px; } .voucher-meta { grid-template-columns:1fr; } th,td { padding:5px; } }

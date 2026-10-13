@@ -484,7 +484,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php foreach ($vouchers as $voucher): ?>
                 <tr>
                     <td><?= e($voucher['voucher_date'] ?? date('Y-m-d', strtotime((string) $voucher['posted_at']))) ?></td>
-                    <td><?= e($voucher['voucher_no']) ?></td>
+                    <td><a href="<?= e(url('admin/voucher-view.php?id=' . (int) $voucher['id'])) ?>" data-voucher-preview><?= e($voucher['voucher_no']) ?></a></td>
                     <td><?php $vRowType = voucher_type_spec((string) $voucher['voucher_type']); ?><span class="mbw-pill tone-<?= e((string) $vRowType['tone']) ?>"><?= e((string) $vRowType['short']) ?></span></td>
                     <td><?= e($voucher['party_name'] ?? '') ?></td>
                     <td><?= e($voucher['reference_no'] ?? '') ?></td>
@@ -557,4 +557,5 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
+<?php include __DIR__ . '/../../app/views/vouchers/preview_dialog.php'; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

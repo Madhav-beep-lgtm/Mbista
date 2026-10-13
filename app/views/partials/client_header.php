@@ -81,7 +81,6 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
                     <select name="date_mode" onchange="this.form.submit()" title="Date display: English / Nepali" style="min-height:40px;border:1px solid var(--mbw-border);border-radius:10px;background:var(--mbw-card);color:var(--mbw-heading);font-size:12px;font-weight:700;padding:4px 8px;cursor:pointer">
                         <option value="ad" <?= date_mode() === 'ad' ? 'selected' : '' ?>>AD</option>
                         <option value="bs" <?= date_mode() === 'bs' ? 'selected' : '' ?>>BS</option>
-                        <option value="both" <?= date_mode() === 'both' ? 'selected' : '' ?>>AD+BS</option>
                     </select>
                 </form>
 

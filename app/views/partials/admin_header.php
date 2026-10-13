@@ -576,7 +576,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 $headerNextLanguage = $headerLanguageCodes[((int) $headerLanguageIndex + 1) % count($headerLanguageCodes)];
                 $headerLanguageQuery = $_GET;
                 $headerLanguageQuery['lang'] = $headerNextLanguage;
-                $headerDateModes = ['ad', 'bs', 'both'];
+                $headerDateModes = ['ad', 'bs'];
                 $headerDateModeIndex = array_search(date_mode(), $headerDateModes, true);
                 $headerNextDateMode = $headerDateModes[((int) $headerDateModeIndex + 1) % count($headerDateModes)];
                 ?>

@@ -22,7 +22,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 require_once __DIR__ . '/nepali_date.php';
 
 /**
- * Active date display mode for the current user: 'ad', 'bs', or 'both'.
+ * Active date display mode: AD or BS. Legacy 'both' preferences use AD.
  * Session overrides the company default (settings key 'date_mode').
  */
 function date_mode(): string
@@ -31,7 +31,7 @@ function date_mode(): string
     if (!in_array($mode, ['ad', 'bs', 'both'], true)) {
         $mode = (string) (function_exists('setting') ? setting('date_mode', 'both') : 'both');
     }
-    return in_array($mode, ['ad', 'bs', 'both'], true) ? $mode : 'both';
+    return $mode === 'bs' ? 'bs' : 'ad';
 }
 
 /**

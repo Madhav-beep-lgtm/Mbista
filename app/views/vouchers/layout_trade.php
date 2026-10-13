@@ -75,9 +75,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                 <?= $renderLedgerOptions($optionsCashBank, $settlementMode === 'cash' ? (int) ($prefill['settlement_ledger_id'] ?? 0) : 0) ?>
             </select>
         </label>
-        <label><?= e((string) $spec['reference_label']) ?>
-            <input type="text" name="reference_no" maxlength="120" placeholder="<?= e($spec['key'] === 'purchase' ? "The supplier's number" : 'Document number') ?>" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
-        </label>
+        <input type="hidden" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
         <label><?= e((string) $spec['reference_date_label']) ?>
             <input type="date" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">
         </label>

@@ -6,8 +6,8 @@ require_login();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
-    $mode = (string) ($_POST['date_mode'] ?? 'both');
-    if (in_array($mode, ['ad', 'bs', 'both'], true)) {
+    $mode = (string) ($_POST['date_mode'] ?? 'ad');
+    if (in_array($mode, ['ad', 'bs'], true)) {
         $_SESSION['app_date_mode'] = $mode;
     }
 }
