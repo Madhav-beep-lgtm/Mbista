@@ -262,16 +262,16 @@ $statusPill = static fn (string $status): string => $status === 'active'
     </details>
 </div>
 
-<form method="get" class="coa-filter-bar">
-    <label>View
+<form method="get" class="coa-filter-bar" style="display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px;margin:14px 0">
+    <label style="flex:0 1 180px;min-width:0">View
         <select id="coa-section" name="view" aria-controls="coa-tree-panel coa-posting-panel coa-audit-panel">
             <?php foreach ($coaViews as $viewKey => $viewLabel): ?>
                 <option value="<?= e($viewKey) ?>" <?= $coaView === $viewKey ? 'selected' : '' ?>><?= e($viewLabel) ?></option>
             <?php endforeach; ?>
         </select>
     </label>
-    <label>Ledger or group
-        <input type="search" id="coa-search" name="q" value="<?= e($coaSearch) ?>" placeholder="Search ledgers or groups...">
+    <label style="flex:0 1 240px;min-width:0">Accounts
+        <input type="search" id="coa-search" name="q" value="<?= e($coaSearch) ?>" placeholder="Search accounts...">
     </label>
     <div style="align-self:end;display:flex;gap:10px">
         <button class="button" type="submit"><?= icon('search') ?>Filter</button>

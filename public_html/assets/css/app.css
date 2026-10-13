@@ -377,8 +377,8 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .action-menu-options a { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--color-text); border-radius: var(--radius-control); }
 .action-menu-options a:hover, .action-menu-options a:focus-visible { background: var(--color-primary-soft); color: var(--color-primary); }
 .chart-accounts-page .coa-filter-bar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
-.chart-accounts-page .coa-filter-bar > label { width: 220px; max-width: 100%; font-size: 13px; }
-.chart-accounts-page .coa-filter-bar > label:nth-child(2) { width: 280px; }
+.chart-accounts-page .coa-filter-bar > label { width: 180px; max-width: 100%; min-width: 0; font-size: 13px; }
+.chart-accounts-page .coa-filter-bar > label:nth-child(2) { width: 240px; }
 .chart-accounts-page .coa-filter-bar input,
 .chart-accounts-page .coa-filter-bar select,
 .chart-accounts-page .coa-filter-bar .button { min-height: 36px; height: 36px; padding: 6px 10px; font-size: 13px; }
