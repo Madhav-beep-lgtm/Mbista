@@ -447,13 +447,14 @@ $coaRowPill = static function (string $status): string {
     <section class="mbw-card" id="coa-tree-panel" aria-label="Chart of accounts hierarchy">
         <div style="overflow-x:auto">
             <table id="coa-tree" class="coa-table">
-                <thead><tr><th scope="col" style="width:240px">Code</th><th scope="col">Name</th><th scope="col" style="width:100px">Type</th><th scope="col" style="width:110px">Status</th><th scope="col" style="width:140px">Actions</th></tr></thead>
+                <thead><tr><th scope="col" style="width:240px">Code</th><th scope="col">Account name</th><th scope="col" style="width:100px">Level</th><th scope="col" style="width:110px">Nature</th><th scope="col" style="width:110px">Status</th><th scope="col" style="width:140px">Actions</th></tr></thead>
                 <tbody>
                 <?php foreach ($natureOrder as $nature => [$digit, $natureLabel]): ?>
                     <tr class="coa-node coa-master-row" data-name="<?= e(strtolower($natureLabel)) ?>">
                         <td><button type="button" class="coa-tgl" data-parent="m<?= e($digit) ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <strong style="color:var(--mbw-heading)"><?= e($digit) ?></strong></td>
                         <td><strong style="color:var(--mbw-heading)"><?= e($natureLabel) ?></strong></td>
                         <td><span class="mbw-pill tone-blue">Master</span></td>
+                        <td><?= e(ucfirst((string) $nature)) ?></td>
                         <td><span class="mbw-pill tone-green">Active</span></td>
                         <td><span style="color:var(--mbw-muted);font-size:11.5px">System-defined</span></td>
                     </tr>
@@ -463,6 +464,7 @@ $coaRowPill = static function (string $status): string {
                             <td style="padding-left:32px"><button type="button" class="coa-tgl" data-parent="g<?= $gid ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <?= e($g['code']) ?></td>
                             <td style="padding-left:18px"><?= e($g['name']) ?></td>
                             <td><span class="mbw-pill tone-purple">Group</span></td>
+                            <td><?= e(ucfirst((string) (ledger_master_nature((string) $g['master_key']) ?? ''))) ?></td>
                             <td><?= (int) $g['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
                             <td><a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Edit</a></td>
                         </tr>
@@ -471,6 +473,7 @@ $coaRowPill = static function (string $status): string {
                                 <td style="padding-left:64px"><?= e($l['code']) ?></td>
                                 <td style="padding-left:36px"><?= e($l['name']) ?></td>
                                 <td><span class="mbw-pill tone-teal">Ledger</span></td>
+                                <td><?= e(ucfirst((string) $l['type'])) ?></td>
                                 <td><?= $statusPill((string) $l['status']) ?></td>
                                 <td><div class="coa-row-actions">
                                     <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $l['id'])) ?>" title="View statement"><?= icon('search') ?></a>
@@ -486,6 +489,7 @@ $coaRowPill = static function (string $status): string {
                         <td><?= e($l['code']) ?></td>
                         <td><?= e($l['name']) ?> <span class="mbw-pill tone-amber">No group</span></td>
                         <td><span class="mbw-pill tone-teal">Ledger</span></td>
+                        <td><?= e(ucfirst((string) $l['type'])) ?></td>
                         <td><?= $statusPill((string) $l['status']) ?></td>
                         <td><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">Assign group</a></td>
                     </tr>

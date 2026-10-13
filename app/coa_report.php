@@ -24,10 +24,11 @@ function coa_report_data(array $company, array $fiscalYear, array $masters, arra
         $byGroup[(int) ($ledger['group_id'] ?? 0)][] = $ledger;
     }
     $seenGroups = [];
-    $addGroup = static function (array $group) use ($add, $byGroup, &$seenGroups): void {
+    $addGroup = static function (array $group) use ($add, $byGroup, $masters, &$seenGroups): void {
         $id = (int) $group['id'];
         $seenGroups[$id] = true;
-        $add([(string) $group['code'], (string) $group['name'], 'Group', '', (int) $group['is_active'] === 1 ? 'Active' : 'Inactive'], 'bold', 1);
+        $nature = (string) ($masters[(string) $group['master_key']]['nature'] ?? '');
+        $add([(string) $group['code'], (string) $group['name'], 'Group', ucfirst($nature), (int) $group['is_active'] === 1 ? 'Active' : 'Inactive'], 'bold', 1);
         foreach ($byGroup[$id] ?? [] as $ledger) {
             $add([(string) $ledger['code'], (string) $ledger['name'], 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status'])], 'body', 2);
         }
