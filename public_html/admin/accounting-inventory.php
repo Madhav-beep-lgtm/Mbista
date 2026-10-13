@@ -276,6 +276,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // The code goes on to be a barcode payload, a spreadsheet column and a
         // URL parameter, so what may be in it is settled in one place rather
         // than by whatever each of those happens to tolerate.
+        // A unit and a purchase category are chosen from the company's own
+        // master lists. The id arrives on a posted form as whatever it was
+        // sent with, so membership is checked rather than assumed: an item
+        // pointed at another company's unit would convert its stock by that
+        // company's factor.
+        $unitId = (int) ($_POST['unit_id'] ?? 0);
+        $categoryId = (int) ($_POST['category_id'] ?? 0);
+        foreach ([inv_unit_choice_error($companyId, $unitId),
+                  inv_category_choice_error($companyId, $categoryId)] as $masterError) {
+            if ($masterError !== null) {
+                flash('error', $masterError);
+                redirect(inv_back_url());
+            }
+        }
+        $unitName = (string) (inv_units_list($companyId)[$unitId]['name'] ?? '');
+        $categoryName = (string) (inv_categories_list($companyId)[$categoryId]['name'] ?? '');
+
         foreach ([inv_item_code_error($sku), inv_item_name_error($name),
                   inv_hs_code_error((string) ($_POST['hs_code'] ?? ''))] as $codingError) {
             if ($codingError !== null) {
@@ -296,10 +313,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'ledger_id' => (int) ($_POST['item_map']['inventory_asset'] ?? ($_POST['ledger_id'] ?? 0)) ?: null,
             'sku' => $sku,
             'name' => $name,
-            'category' => trim((string) ($_POST['category'] ?? '')) ?: null,
+            'category' => $categoryName !== '' ? $categoryName : null,
+            'category_id' => $categoryId ?: null,
             'item_type' => $itemType,
             'valuation_method' => $valuationMethod,
-            'unit' => trim((string) ($_POST['unit'] ?? 'pcs')) ?: 'pcs',
+            'unit' => $unitName !== '' ? $unitName : 'pcs',
+            'unit_id' => $unitId ?: null,
             'hs_code' => trim((string) ($_POST['hs_code'] ?? '')) ?: null,
             'tax_rate' => max(0.0, round((float) ($_POST['tax_rate'] ?? 13), 2)),
             'sales_rate' => max(0.0, round((float) ($_POST['sales_rate'] ?? 0), 2)),
@@ -339,7 +358,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UPDATE inventory_items
                     SET ledger_id = :ledger_id, sku = :sku, name = :name, category = :category, item_type = :item_type,
                         ' . ($marksIngredient ? 'is_ingredient = :is_ingredient,' : '') . '
-                        valuation_method = :valuation_method, unit = :unit,
+                        valuation_method = :valuation_method, unit = :unit, unit_id = :unit_id, category_id = :category_id,
                         hs_code = :hs_code, tax_rate = :tax_rate, sales_rate = :sales_rate, purchase_rate = :purchase_rate,
                         opening_qty = :opening_qty, opening_amount = :opening_amount, reorder_level = :reorder_level, default_warehouse_id = :default_warehouse_id,
                         status = :status, notes = :notes
@@ -353,10 +372,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 db()->prepare('
                     INSERT INTO inventory_items (
-                        company_id, ledger_id, sku, name, category, item_type, ' . ($marksIngredient ? 'is_ingredient, ' : '') . 'valuation_method, unit, hs_code, tax_rate,
+                        company_id, ledger_id, sku, name, category, category_id, unit_id, item_type, ' . ($marksIngredient ? 'is_ingredient, ' : '') . 'valuation_method, unit, hs_code, tax_rate,
                         sales_rate, purchase_rate, opening_qty, opening_amount, reorder_level, default_warehouse_id, status, notes
                     ) VALUES (
-                        :company_id, :ledger_id, :sku, :name, :category, :item_type, ' . ($marksIngredient ? ':is_ingredient, ' : '') . ':valuation_method, :unit, :hs_code, :tax_rate,
+                        :company_id, :ledger_id, :sku, :name, :category, :category_id, :unit_id, :item_type, ' . ($marksIngredient ? ':is_ingredient, ' : '') . ':valuation_method, :unit, :hs_code, :tax_rate,
                         :sales_rate, :purchase_rate, :opening_qty, :opening_amount, :reorder_level, :default_warehouse_id, :status, :notes
                     )
                 ')->execute($params);
@@ -2773,20 +2792,22 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                   // genuinely new category is born: it suggests what exists and
                   // still accepts what does not. ?>
             <label>Category
-                <input type="text" name="category" maxlength="120" value="<?= e($editItem['category'] ?? '') ?>"
-                       list="inv-item-categories" autocomplete="off"
-                       placeholder="<?= $itemCategoryOptions === [] ? 'e.g. Raw Materials' : 'Choose or type a new one' ?>">
-                <datalist id="inv-item-categories">
-                    <?php foreach ($itemCategoryOptions as $categoryChoice): ?>
-                        <option value="<?= e($categoryChoice) ?>"></option>
+                <select name="category_id" required>
+                    <option value="">—</option>
+                    <?php foreach (inv_categories_list($companyId) as $categoryRow): ?>
+                        <option value="<?= (int) $categoryRow['id'] ?>" <?= (int) ($editItem['category_id'] ?? 0) === $categoryRow['id'] ? 'selected' : '' ?>><?= e($categoryRow['name']) ?></option>
                     <?php endforeach; ?>
-                </datalist>
-                <?php if ($itemCategoryOptions !== []): ?>
-                    <small style="color:var(--mbw-muted);font-size:11.5px"><?= count($itemCategoryOptions) ?> already in use — click the box to see them</small>
-                <?php endif; ?>
+                </select>
             </label>
             <label>Status<select name="status"><option value="active" <?= ($editItem['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option><option value="inactive" <?= ($editItem['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option></select></label>
-            <label>Unit<input type="text" name="unit" value="<?= e($editItem['unit'] ?? 'pcs') ?>" required></label>
+            <label>Unit
+                <select name="unit_id" required>
+                    <option value="">—</option>
+                    <?php foreach (inv_units_list($companyId) as $unitRow): ?>
+                        <option value="<?= (int) $unitRow['id'] ?>" <?= (int) ($editItem['unit_id'] ?? 0) === $unitRow['id'] ? 'selected' : '' ?>><?= e($unitRow['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
             <label>HS code<input type="text" name="hs_code" value="<?= e($editItem['hs_code'] ?? '') ?>"></label>
             <label>Tax rate %<input type="number" step="0.01" name="tax_rate" value="<?= e($editItem['tax_rate'] ?? '13.00') ?>"></label>
             <label>Sales rate<input type="number" step="0.01" name="sales_rate" value="<?= e($editItem['sales_rate'] ?? '0.00') ?>"></label>

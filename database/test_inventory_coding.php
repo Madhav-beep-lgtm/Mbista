@@ -221,6 +221,28 @@ db()->exec("INSERT IGNORE INTO inventory_units (company_id, name)
 ok((int) db()->query("SELECT COUNT(*) FROM inventory_units WHERE company_id = {$cid} AND name = 'DRUM'")->fetchColumn() === 1,
     'Seeding again adds nothing, because the master is unique per company');
 
+
+echo "
+8. The item form chooses from the masters
+";
+$formSource = (string) file_get_contents(dirname(__DIR__) . "/public_html/admin/accounting-inventory.php");
+ok(str_contains($formSource, '<select name="unit_id" required>'),
+    'The unit is chosen from a list, not typed');
+ok(str_contains($formSource, '<select name="category_id" required>'),
+    '  ...and so is the purchase category');
+ok(!str_contains($formSource, 'name="unit" value='),
+    '  ...the free-text unit box is gone');
+ok(str_contains($formSource, 'inv_unit_choice_error($companyId, $unitId)')
+    && str_contains($formSource, 'inv_category_choice_error($companyId, $categoryId)'),
+    'The save path checks both belong to this company');
+ok(str_contains($formSource, 'unit_id = :unit_id, category_id = :category_id'),
+    'The update statement carries the ids');
+ok(str_contains($formSource, ':category, :category_id, :unit_id, :item_type'),
+    '  ...and so does the insert, or they would be validated and then dropped');
+ok(str_contains($formSource, '$unitName !== \'\' ? $unitName : \'pcs\'')
+    && str_contains($formSource, '$categoryName !== \'\' ? $categoryName : null'),
+    'The legacy text columns are written from the master, so the two cannot disagree');
+
 invcode_cleanup();
 
 echo "\n" . str_repeat('=', 50) . "\n  PASS: $pass    FAIL: $fail\n" . str_repeat('=', 50) . "\n";
