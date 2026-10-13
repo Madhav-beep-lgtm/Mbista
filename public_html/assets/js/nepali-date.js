@@ -181,7 +181,13 @@
       var hint = document.createElement('small');
       hint.className = 'bs-date-hint';
       hint.style.cssText = 'display:block;margin-top:3px;font-size:10.5px;font-weight:500;letter-spacing:0.02em;color:var(--mbw-muted,#64748b)';
-      input.insertAdjacentElement('afterend', hint);
+      // Keep the input and its hint in one grid item. A third label child
+      // otherwise stretches sibling controls and misaligns the whole row.
+      var field = document.createElement('span');
+      field.className = 'dual-date-field';
+      input.parentNode.insertBefore(field, input);
+      field.appendChild(input);
+      field.appendChild(hint);
       var update = function () {
         var bs = input.value ? adToBs(input.value) : null;
         hint.textContent = bs ? bs.str + ' BS' : '';

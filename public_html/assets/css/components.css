@@ -32,7 +32,12 @@
 }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 
-label { display: grid; gap: 6px; color: var(--color-text); font-size: var(--font-size-control); font-weight: 650; }
+label { display: grid; align-content: start; gap: 6px; color: var(--color-text); font-size: var(--font-size-control); font-weight: 650; }
+.dual-date-field { display: block; min-width: 0; width: 100%; }
+.dual-date-field > input { width: 100%; }
+.filter-grid > label, .filters-grid > label, .frm-grid > label, .workspace-form-grid > label { align-self: start; }
+.voucher-register-filters > .dual-date-field { flex: 0 1 155px; width: 155px; }
+.voucher-register-filters { align-items: flex-start !important; }
 label em, th em, .required { color: var(--color-danger); font-style: normal; }
 input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea {
   width: 100%; min-height: var(--control-height); padding: 8px 11px;

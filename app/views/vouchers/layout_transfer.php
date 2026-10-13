@@ -1,84 +1,38 @@
 <?php
 declare(strict_types=1);
-
-/**
- * Contra — money moving between the firm's own pockets.
- *
- * Nothing is earned or spent here, so there is no party, no tax and no
- * particulars grid. There are accounts on each side and the amounts moving
- * between them, with the resulting double entry spelled out underneath so the
- * person can see the direction, and the two totals, before they post it.
- *
- * Each side is a list rather than a single field because a real sweep is often
- * one-to-many: a day's takings out of the till and into three bank accounts is
- * one movement of money, and splitting it across three vouchers stops the day
- * book from showing it as the one thing it was.
- */
-$contraOut = $prefill['contra_out'] ?? [];
-$contraIn = $prefill['contra_in'] ?? [];
-// A voucher submitted before this screen had grids, handed back after a
-// rejection: put its one account on each side rather than lose it.
-if ($contraOut === [] && (int) ($prefill['contra_from_ledger'] ?? 0) > 0) {
-    $contraOut = [['ledger_id' => (string) (int) $prefill['contra_from_ledger'], 'amount' => (float) ($prefill['contra_amount'] ?? 0)]];
+// Preserve existing transfer prefills while presenting one Dr/Cr register.
+$rows = [];
+foreach (['contra_in' => 'debit', 'contra_out' => 'credit'] as $key => $side) {
+    foreach ($prefill[$key] ?? [] as $line) {
+        $rows[] = ['ledger_id' => $line['ledger_id'], $side => $line['amount'], 'entry_type' => $side, 'amount' => $line['amount']];
+    }
 }
-if ($contraIn === [] && (int) ($prefill['contra_to_ledger'] ?? 0) > 0) {
-    $contraIn = [['ledger_id' => (string) (int) $prefill['contra_to_ledger'], 'amount' => (float) ($prefill['contra_amount'] ?? 0)]];
-}
-
-/** One side of the transfer, as a grid of accounts and amounts. */
-$renderContraLegs = static function (string $side, array $rows) use ($optionsCashBank, $renderLedgerOptions, $currency): void {
-    $isOut = $side === 'out';
-    ?>
-    <div class="vch-leg">
-        <div class="vch-leg-head">
-            <strong><?= $isOut ? 'Money out of' : 'Money into' ?></strong>
-        </div>
-        <div class="vch-grid" data-grid data-min-rows="1" id="vch-<?= e($side) ?>-grid"
-             data-prefill="<?= e(json_encode($rows, JSON_UNESCAPED_SLASHES)) ?>">
-            <div class="mbw-tablewrap">
-                <table class="frm-entries vch-table">
-                    <thead>
-                        <tr>
-                            <th style="width:36px">SN</th>
-                            <th>Cash / bank account <em>*</em></th>
-                            <th class="is-numeric" style="width:150px">Amount (<?= e(trim($currency)) ?>) <em>*</em></th>
-                            <th style="width:40px"></th>
-                        </tr>
-                    </thead>
-                    <tbody data-rows></tbody>
-                </table>
-            </div>
-            <div class="frm-entries-foot">
-                <button type="button" class="button soft" data-add-row>＋ Add another account</button>
-                <div class="frm-entry-totals">
-                    <span><?= $isOut ? 'Out' : 'In' ?> (<?= e(trim($currency)) ?>) <strong id="vch-<?= e($side) ?>-total">0.00</strong></span>
-                </div>
-            </div>
-            <template data-row-template>
-                <tr>
-                    <td data-sn>1</td>
-                    <td>
-                        <select name="contra_<?= e($side) ?>_ledger[]" data-field="ledger_id" class="vch-leg-ledger">
-                            <option value="">Select cash / bank account</option>
-                            <?= $renderLedgerOptions($optionsCashBank, 0) ?>
-                        </select>
-                    </td>
-                    <td class="is-numeric"><input type="number" name="contra_<?= e($side) ?>_amount[]" data-field="amount" class="frm-num vch-leg-amount" step="0.01" min="0" placeholder="0.00"></td>
-                    <td><button type="button" class="frm-del" data-remove-row aria-label="Remove this account">&#128465;</button></td>
-                </tr>
-            </template>
-        </div>
-    </div>
-    <?php
-};
 ?>
-<section class="mbw-card frm-section vch-focus vch-entry-panel">
-    <div class="vch-legs">
-        <?php $renderContraLegs('out', $contraOut); ?>
-        <span class="vch-transfer-arrow" aria-hidden="true"><?= icon('chevron-right') ?></span>
-        <?php $renderContraLegs('in', $contraIn); ?>
+<section class="mbw-card frm-section vch-entry-panel">
+    <div class="vch-grid" data-grid data-min-rows="2" data-prefill="<?= e(json_encode($rows, JSON_UNESCAPED_SLASHES)) ?>">
+        <div class="mbw-tablewrap"><table class="frm-entries vch-table">
+            <thead><tr><th>SN</th><th>Cash / bank account</th><th>Debit (<?= e(trim($currency)) ?>)</th><th>Credit (<?= e(trim($currency)) ?>)</th><th></th></tr></thead>
+            <tbody data-rows></tbody>
+        </table></div>
+        <div class="frm-entries-foot">
+            <button type="button" class="button soft" data-add-row>＋ Add line</button>
+            <div class="frm-entry-totals">
+                <span>Total debit <strong id="vch-total-debit">0.00</strong></span>
+                <span>Total credit <strong id="vch-total-credit">0.00</strong></span>
+                <span class="mbw-pill tone-gray" id="vch-balance-pill">Enter lines</span>
+            </div>
+        </div>
+        <template data-row-template><tr>
+            <td data-sn></td>
+            <td><select name="ledger_id[]" data-field="ledger_id" class="vch-ledger vch-journal-ledger"><option value="">Select cash / bank account</option><?= $renderLedgerOptions($optionsCashBank, 0) ?></select></td>
+            <td><input type="number" data-field="debit" class="frm-num vch-dr" min="0" step="0.01" aria-label="Debit amount"></td>
+            <td><input type="number" data-field="credit" class="frm-num vch-cr" min="0" step="0.01" aria-label="Credit amount">
+                <input type="hidden" name="entry_type[]" data-field="entry_type" value="debit">
+                <input type="hidden" name="amount[]" data-field="amount" value="0">
+            </td>
+            <td><button type="button" class="frm-del" data-remove-row aria-label="Remove line">&#128465;</button></td>
+        </tr></template>
     </div>
-
     <div class="frm-grid frm-grid-4 vch-transfer-meta">
         <label>Mode
             <select name="instrument_type">
@@ -96,94 +50,65 @@ $renderContraLegs = static function (string $side, array $rows) use ($optionsCas
         </label>
     </div>
 
-    <div class="vch-preview" id="vch-preview" hidden>
-        <span class="vch-preview-label">This will post</span>
-        <span class="vch-preview-line"><em>Dr</em> <strong data-preview-debit>—</strong> <b data-preview-in>0.00</b></span>
-        <span class="vch-preview-line"><em>Cr</em> <strong data-preview-credit>—</strong> <b data-preview-out>0.00</b></span>
-    </div>
-</section>
 
+</section>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    var preview = document.getElementById('vch-preview');
     var form = document.getElementById('voucher-form');
+    var cashBankIds = <?= json_encode(array_values(array_map(static fn (array $ledger): int => (int) $ledger['id'], $optionsCashBank))) ?>;
+    var warning = { hidden: true };
 
-    // One side of the transfer, as the rows a person has actually filled in.
-    // A row with neither an account nor an amount is nothing yet, not an error.
-    function legsOf(side) {
-        var legs = [];
-        form.querySelectorAll('#vch-' + side + '-grid [data-rows] tr').forEach(function (row) {
-            var select = row.querySelector('.vch-leg-ledger');
-            var amountField = row.querySelector('.vch-leg-amount');
-            var amount = amountField ? (Number(amountField.value) || 0) : 0;
-            var id = select ? select.value : '';
-            if (id === '' && amount <= 0) { return; }
-            legs.push({
-                id: id,
-                name: (select && select.value && select.selectedIndex >= 0)
-                    ? select.options[select.selectedIndex].textContent.trim() : '',
-                amount: amount
-            });
+    // The two amount boxes are one figure wearing two hats: typing in one
+    // clears the other, and the hidden pair the server reads is kept in step.
+    function syncRow(row) {
+        var debit = row.querySelector('.vch-dr');
+        var credit = row.querySelector('.vch-cr');
+        var typeField = row.querySelector('[data-field="entry_type"]');
+        var amountField = row.querySelector('[data-field="amount"]');
+        if (!debit || !credit) { return; }
+
+        var debitValue = Number(debit.value) || 0;
+        var creditValue = Number(credit.value) || 0;
+        if (debitValue > 0 && document.activeElement === debit) { credit.value = ''; creditValue = 0; }
+        if (creditValue > 0 && document.activeElement === credit) { debit.value = ''; debitValue = 0; }
+        typeField.value = creditValue > 0 ? 'credit' : 'debit';
+        amountField.value = String(creditValue > 0 ? creditValue : debitValue);
+    }
+
+    function recalc() {
+        var totalDebit = 0;
+        var totalCredit = 0;
+        var hasCashBank = false;
+        form.querySelectorAll('[data-rows] tr').forEach(function (row) {
+            syncRow(row);
+            totalDebit += Number((row.querySelector('.vch-dr') || {}).value) || 0;
+            totalCredit += Number((row.querySelector('.vch-cr') || {}).value) || 0;
+            var ledger = row.querySelector('.vch-journal-ledger');
+            if (ledger && ledger.value && cashBankIds.indexOf(Number(ledger.value)) !== -1) { hasCashBank = true; }
         });
-        return legs;
-    }
 
-    function totalOf(legs) {
-        var total = 0;
-        legs.forEach(function (leg) { total += leg.amount; });
-        return Math.round(total * 100) / 100;
-    }
+        document.getElementById('vch-total-debit').textContent = window.vchMoney(totalDebit);
+        document.getElementById('vch-total-credit').textContent = window.vchMoney(totalCredit);
+        warning.hidden = !hasCashBank;
 
-    // Named when there is one of it; counted when there are several, because
-    // naming one of three banks implies the other two were not involved.
-    function nameOf(legs) {
-        if (legs.length === 0) { return '—'; }
-        if (legs.length === 1) { return legs[0].name || '—'; }
-        return legs.length + ' accounts';
-    }
-
-    function refresh() {
-        var outLegs = legsOf('out');
-        var inLegs = legsOf('in');
-        var outTotal = totalOf(outLegs);
-        var inTotal = totalOf(inLegs);
-
-        document.getElementById('vch-out-total').textContent = window.vchMoney(outTotal);
-        document.getElementById('vch-in-total').textContent = window.vchMoney(inTotal);
-
-        var overlap = false;
-        outLegs.forEach(function (leg) {
-            if (!leg.id) { return; }
-            inLegs.forEach(function (other) { if (other.id === leg.id) { overlap = true; } });
-        });
-        function complete(legs) {
-            return legs.length > 0 && legs.every(function (leg) { return leg.id !== '' && leg.amount > 0; });
+        var pill = document.getElementById('vch-balance-pill');
+        var balanced = totalDebit > 0 && Math.abs(totalDebit - totalCredit) < 0.005;
+        if (totalDebit === 0 && totalCredit === 0) {
+            pill.textContent = 'Enter lines';
+            pill.className = 'mbw-pill tone-gray';
+        } else if (balanced) {
+            pill.textContent = '✓ Balanced';
+            pill.className = 'mbw-pill tone-green';
+        } else {
+            pill.textContent = 'Off by ' + window.vchMoney(Math.abs(totalDebit - totalCredit));
+            pill.className = 'mbw-pill tone-red';
         }
-        var agrees = outTotal > 0 && Math.abs(outTotal - inTotal) < 0.005;
-        var ready = complete(outLegs) && complete(inLegs);
 
-        // The submit guard is set on EVERY pass, including the ones that
-        // return early — a contra emptied back out has to take the guard down
-        // with it, or a half-filled voucher stays postable.
-        form.setAttribute('data-balanced', (ready && agrees && !overlap) ? '1' : '0');
-
-        preview.hidden = outLegs.length === 0 && inLegs.length === 0;
-        if (preview.hidden) { return; }
-        preview.querySelector('[data-preview-debit]').textContent = nameOf(inLegs);
-        preview.querySelector('[data-preview-credit]').textContent = nameOf(outLegs);
-        preview.querySelector('[data-preview-in]').textContent = window.vchMoney(inTotal);
-        preview.querySelector('[data-preview-out]').textContent = window.vchMoney(outTotal);
-        preview.classList.toggle('is-invalid', overlap || (ready && !agrees));
-        preview.querySelector('.vch-preview-label').textContent = overlap
-            ? 'An account is on both sides — money cannot move to where it already is'
-            : (ready && !agrees
-                ? 'The two sides are ' + window.vchMoney(Math.abs(outTotal - inTotal)) + ' apart — what leaves has to equal what arrives'
-                : 'This will post');
+        form.setAttribute('data-balanced', balanced ? '1' : '0');
     }
 
-    form.addEventListener('vch:change', refresh);
-    form.addEventListener('input', refresh);
-    form.addEventListener('change', refresh);
-    refresh();
+    form.addEventListener('vch:change', recalc);
+    form.addEventListener('input', recalc);
+    recalc();
 });
 </script>

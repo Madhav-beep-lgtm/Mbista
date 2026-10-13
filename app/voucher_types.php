@@ -544,6 +544,23 @@ function voucher_transfer_legs(array $input, array $ledgers, string $side, array
  */
 function voucher_compose_transfer(array $spec, array $input, array $ledgers, array $result, bool $draft = false): array
 {
+    // The Dr/Cr editor uses the common line contract; retain legacy imports.
+    if (isset($input['ledger_id']) && is_array($input['ledger_id'])) {
+        foreach (['in', 'out'] as $side) {
+            $input['contra_' . $side . '_ledger'] = [];
+            $input['contra_' . $side . '_amount'] = [];
+        }
+        foreach ($input['ledger_id'] as $index => $id) {
+            $entryType = (string) ($input['entry_type'][$index] ?? '');
+            if (!in_array($entryType, ['debit', 'credit'], true)) {
+                $result['errors'][] = 'Select Debit or Credit for each contra line.';
+                continue;
+            }
+            $side = $entryType === 'debit' ? 'in' : 'out';
+            $input['contra_' . $side . '_ledger'][] = $id;
+            $input['contra_' . $side . '_amount'][] = $input['amount'][$index] ?? 0;
+        }
+    }
     $outLegs = voucher_transfer_legs($input, $ledgers, 'out', $result);
     $inLegs = voucher_transfer_legs($input, $ledgers, 'in', $result);
 
@@ -1403,6 +1420,17 @@ function voucher_prefill_from_input(string $type, array $input): array
     ];
 
     if ($layout === 'transfer') {
+        if (isset($input['ledger_id']) && is_array($input['ledger_id'])) {
+            foreach (['in', 'out'] as $side) {
+                $input['contra_' . $side . '_ledger'] = [];
+                $input['contra_' . $side . '_amount'] = [];
+            }
+            foreach ($input['ledger_id'] as $index => $id) {
+                $side = ($input['entry_type'][$index] ?? '') === 'credit' ? 'out' : 'in';
+                $input['contra_' . $side . '_ledger'][] = $id;
+                $input['contra_' . $side . '_amount'][] = $input['amount'][$index] ?? 0;
+            }
+        }
         $prefill['contra_from_ledger'] = (int) ($input['contra_from_ledger'] ?? 0);
         $prefill['contra_to_ledger'] = (int) ($input['contra_to_ledger'] ?? 0);
         $prefill['contra_amount'] = (float) ($input['contra_amount'] ?? 0);
