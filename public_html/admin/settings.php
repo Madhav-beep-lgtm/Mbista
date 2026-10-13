@@ -1030,6 +1030,11 @@ if (table_exists('company_shareholdings')) {
                     <span class="frm-toggle"><input type="checkbox" name="<?= e($notifyKey) ?>" value="1"<?= $checked($notifyKey, '1') ?>><i></i></span>
                 </label>
             <?php endforeach; ?>
+            <div style="grid-column:1/-1;border-top:1px solid var(--mbw-border);margin-top:6px;padding-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                <strong style="color:var(--mbw-heading)"><?= icon('calendar') ?> Report emails</strong>
+                <span style="font-size:12.5px;color:var(--mbw-muted)">Scheduled reports for <?= e((string) ($settingsCompany['name'] ?? 'this company')) ?>.</span>
+                <a class="button secondary" style="margin-left:auto" href="<?= e(url('admin/report-schedules.php')) ?>">Open report emails</a>
+            </div>
         </div>
     </details>
 

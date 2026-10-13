@@ -332,8 +332,11 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>Companies</a>
             <a class="<?= $headerScript === 'staff.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/staff.php')) ?>"><?= icon('users') ?>Staff</a>
             <a class="<?= $headerScript === 'work.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/work.php')) ?>"><?= icon('tasks') ?>Work Portal</a>
+            <?php // Report emails are not a platform matter. A schedule belongs
+                  // to the company whose figures it sends, so it lives in that
+                  // company's Settings — reached by opening the company, which
+                  // is the only place the schedule means anything. ?>
             <span class="admin-nav-group">System</span>
-            <a class="<?= $headerScript === 'report-emails.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/report-emails.php')) ?>"><?= icon('calendar') ?>Report Emails</a>
             <a class="<?= $headerScript === 'settings.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/settings.php')) ?>"><?= icon('settings') ?>Settings</a>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Sign out</a>
             <?php elseif ($headerIsCustomer): ?>
