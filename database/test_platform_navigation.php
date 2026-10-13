@@ -4,6 +4,9 @@ declare(strict_types=1);
 $root = dirname(__DIR__);
 $header = (string) file_get_contents($root . '/app/views/partials/admin_header.php');
 $clients = (string) file_get_contents($root . '/public_html/platform/clients.php');
+$companies = (string) file_get_contents($root . '/public_html/admin/companies.php');
+$platformCompanies = (string) file_get_contents($root . '/public_html/platform/companies.php');
+$helpers = (string) file_get_contents($root . '/app/helpers.php');
 $failures = 0;
 
 $ok = static function (bool $condition, string $label) use (&$failures): void {
@@ -35,6 +38,13 @@ $ok(!str_contains($header, 'Open M.Bista superadmin')
 $ok(str_contains($clients, '$platformShell = true;')
     && str_contains($clients, "../admin/manage-clients.php"),
     'The client directory renders as an independent platform page');
+$ok(str_contains($platformCompanies, "../admin/companies.php")
+    && str_contains($companies, '$platformShell = true;')
+    && str_contains($companies, "redirect('platform/companies.php')"),
+    'Company creation belongs to the Super Admin platform');
+$ok(!str_contains($companies, 'name="admin_pin"')
+    && !str_contains($helpers, "redirect('admin/company-pin.php?company_id='"),
+    'Authorized company opening has no PIN step');
 
 echo PHP_EOL . ($failures === 0 ? 'PASS' : 'FAIL') . ": platform navigation\n";
 exit($failures === 0 ? 0 : 1);

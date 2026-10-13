@@ -28,7 +28,7 @@ if (!$firmCompany) {
 
 $firmCompanyId = (int) $firmCompany['id'];
 
-if ((int) current_company_id() !== $firmCompanyId || !company_pin_verified($firmCompanyId)) {
-    redirect('admin/company-pin.php?company_id=' . $firmCompanyId
-        . '&return=' . rawurlencode((string) ($platformReturnTo ?? 'platform/index.php')));
+if ((int) current_company_id() !== $firmCompanyId && !activate_company_context($firmCompanyId, true)) {
+    flash('error', 'No active fiscal year is available for the firm company.');
+    redirect('platform/index.php');
 }

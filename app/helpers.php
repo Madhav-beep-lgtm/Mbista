@@ -1959,14 +1959,13 @@ function handle_company_switch(int $companyId, string $failureUrl): never
         redirect('admin/index.php');
     }
 
-    if (!company_pin_is_set($companyId)) {
-        flash('error', 'Set a 4-digit PIN for this company before opening its portal.');
-        redirect('admin/company-pin-reset.php?company_id=' . $companyId);
+    if (!activate_company_context($companyId, true)) {
+        flash('error', 'No active fiscal year is available for this company.');
+        redirect($failureUrl);
     }
 
-    set_selected_company($companyId);
-    clear_company_pin_verification();
-    redirect('admin/company-pin.php?company_id=' . $companyId);
+    flash('success', 'Opened ' . (string) ($company['name'] ?? 'company') . '.');
+    redirect('admin/index.php');
 }
 
 function verify_company_pin(int $companyId, string $pin): bool
@@ -2101,8 +2100,8 @@ function ensure_company_context_selected(): bool
 
 function require_company_context(): void
 {
-    if (!ensure_company_context_selected() || !company_pin_verified(current_company_id())) {
-        flash('error', 'Select a company and enter the 4-digit PIN to continue.');
+    if (!ensure_company_context_selected() || !user_can_access_company(current_company_id())) {
+        flash('error', 'Select a company to continue.');
         redirect('portal.php');
     }
 }

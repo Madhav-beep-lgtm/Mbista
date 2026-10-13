@@ -4,6 +4,15 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_admin();
+if (!user_is_super_admin()) {
+    redirect('admin/index.php');
+}
+if (!defined('PLATFORM_COMPANIES_PAGE')) {
+    redirect('platform/companies.php');
+}
+
+$platformShell = true;
+$companiesRoute = 'platform/companies.php';
 accounting_module_repair_database();
 $pageTitle = 'Companies & Fiscal Years';
 $pageSubtitle = 'Create companies, manage group relationships, and set up fiscal years.';
@@ -21,24 +30,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'create_company') {
         $name = trim((string) ($_POST['name'] ?? ''));
         $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
-        $adminPin = trim((string) ($_POST['admin_pin'] ?? ''));
         $parentCompanyIdRaw = trim((string) ($_POST['parent_company_id'] ?? ''));
         $parentCompanyId = $parentCompanyIdRaw === '' ? null : (int) $parentCompanyIdRaw;
         $isActive = isset($_POST['is_active']) ? 1 : 0;
 
         if ($name === '' || $code === '') {
             flash('error', 'Company name and code are required.');
-            redirect('admin/companies.php');
-        }
-
-        if ($adminPin !== '' && !preg_match('/^[0-9]{4}$/', $adminPin)) {
-            flash('error', 'Company PIN must be exactly 4 digits.');
-            redirect('admin/companies.php');
+            redirect($companiesRoute);
         }
 
         if ($parentCompanyId !== null && $parentCompanyId <= 0) {
             flash('error', 'Invalid parent company selected.');
-            redirect('admin/companies.php');
+            redirect($companiesRoute);
         }
 
         if ($parentColumnExists && $parentCompanyId !== null) {
@@ -46,33 +49,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $parentCheck->execute(['id' => $parentCompanyId]);
             if (!$parentCheck->fetch()) {
                 flash('error', 'Selected parent company does not exist.');
-                redirect('admin/companies.php');
+                redirect($companiesRoute);
             }
         }
 
         if ($parentColumnExists) {
-            $stmt = db()->prepare('INSERT INTO companies (name, code, parent_company_id, admin_pin_hash, is_active) VALUES (:name, :code, :parent_company_id, :admin_pin_hash, :is_active)');
+            $stmt = db()->prepare('INSERT INTO companies (name, code, parent_company_id, is_active) VALUES (:name, :code, :parent_company_id, :is_active)');
             $stmt->execute([
                 'name' => $name,
                 'code' => $code,
                 'parent_company_id' => $parentCompanyId,
-                'admin_pin_hash' => $adminPin !== '' ? password_hash($adminPin, PASSWORD_DEFAULT) : null,
                 'is_active' => $isActive,
             ]);
         } else {
-            $stmt = db()->prepare('INSERT INTO companies (name, code, admin_pin_hash, is_active) VALUES (:name, :code, :admin_pin_hash, :is_active)');
+            $stmt = db()->prepare('INSERT INTO companies (name, code, is_active) VALUES (:name, :code, :is_active)');
             $stmt->execute([
                 'name' => $name,
                 'code' => $code,
-                'admin_pin_hash' => $adminPin !== '' ? password_hash($adminPin, PASSWORD_DEFAULT) : null,
                 'is_active' => $isActive,
             ]);
         }
 
         $companyId = (int) db()->lastInsertId();
-        log_activity('company', $companyId, 'created', 'Company created from admin workflow.', (int) ($currentAdmin['id'] ?? 0));
+        log_activity('company', $companyId, 'created', 'Company created from platform workflow.', (int) ($currentAdmin['id'] ?? 0));
         flash('success', 'Company created.');
-        redirect('admin/companies.php');
+        redirect($companiesRoute);
     }
 
     if ($action === 'create_fiscal_year') {
@@ -85,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($companyId <= 0 || $label === '' || $startDate === '' || $endDate === '') {
             flash('error', 'Company, label, start date, and end date are required.');
-            redirect('admin/companies.php');
+            redirect($companiesRoute);
         }
 
         // Shared service: overlap/duplicate rejection + race-safe single
@@ -93,13 +94,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = create_fiscal_year($companyId, $label, $startDate, $endDate, $isDefault === 1, (int) ($currentAdmin['id'] ?? 0));
         if (!$result['ok']) {
             flash('error', (string) $result['error']);
-            redirect('admin/companies.php');
+            redirect($companiesRoute);
         }
         if ($isActive === 0) {
             db()->prepare('UPDATE fiscal_years SET is_active = 0 WHERE id = :id')->execute(['id' => $result['id']]);
         }
         flash('success', 'Fiscal year created.');
-        redirect('admin/companies.php');
+        redirect($companiesRoute);
     }
 
     if ($action === 'save_bank_account') {
@@ -112,7 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $companyCheck->execute(['id' => $companyId]);
         if (!$companyCheck->fetch() || $bankName === '' || $accountName === '' || $accountNumber === '') {
             flash('error', 'Company, bank name, account name and account number are required.');
-            redirect('admin/companies.php#banks');
+            redirect($companiesRoute . '#banks');
         }
         $isDefault = isset($_POST['is_default']) ? 1 : 0;
         $params = [
@@ -142,11 +143,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             log_activity('company', $companyId, 'bank_account_added', 'Bank account ' . $bankName . ' (' . $accountNumber . ') added.', (int) ($currentAdmin['id'] ?? 0));
         }
         flash('success', 'Bank account saved. Invoices issued by this company now show its listed accounts.');
-        redirect('admin/companies.php#banks');
+        redirect($companiesRoute . '#banks');
     }
 
     flash('error', 'Unsupported action.');
-    redirect('admin/companies.php');
+    redirect($companiesRoute);
 }
 
 $companies = $parentColumnExists
@@ -175,7 +176,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="hidden" name="action" value="create_company">
             <label>Name<input type="text" name="name" required></label>
             <label>Code<input type="text" name="code" maxlength="20" required></label>
-            <label>Company PIN (optional)<input type="password" name="admin_pin" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" minlength="4" placeholder="4 digits"></label>
             <?php if ($parentColumnExists): ?>
                 <label>Parent company (optional)
                     <select name="parent_company_id">
@@ -219,11 +219,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div style="overflow-x:auto">
     <table>
         <thead>
-            <tr><th>ID</th><th>Name</th><th>Code</th><?php if ($parentColumnExists): ?><th>Relationship</th><?php endif; ?><th>Status</th><th>PIN</th><th>Action</th></tr>
+            <tr><th>ID</th><th>Name</th><th>Code</th><?php if ($parentColumnExists): ?><th>Relationship</th><?php endif; ?><th>Status</th><th>Action</th></tr>
         </thead>
         <tbody>
             <?php if ($companies === []): ?>
-                <tr><td colspan="<?= $parentColumnExists ? '7' : '6' ?>">No companies available.</td></tr>
+                <tr><td colspan="<?= $parentColumnExists ? '6' : '5' ?>">No companies available.</td></tr>
             <?php endif; ?>
             <?php foreach ($companies as $company): ?>
                 <tr>
@@ -240,13 +240,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </td>
                     <?php endif; ?>
                     <td><?php if ((int) $company['is_active'] === 1): ?><span class="mbw-pill tone-green">Active</span><?php else: ?><span class="mbw-pill tone-red">Inactive</span><?php endif; ?></td>
-                    <td><?php if (company_pin_is_set((int) $company['id'])): ?><span class="mbw-pill tone-green">Configured</span><?php else: ?><span class="mbw-pill tone-amber">Required</span><?php endif; ?></td>
                     <td>
                         <?php if ((int) $company['is_active'] === 1): ?>
                             <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="inline-form">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                 <input type="hidden" name="company_id" value="<?= e((int) $company['id']) ?>">
-                                <input type="hidden" name="return_to" value="admin/companies.php">
+                                <input type="hidden" name="return_to" value="platform/companies.php">
                                 <button type="submit">Open portal</button>
                             </form>
                         <?php else: ?>
@@ -261,7 +260,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 
 <section class="mbw-card" data-collapsible id="banks">
-    <div class="mbw-card-head"><h2>Company Bank Accounts</h2><?php if ($editBankAccount): ?><a class="mbw-view-all" href="<?= e(url('admin/companies.php#banks')) ?>">Cancel edit</a><?php endif; ?></div>
+    <div class="mbw-card-head"><h2>Company Bank Accounts</h2><?php if ($editBankAccount): ?><a class="mbw-view-all" href="<?= e(url($companiesRoute . '#banks')) ?>">Cancel edit</a><?php endif; ?></div>
     
     <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -303,7 +302,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <td><?= (int) $bankRow['is_default'] === 1 ? '<span class="mbw-pill tone-blue">Default</span>' : '—' ?></td>
                     <td><?= (int) $bankRow['show_on_invoice'] === 1 ? '<span class="mbw-pill tone-green">Yes</span>' : '<span class="mbw-pill tone-gray">No</span>' ?></td>
                     <td><?= (int) $bankRow['active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
-                    <td><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/companies.php?bank=' . (int) $bankRow['id'] . '#banks')) ?>">Edit</a></td>
+                    <td><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url($companiesRoute . '?bank=' . (int) $bankRow['id'] . '#banks')) ?>">Edit</a></td>
                 </tr>
             <?php endforeach; ?>
         </tbody>

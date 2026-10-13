@@ -15,8 +15,8 @@ declare(strict_types=1);
  *   Open companies  — the clients it serves, each openable in turn
  *
  * Nothing here decides who may open what. handle_company_switch() checks
- * membership and then the company PIN, exactly as it did for portal.php; this
- * page only decides what to LIST.
+ * membership before opening the selected company; this page only decides
+ * what to list.
  */
 
 require_once __DIR__ . '/../../app/bootstrap.php';
@@ -110,7 +110,7 @@ $pageTitle = $servingCompany ? (string) $servingCompany['name'] : 'Companies';
 $pageBreadcrumb = $servingCompany
     ? [['Platform', 'platform/index.php'], ['Companies', 'platform/index.php']]
     : [['Platform', 'platform/index.php']];
-$pageHeadActions = '<a class="button secondary" href="' . e(url('admin/companies.php')) . '">New company</a>';
+$pageHeadActions = '<a class="button secondary" href="' . e(url('platform/companies.php')) . '">New company</a>';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 

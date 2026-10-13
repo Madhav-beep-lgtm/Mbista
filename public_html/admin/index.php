@@ -269,7 +269,7 @@ $ovTrend = static function (array $trend): string {
 };
 ?>
 <div class="ov-kpis">
-    <a class="ov-kpi" href="<?= e(url('admin/companies.php')) ?>">
+    <a class="ov-kpi" href="<?= e(url('platform/companies.php')) ?>">
         <span class="ov-kpi-top"><span class="mbw-chip is-square tone-blue"><?= icon('companies') ?></span><span class="ov-kpi-label">Companies</span></span>
         <strong class="ov-kpi-value"><?= e($companyCount) ?></strong>
         <span class="ov-kpi-sub">Total companies</span>

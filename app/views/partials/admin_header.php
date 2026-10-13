@@ -322,7 +322,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             // books were open last.
             ?>
             <span class="admin-nav-group">Platform</span>
-            <a class="<?= $headerScript === 'index.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>Companies</a>
+            <a class="<?= in_array($headerScript, ['index.php', 'companies.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>Companies</a>
             <a class="<?= $headerScript === 'clients.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/clients.php')) ?>"><?= icon('clients') ?>Clients</a>
             <a class="<?= $headerScript === 'staff.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/staff.php')) ?>"><?= icon('users') ?>Staff</a>
             <a class="<?= $headerScript === 'work.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/work.php')) ?>"><?= icon('tasks') ?>Work Portal</a>

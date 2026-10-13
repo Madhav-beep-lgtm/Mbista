@@ -14,7 +14,7 @@ if (user_is_super_admin()) {
     redirect('platform/index.php');
 }
 
-if (company_pin_verified(current_company_id()) && current_company()) {
+if (current_company() && user_can_access_company(current_company_id())) {
     redirect('admin/index.php');
 }
 
@@ -51,13 +51,6 @@ $otherCompanies = array_values(array_filter(
     static fn (array $company): bool => !in_array((int) $company['id'], $featuredIds, true)
 ));
 
-if (count($companies) === 1 && $_SERVER['REQUEST_METHOD'] !== 'POST') {
-    $only = $companies[0];
-    if ((string) ($only['code'] ?? '') === 'MBAACA' || company_pin_is_set((int) $only['id'])) {
-        // Fall through
-    }
-}
-
 include __DIR__ . '/../app/views/partials/header.php';
 ?>
 
@@ -75,7 +68,6 @@ include __DIR__ . '/../app/views/partials/header.php';
 
                 <div class="portal-company-grid portal-company-grid-featured">
                     <?php if ($mbistaCompany): ?>
-                        <?php $mbistaPinIsSet = company_pin_is_set((int) $mbistaCompany['id']); ?>
                         <form method="post" class="card portal-company-card portal-company-card-gold">
                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                             <input type="hidden" name="company_id" value="<?= e((int) $mbistaCompany['id']) ?>">
@@ -92,10 +84,6 @@ include __DIR__ . '/../app/views/partials/header.php';
                             </div>
 
                             <div class="portal-card-footer">
-                                <span class="portal-pin-status <?= $mbistaPinIsSet ? 'is-ready' : 'is-required' ?>">
-                                    <span aria-hidden="true"><?= icon($mbistaPinIsSet ? 'admin' : 'lock') ?></span>
-                                    <?= $mbistaPinIsSet ? 'PIN configured' : 'PIN required' ?>
-                                </span>
                                 <button type="submit" class="button portal-company-action">
                                     <span>Open M.Bista</span>
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -105,7 +93,6 @@ include __DIR__ . '/../app/views/partials/header.php';
                     <?php endif; ?>
 
                     <?php if ($altioraCompany): ?>
-                        <?php $altioraPinIsSet = company_pin_is_set((int) $altioraCompany['id']); ?>
                         <form method="post" class="card portal-company-card portal-company-card-blue">
                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                             <input type="hidden" name="company_id" value="<?= e((int) $altioraCompany['id']) ?>">
@@ -122,10 +109,6 @@ include __DIR__ . '/../app/views/partials/header.php';
                             </div>
 
                             <div class="portal-card-footer">
-                                <span class="portal-pin-status <?= $altioraPinIsSet ? 'is-ready' : 'is-required' ?>">
-                                    <span aria-hidden="true"><?= icon($altioraPinIsSet ? 'admin' : 'lock') ?></span>
-                                    <?= $altioraPinIsSet ? 'PIN configured' : 'PIN required' ?>
-                                </span>
                                 <button type="submit" class="button portal-company-action">
                                     <span>Open Altiora</span>
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -151,7 +134,6 @@ include __DIR__ . '/../app/views/partials/header.php';
                     <?php foreach ($otherCompanies as $company): ?>
                         <?php
                         $isSubsidiary = !empty($company['parent_company_name']);
-                        $companyPinIsSet = company_pin_is_set((int) $company['id']);
                         ?>
                         <form method="post" class="card portal-company-card portal-company-card-neutral">
                             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -173,10 +155,6 @@ include __DIR__ . '/../app/views/partials/header.php';
                             </div>
 
                             <div class="portal-card-footer">
-                                <span class="portal-pin-status <?= $companyPinIsSet ? 'is-ready' : 'is-required' ?>">
-                                    <span aria-hidden="true"><?= icon($companyPinIsSet ? 'admin' : 'lock') ?></span>
-                                    <?= $companyPinIsSet ? 'PIN configured' : 'PIN required' ?>
-                                </span>
                                 <button type="submit" class="button portal-company-action portal-company-action-secondary">
                                     <span>Open workspace</span>
                                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
