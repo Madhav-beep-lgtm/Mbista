@@ -9,6 +9,10 @@ $inventoryNavActive = $inventoryNavActive && !$manufacturingNavActive;
 $inventoryNavProfile = accounting_business_profile(company_accounting_business_type((int)current_company_id()));
 ?>
 <span class="admin-nav-group">Management</span>
+<?php if (company_can_manage_settings()): ?>
+<a href="<?= e(url('admin/company-settings.php')) ?>"><?= icon('settings') ?>Company Settings</a>
+<?php endif; ?>
+<?php if (company_module_enabled('inventory')): ?>
 <div class="mbw-nav-parent<?= $inventoryNavActive ? ' is-open' : '' ?>" data-nav-parent="inventory-management">
     <a href="#" data-nav-toggle aria-expanded="<?= $inventoryNavActive ? 'true' : 'false' ?>">
         <?= icon('box') ?>Inventory Management
@@ -33,6 +37,11 @@ $inventoryNavProfile = accounting_business_profile(company_accounting_business_t
     </div>
 </div>
 <?php endif; ?>
+<?php endif; ?>
+<?php if (company_module_enabled('fixed_assets')): ?>
 <a class="<?= $headerScript === 'fixed-assets.php' && $headerView !== 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('tag') ?>Fixed Asset Management</a>
+<?php endif; ?>
+<?php if (company_module_enabled('nfrs')): ?>
 <span class="admin-nav-group">NFRS Compliance</span>
 <a class="<?= $headerScript === 'fixed-assets.php' && $headerView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('key') ?>Lease</a>
+<?php endif; ?>

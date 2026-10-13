@@ -148,6 +148,7 @@ function voucher_stock_preflight(int $companyId, string $voucherType, array $lin
     if ($wanted === []) {
         return [];
     }
+    if (function_exists('company_module_enabled') && !company_module_enabled('inventory', $companyId)) return ['Inventory is disabled for this company.'];
 
     $problems = [];
     foreach ($wanted as $itemId => $quantity) {
@@ -202,6 +203,7 @@ function voucher_stock_clear(int $companyId, int $voucherId): array
     if ($existing === []) {
         return [];
     }
+    if (function_exists('require_company_module')) require_company_module('inventory', $companyId);
 
     $items = [];
     $costVoucherIds = [];
@@ -267,6 +269,7 @@ function voucher_stock_sync(int $companyId, ?int $fiscalYearId, array $voucher, 
 
     $isPosted = (string) ($voucher['status'] ?? '') === 'posted';
     $lines = $isPosted ? voucher_stock_item_lines($voucherId) : [];
+    if ($lines !== [] && function_exists('require_company_module')) require_company_module('inventory', $companyId);
     foreach ($lines as $line) {
         $affectedItems[] = (int) $line['item_id'];
     }

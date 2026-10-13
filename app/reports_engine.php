@@ -645,6 +645,7 @@ function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, str
 // ---------------------------------------------------------------------------
 function rc_generate(string $reportId, int $scopeCompanyId, string $from, string $to, array $ctx): array
 {
+    if (function_exists('company_report_module') && ($module = company_report_module($reportId))) require_company_module($module, $scopeCompanyId);
     $sym = $ctx['currency'];
     $ctx += ['vtype' => '', 'group_id' => 0, 'ledger_id' => 0, 'item_id' => 0, 'biz' => 'all', 'dims' => [],
              'company_id' => $scopeCompanyId, 'company_name' => '', 'subsidiaries' => []];

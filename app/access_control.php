@@ -1082,6 +1082,7 @@ function access_level_capability_for_action(string $action): string
  */
 function user_can_do(string $module, string $action, ?array $user = null): bool
 {
+    if (function_exists('company_module_enabled') && !company_module_enabled($module)) return false;
     $user = $user ?? current_user();
     if (!$user) {
         return false;

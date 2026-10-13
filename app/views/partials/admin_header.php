@@ -50,6 +50,7 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],
 ]);
+$headerAccountingChildren = array_values(array_filter($headerAccountingChildren, static fn($child) => company_module_enabled(company_route_module((string)parse_url($child[1], PHP_URL_PATH)) ?? '')));
 $headerAccountingActive = false;
 foreach ($headerAccountingChildren as $headerChild) {
     if ($headerChild[3]) {
@@ -361,6 +362,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             </div>
             <?php include __DIR__ . '/books_management_nav.php'; ?>
+            <?php if (company_module_enabled('payroll')): ?>
             <span class="admin-nav-group">Payroll</span>
             <a class="<?= $headerScript === 'payroll.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll.php')) ?>"><?= icon('card') ?>Payroll Processing</a>
             <a class="<?= $headerScript === 'payroll-employees.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-employees.php')) ?>"><?= icon('teams') ?>Employees &amp; Advances</a>
@@ -368,6 +370,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= $headerScript === 'payroll-service-charge.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-service-charge.php')) ?>"><?= icon('handshake') ?>Service Charge</a>
             <?php if (client_portal_user_is_owner()): ?>
                 <a class="<?= $headerScript === 'payroll-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/payroll-settings.php')) ?>"><?= icon('sliders') ?>Payroll Settings</a>
+            <?php endif; ?>
             <?php endif; ?>
             <?php if ($headerHospitality): ?>
                 <span class="admin-nav-group">Hospitality</span>
@@ -450,16 +453,17 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <span class="admin-nav-group">Reports</span>
             <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
-            <a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a>
+            <?php if (company_module_enabled('compliance')): ?><a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a><?php endif; ?>
             <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
 
             <span class="admin-nav-group">Operations</span>
             <?php if (!$headerIsClientBooks): ?>
                 <a class="<?= in_array($headerScript, ['service-agreements.php', 'export-agreement.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><?= icon('handshake') ?>Contracts &amp; Agreements</a>
             <?php endif; ?>
-            <a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a>
-            <a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a>
-            <a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a>
+            <?php if (company_module_enabled('messages')): ?><a class="<?= $headerScript === 'messages.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/messages.php')) ?>"><?= icon('messages') ?>Messages</a><?php endif; ?>
+            <?php if (company_module_enabled('tickets')): ?><a class="<?= $headerScript === 'tickets.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/tickets.php')) ?>"><?= icon('tickets') ?>Tickets</a><?php endif; ?>
+            <?php if (company_module_enabled('hr')): ?><a class="<?= $headerScript === 'hr.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/hr.php?view=attendance')) ?>"><?= icon('attendance') ?>HR &amp; Attendance</a><?php endif; ?>
+            <?php if (company_module_enabled('payroll')): ?>
             <div class="mbw-nav-parent<?= $headerPayrollActive ? ' is-open' : '' ?>" data-nav-parent="payroll">
                 <a href="#" data-nav-toggle aria-expanded="<?= $headerPayrollActive ? 'true' : 'false' ?>">
                     <?= icon('wallet') ?>Payroll
@@ -476,6 +480,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                 </div>
             </div>
 
+            <?php endif; ?>
             <?php endif; ?>
         </nav>
     </aside>

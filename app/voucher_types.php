@@ -244,6 +244,7 @@ function voucher_type_url(string $type): string
 /** Voucher types intentionally entered from the compact voucher workspace. */
 function voucher_entry_type_catalog(): array
 {
+    if (function_exists('company_module_enabled') && !company_module_enabled('inventory')) return voucher_type_catalog();
     return voucher_type_catalog() + [
         'production' => ['label' => 'Production Voucher', 'short' => 'Production'],
         'stock_transfer' => ['label' => 'Stock Transfer Voucher', 'short' => 'Stock Transfer'],

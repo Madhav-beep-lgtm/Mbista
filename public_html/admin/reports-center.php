@@ -27,6 +27,7 @@ $currencySymbol = site_currency_symbol();
 // ---------------------------------------------------------------------------
 $reportRegistry = rc_report_registry();
 $allowedReportKeys = array_keys($reportRegistry);
+$allowedReportKeys = array_values(array_filter($allowedReportKeys, static fn(string $key): bool => company_module_enabled(company_report_module($key) ?? '', $companyId)));
 if (!($companyBusinessProfile['show_inventory'] ?? false)) {
     $allowedReportKeys = array_values(array_diff($allowedReportKeys, ['inventory-summary', 'stock-ledger', 'stock-movement', 'stock-valuation', 'nrv-report', 'inventory-gl-reconciliation']));
 }

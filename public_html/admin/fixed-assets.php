@@ -2263,13 +2263,16 @@ $bodyClass = 'admin-layout accounting-module-page fixed-assets-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <nav class="mbw-tabbar inventory-module-tabs" aria-label="Inventory and asset modules">
+    <?php if (company_module_enabled('inventory')): ?>
     <a class="mbw-tab" href="<?= e(url('admin/accounting-inventory.php')) ?>"><?= icon('layers') ?> Inventory</a>
     <?php if (($inventoryProfile['show_manufacturing'] ?? false)): ?>
         <a class="mbw-tab" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing')) ?>"><?= icon('services') ?> Manufacturing</a>
     <?php endif; ?>
-    <a class="mbw-tab is-active" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?> Fixed Assets</a>
+    <?php endif; ?>
+    <?php if (company_module_enabled('fixed_assets')): ?><a class="mbw-tab is-active" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?> Fixed Assets</a><?php endif; ?>
 </nav>
 
+<?php if (company_module_enabled('fixed_assets')): ?>
 <section class="mbw-kpi-grid" aria-label="Fixed asset overview">
     <div class="mbw-kpi"><div><span class="mbw-kpi-label">Assets</span><div class="mbw-kpi-value"><?= e((string) count($assets)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Registered</span></span></div><span class="mbw-chip tone-blue"><?= icon('companies') ?></span></div>
     <div class="mbw-kpi"><div><span class="mbw-kpi-label">Gross Cost</span><div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($totalCost, 2)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Original cost</span></span></div><span class="mbw-chip tone-green"><?= icon('wallet') ?></span></div>
@@ -2277,12 +2280,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="mbw-kpi"><div><span class="mbw-kpi-label">Carrying Amount</span><div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($totalCarrying, 2)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Net book value</span></span></div><span class="mbw-chip tone-teal"><?= icon('reports') ?></span></div>
 </section>
 
+<?php endif; ?>
 <nav class="mbw-tabbar" aria-label="Fixed asset workspace" style="margin:6px 0 16px">
+<?php if (company_module_enabled('fixed_assets')): ?>
     <a class="mbw-tab <?= in_array($faView, ['register', 'detail'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('companies') ?>Register</a>
     <a class="mbw-tab <?= $faView === 'models' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>"><?= icon('settings') ?>Measurement Models</a>
     <a class="mbw-tab <?= $faView === 'revaluation' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>"><?= icon('wallet') ?>Revaluation</a>
-    <a class="mbw-tab <?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Lease</a>
+<?php endif; ?>
+    <?php if (company_module_enabled('nfrs')): ?><a class="mbw-tab <?= $faView === 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=leases')) ?>"><?= icon('contracts') ?>Lease</a><?php endif; ?>
+<?php if (company_module_enabled('fixed_assets')): ?>
     <a class="mbw-tab <?= $faView === 'categories' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php?view=categories')) ?>"><?= icon('layers') ?>Categories</a>
+<?php endif; ?>
 </nav>
 
 <?php if ($faIntegrityIssues !== [] && in_array($faView, ['register', 'detail', 'leases'], true)): ?>

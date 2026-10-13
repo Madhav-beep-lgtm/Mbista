@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 
 require_admin();
+if (!user_is_super_admin()) redirect('admin/company-settings.php');
 $pageTitle = 'Settings Center';
 $pageSubtitle = 'Manage global settings that control your brand, operations, and portal experience.';
 $bodyClass = 'admin-layout settings-page';

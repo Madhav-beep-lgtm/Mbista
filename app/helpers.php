@@ -1299,6 +1299,9 @@ function all_settings(): array
  */
 function update_settings(array $settings, int $companyId = 0): void
 {
+    foreach (array_keys($settings) as $key) {
+        if (str_starts_with((string)$key, 'company_module_') && (!user_is_super_admin() || $companyId <= 0)) throw new RuntimeException('Only the super admin can change company modules.');
+    }
     $companyId = max(0, $companyId);
     $stmt = db()->prepare('INSERT INTO settings (company_id, setting_key, setting_value) VALUES (:company_id, :setting_key, :setting_value) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)');
 
@@ -2129,6 +2132,7 @@ function require_company_context(): void
         flash('error', 'Select a company to continue.');
         redirect('portal.php');
     }
+    company_modules_enforce_request();
 }
 
 function admin_totals(): array
@@ -2468,6 +2472,7 @@ function require_login(): void
         flash('error', 'Please log in to continue.');
         redirect('login.php');
     }
+    company_modules_enforce_request();
 
     $script = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
     if (($user['role'] ?? '') === 'customer' && !empty($user['must_change_password']) && !in_array($script, ['change-password.php', 'logout.php'], true)) {
@@ -2484,6 +2489,7 @@ function require_admin(): void
         flash('error', 'Admin access required.');
         redirect('login.php');
     }
+    company_modules_enforce_request();
 }
 
 function require_staff_or_admin(): void
@@ -2493,6 +2499,7 @@ function require_staff_or_admin(): void
         flash('error', 'Staff or admin access required.');
         redirect('login.php');
     }
+    company_modules_enforce_request();
 }
 
 function staff_scoped_client_ids(int $staffId, int $companyId): array
