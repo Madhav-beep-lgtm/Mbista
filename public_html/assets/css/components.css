@@ -19,12 +19,9 @@
 .button.danger, .btn-danger { border-color: var(--color-danger); background: var(--color-danger); color: #fff; }
 .mbw-delete-action { color: var(--color-danger); }
 .button.success, .btn-success { border-color: var(--color-success); background: var(--color-success); color: #fff; }
-.button.is-square, .admin-icon-button, .theme-toggle-link {
+.button.is-square, .admin-icon-button {
   width: var(--control-height); min-width: var(--control-height); padding: 0;
 }
-.theme-toggle-link { display: inline-grid; min-height: var(--control-height); place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); }
-.theme-toggle-link:hover { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-primary); }
-.theme-toggle-link [data-theme-toggle-label] { display: none; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 
 label { display: grid; gap: 6px; color: var(--color-text); font-size: var(--font-size-control); font-weight: 650; }

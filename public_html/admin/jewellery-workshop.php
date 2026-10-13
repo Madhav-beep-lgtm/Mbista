@@ -1107,10 +1107,7 @@ jw_filter_bar_styles();
     </section>
     <style>
         .jw-field-invalid { border-color: var(--mbw-red, #e5484d) !important; box-shadow: 0 0 0 2px rgba(229, 72, 77, 0.15); }
-        /* The text takes the red TOKEN, not a darker shade of it. A fixed dark
-           red reads well on the light theme's pale panel and disappears into
-           the dark theme's translucent one, which is the whole reason the
-           tokens exist. */
+        /* Use the shared danger token so validation feedback stays consistent. */
         .jw-form-errors { border: 1px solid var(--mbw-red, #e5484d); background: var(--mbw-red-soft, #fdeaea);
             color: var(--mbw-red, #e5484d); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
     </style>

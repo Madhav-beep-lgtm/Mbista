@@ -246,7 +246,6 @@ body.sidebar-collapsed .admin-nav a .ui-icon { width: 18px; height: 18px; }
   .portal-card-footer { align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 440px) {
-  .header-actions .theme-toggle-link { display: none; }
   .header-actions .nav-button { width: var(--control-height); min-width: var(--control-height); padding: 0; justify-content: center; font-size: 0; }
   .header-actions .nav-button .ui-icon { width: 18px; height: 18px; }
 }

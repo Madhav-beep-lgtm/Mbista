@@ -3,7 +3,7 @@
   body { background: #fff !important; color: #000 !important; font-size: 10pt; }
   .utility-bar, .site-header, .site-footer, .admin-sidebar, .admin-topbar,
   .admin-breadcrumb, .actions, .button, button, .no-print, .frm-del,
-  .theme-toggle-link, .mobile-menu-button { display: none !important; }
+  .mobile-menu-button { display: none !important; }
   .admin-shell, .admin-main, .admin-content { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
   .card, .mbw-card, .form-card, .panel { border-color: #aaa !important; box-shadow: none !important; break-inside: avoid; }
   table { width: 100% !important; font-size: 9pt; }

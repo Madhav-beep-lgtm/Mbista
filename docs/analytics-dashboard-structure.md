@@ -81,12 +81,6 @@ Primary classes:
 - `.admin-analysis-card`
 - `body.admin-dashboard .admin-stats`
 
-Dark mode variants:
-
-- `body.theme-dark.admin-dashboard .admin-chart-card`
-- `body.theme-dark.admin-dashboard .admin-analysis-card`
-- `body.theme-dark.admin-dashboard .admin-chart-card canvas`
-
 Responsive behavior:
 
 - At the shared responsive breakpoints, the grid collapses for narrow screens.

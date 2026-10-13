@@ -163,13 +163,13 @@
 ### 📊 Current Status: IN PROGRESS
 - **Theme Variables**: ⚠️ Partial
 - **Motion Layers**: ❌ Not started
-- **Dark Mode Override**: ⚠️ Partial
+- **Theme Model**: ✅ Single light theme
 - **Headless Screenshots**: ✅ Working
 
 ### 📝 TODO
 - [ ] Complete blue color palette
 - [ ] Add transition animations
-- [ ] Test dark mode across all pages
+- [ ] Test light-theme consistency across all pages
 - [ ] Performance optimization for animations
 
 **Effort**: ~1-2 weeks | **Priority**: LOW
@@ -217,7 +217,7 @@
 - [ ] IFRS valuation calculations
 - [ ] Cross-tenant data isolation
 - [ ] Export permission validation
-- [ ] Dark mode rendering
+- [ ] Light-theme rendering
 
 ---
 

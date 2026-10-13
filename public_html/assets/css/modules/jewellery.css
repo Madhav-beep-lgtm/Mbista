@@ -3,7 +3,7 @@
    ---------------------------------------------------------------------------
    Styling only. Every rule here is scoped under .jw-page so it cannot reach any
    other module, and every colour is a design token so the whole thing follows
-   the light/dark switch rather than pinning itself to one of them.
+   the shared application palette.
 
    The shape it is aiming for: a document header with its own icon, a working
    area on the left, and a summary rail on the right that keeps the totals and
@@ -439,8 +439,8 @@ table.jw-opening-import-table td:nth-child(17) { min-width: 190px; }
    empty green rectangles — the labels were in the HTML the whole time, just
    painted the same colour as what was behind them.
 
-   So they get their own class. Everything below is a token, which is what makes
-   it follow the light/dark switch instead of being right in one of them; and
+   So they get their own class. Everything below is a token, which keeps the
+   controls aligned with the shared application palette; and
    the colours are stated explicitly rather than inherited, so no other sheet
    can leave the text and the background agreeing with each other again.
 

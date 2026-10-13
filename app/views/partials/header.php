@@ -86,11 +86,6 @@ if ($navSection === '') {
             <button type="submit" aria-label="Search" title="Search"><?= icon('search') ?></button>
         </form>
         <div class="header-actions">
-            <button type="button" class="theme-toggle-link" data-theme-toggle aria-label="Switch to dark mode" title="Switch to dark mode">
-                <span data-theme-icon="dark"><?= icon('theme') ?></span>
-                <span data-theme-icon="light" hidden><?= icon('sun') ?></span>
-                <span data-theme-toggle-label>Dark mode</span>
-            </button>
             <?php if ($currentUser): ?>
                 <a class="nav-button" href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php else: ?>

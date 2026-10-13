@@ -199,12 +199,9 @@ hr { border: 0; border-top: 1px solid var(--color-border); }
 .button.danger, .btn-danger { border-color: var(--color-danger); background: var(--color-danger); color: #fff; }
 .mbw-delete-action { color: var(--color-danger); }
 .button.success, .btn-success { border-color: var(--color-success); background: var(--color-success); color: #fff; }
-.button.is-square, .admin-icon-button, .theme-toggle-link {
+.button.is-square, .admin-icon-button {
   width: var(--control-height); min-width: var(--control-height); padding: 0;
 }
-.theme-toggle-link { display: inline-grid; min-height: var(--control-height); place-items: center; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); }
-.theme-toggle-link:hover { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-primary); }
-.theme-toggle-link [data-theme-toggle-label] { display: none; }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 
 label { display: grid; gap: 6px; color: var(--color-text); font-size: var(--font-size-control); font-weight: 650; }
@@ -838,38 +835,12 @@ body.sidebar-collapsed .admin-nav a .ui-icon { width: 18px; height: 18px; }
   .portal-card-footer { align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 440px) {
-  .header-actions .theme-toggle-link { display: none; }
   .header-actions .nav-button { width: var(--control-height); min-width: var(--control-height); padding: 0; justify-content: center; font-size: 0; }
   .header-actions .nav-button .ui-icon { width: 18px; height: 18px; }
 }
 
 /* SOURCE: themes.css */
-/* Theme variants contain token overrides only. */
-body.theme-dark,
-body.admin-dark {
-  color-scheme: dark;
-  --color-bg: #0F1720;
-  --color-surface: #17212B;
-  --color-surface-muted: #1D2935;
-  --color-primary: #55B5DF;
-  --color-primary-hover: #7AC7E8;
-  --color-primary-soft: #16384A;
-  --color-text: #E7EEF4;
-  --color-text-muted: #A8B7C4;
-  --color-border: #324453;
-  --color-focus: #55B5DF;
-  --color-danger: #FDA29B;
-  --color-danger-soft: #3B2224;
-  --color-success: #75E0A7;
-  --color-success-soft: #153B2B;
-  --color-warning: #FEC84B;
-  --color-warning-soft: #3B3018;
-  --color-info: #84CAFF;
-  --color-info-soft: #17344B;
-  --shadow-panel: 0 1px 2px rgba(0, 0, 0, .22);
-  --shadow-menu: 0 16px 36px rgba(0, 0, 0, .34);
-  --focus-ring: 0 0 0 3px rgba(85, 181, 223, .22);
-}
+/* Reserved for token-only brand variants. The application ships one light theme. */
 
 /* SOURCE: print.css */
 @media print {
@@ -877,7 +848,7 @@ body.admin-dark {
   body { background: #fff !important; color: #000 !important; font-size: 10pt; }
   .utility-bar, .site-header, .site-footer, .admin-sidebar, .admin-topbar,
   .admin-breadcrumb, .actions, .button, button, .no-print, .frm-del,
-  .theme-toggle-link, .mobile-menu-button { display: none !important; }
+  .mobile-menu-button { display: none !important; }
   .admin-shell, .admin-main, .admin-content { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
   .card, .mbw-card, .form-card, .panel { border-color: #aaa !important; box-shadow: none !important; break-inside: avoid; }
   table { width: 100% !important; font-size: 9pt; }

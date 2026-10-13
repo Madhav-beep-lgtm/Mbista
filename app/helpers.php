@@ -471,10 +471,6 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'M16 17l5-5-5-5', 'M21 12H9'],
         ],
-        'theme' => [
-            'viewBox' => '0 0 24 24',
-            'paths' => ['M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79'],
-        ],
         'profile' => [
             'viewBox' => '0 0 24 24',
             'paths' => ['M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2', 'M12 11a4 4 0 1 0 0-8'],
@@ -702,17 +698,10 @@ function icon(string $name): string
             'viewBox' => '0 0 24 24',
             'paths' => ['M8 9a6 3 0 1 0 0-6 6 3 0 0 0 0 6', 'M2 6v4c0 1.66 2.69 3 6 3s6-1.34 6-3V6', 'M14 13.5c.63.95 2.68 1.5 5 1.5', 'M10 13v4c0 1.66 2.69 3 6 3s6-1.34 6-3v-4', 'M22 13c0 1.66-2.69 3-6 3s-6-1.34-6-3'],
         ],
-        // These four were being asked for by name but were not here, so every
-        // one of them fell through to the placeholder circle: the pencil on
-        // every edit button, and the three chips in the top bar — language,
-        // date mode and the light half of the theme switch.
+        // These glyphs are used by the compact edit, language and date controls.
         'edit' => [
             'viewBox' => '0 0 24 24',
             'paths' => ['M12 20h9', 'M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z'],
-        ],
-        'sun' => [
-            'viewBox' => '0 0 24 24',
-            'paths' => ['M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10', 'M12 1v2', 'M12 21v2', 'M4.22 4.22l1.42 1.42', 'M18.36 18.36l1.42 1.42', 'M1 12h2', 'M21 12h2', 'M4.22 19.78l1.42-1.42', 'M18.36 5.64l1.42-1.42'],
         ],
         'globe-language' => [
             'viewBox' => '0 0 24 24',

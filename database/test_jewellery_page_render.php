@@ -573,7 +573,7 @@ $exportRule = $exportAt === false ? '' : substr($skinCss, $exportAt, 700);
 ok(str_contains($exportRule, 'background') && str_contains($exportRule, 'color'),
     'Stating BOTH the background and the text colour, so they cannot end up agreeing');
 ok(substr_count($skinCss, 'var(--mbw-') > 20,
-    'And in tokens, so the bar follows the light/dark switch rather than being right in one');
+    'And in tokens, so the bar follows the shared application palette');
 
 // ---------------------------------------------------------------------------
 // The print / preview controller, once per document type. It exits via

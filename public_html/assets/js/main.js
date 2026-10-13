@@ -343,55 +343,6 @@ document.addEventListener('DOMContentLoaded', () => {
     rebuildAll();
   }
 
-  const themeToggleButtons = document.querySelectorAll('[data-theme-toggle]');
-  if (themeToggleButtons.length > 0) {
-    const storageKey = 'appTheme';
-
-    const applyTheme = (theme) => {
-      const isDark = theme === 'dark';
-      document.body.classList.toggle('theme-dark', isDark);
-      document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
-
-      // Keep compatibility with the admin workspace styles that also key off this class.
-      if (document.body.classList.contains('admin-workspace') || document.body.classList.contains('admin-layout')) {
-        document.body.classList.toggle('admin-dark', isDark);
-      }
-
-      // Let canvas charts re-read design tokens for the new theme.
-      window.dispatchEvent(new CustomEvent('mbw:theme'));
-
-      themeToggleButtons.forEach((button) => {
-        const labelText = isDark ? 'Light mode' : 'Dark mode';
-        const actionText = isDark ? 'Switch to light mode' : 'Switch to dark mode';
-        const label = button.querySelector('[data-theme-toggle-label]');
-        button.querySelectorAll('[data-theme-icon]').forEach((icon) => {
-          icon.hidden = icon.dataset.themeIcon !== (isDark ? 'light' : 'dark');
-        });
-
-        if (label) {
-          label.textContent = labelText;
-        } else {
-          button.textContent = labelText;
-        }
-
-        button.setAttribute('aria-label', actionText);
-        button.setAttribute('title', actionText);
-      });
-    };
-
-    const storedTheme = localStorage.getItem(storageKey);
-    applyTheme(storedTheme === 'dark' ? 'dark' : 'light');
-
-    themeToggleButtons.forEach((button) => {
-      button.addEventListener('click', () => {
-        const isDark = document.body.classList.contains('theme-dark');
-        const nextTheme = isDark ? 'light' : 'dark';
-        localStorage.setItem(storageKey, nextTheme);
-        applyTheme(nextTheme);
-      });
-    });
-  }
-
   // Creation forms are always visible now (modern fields, no Open form).
   if (document.body.classList.contains('admin-layout')) {
     document.querySelectorAll('details.feature-disclosure').forEach((disclosure) => {

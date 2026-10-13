@@ -81,20 +81,17 @@ ok($used !== [], 'Icons are in use (' . count($used) . ' distinct)');
 ok($missing === [], 'Every one resolves to an SVG'
     . ($missing === [] ? '' : ' — missing: ' . implode(', ', $missing)));
 
-echo "\n3. Colours follow the theme\n";
-// The app has a dark mode driven by CSS custom properties. A fixed hex in a
-// colour declaration keeps its light value on the dark canvas, which is how a
-// red delete link ends up unreadable at night.
+echo "\n3. Colours follow the shared light theme\n";
+// Shared colours are driven by CSS custom properties. Fixed hex declarations
+// bypass that palette and make later brand adjustments unnecessarily fragile.
 //
 // Surfaces where a FIXED colour is the correct answer, not an oversight:
 //
 //   the printed documents — a bill, a payslip, a statement, an agreement. They
-//   are ink on paper. Theming them would make what comes out of the printer
-//   follow whether the clerk happened to be in dark mode.
+//   are ink on paper and intentionally use print-specific colours.
 //
 //   the rich-text editor in agreement-builder, which is a white page showing
-//   what the agreement will look like printed. A WYSIWYG canvas that changes
-//   colour with the theme is no longer WYS.
+//   what the agreement will look like printed.
 //
 // Each was read before being listed. This is not a way of silencing the check.
 $printPages = [
@@ -130,22 +127,21 @@ $themes = (string) file_get_contents($root . '/public_html/assets/css/themes.css
 ok(str_contains($tokens, '--color-primary: #1676A3'), 'The requested blue primary token is the default');
 ok(str_contains($tokens, '--color-bg: #F6F9FC'), 'The requested neutral canvas token is the default');
 ok(str_contains($tokens, '--color-surface: #FFFFFF'), 'Cards and controls use the white surface token');
-ok(str_contains($themes, 'body.theme-dark') && str_contains($themes, '--color-bg:'), 'A dark token variant remains available');
+ok(!str_contains($themes, 'theme-dark') && !str_contains($themes, 'admin-dark'), 'No dark token variant remains');
 
-echo "\n4. The theme can actually be switched\n";
+echo "\n4. The application has one light theme\n";
 $mainJs = (string) file_get_contents($root . '/public_html/assets/js/main.js');
-ok(str_contains($mainJs, 'data-theme-toggle'), 'The toggle is wired up');
-ok(str_contains($mainJs, "localStorage.setItem(storageKey"), 'And the choice is remembered');
+ok(!str_contains($mainJs, 'data-theme-toggle') && !str_contains($mainJs, 'appTheme'), 'Theme switching and remembered theme state are absent');
 $headers = ['admin_header.php', 'client_header.php', 'staff_header.php', 'header.php'];
-$without = [];
+$withToggle = [];
 foreach ($headers as $header) {
     $path = $root . '/app/views/partials/' . $header;
-    if (is_file($path) && !str_contains((string) file_get_contents($path), 'data-theme-toggle')) {
-        $without[] = $header;
+    if (is_file($path) && str_contains((string) file_get_contents($path), 'data-theme-toggle')) {
+        $withToggle[] = $header;
     }
 }
-ok($without === [], 'Every layout offers the toggle'
-    . ($without === [] ? '' : ' — missing from ' . implode(', ', $without)));
+ok($withToggle === [], 'No layout offers a dark-mode toggle'
+    . ($withToggle === [] ? '' : ' — found in ' . implode(', ', $withToggle)));
 
 echo "\n5. No stray PHP close tags reaching the page\n";
 /*

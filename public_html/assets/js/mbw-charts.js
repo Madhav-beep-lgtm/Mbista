@@ -14,9 +14,8 @@
  *
  * Colors are design-token names resolved from CSS custom properties at draw
  * time (--mbw-green, --mbw-red, --mbw-primary, --mbw-amber, --mbw-purple,
- * --mbw-muted, --mbw-border, --mbw-card, --mbw-heading), so charts follow the
- * active light/dark theme. Charts redraw on resize and on the `mbw:theme`
- * event dispatched by the theme toggle.
+ * --mbw-muted, --mbw-border, --mbw-card, --mbw-heading). Charts redraw when
+ * their container or the browser window changes size.
  */
 (function () {
   'use strict';
@@ -89,9 +88,6 @@
     }
   }
 
-  window.addEventListener('mbw:theme', function () {
-    charts.forEach(function (c) { c.draw(); });
-  });
   window.addEventListener('resize', function () {
     charts.forEach(function (c) { c.draw(); });
   });

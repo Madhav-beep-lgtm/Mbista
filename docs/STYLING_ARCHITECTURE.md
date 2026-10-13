@@ -24,7 +24,7 @@ php deploy/build-css.php --check
 - `base.css` — reset, document defaults and foundational typography
 - `components.css` — controls, panels, tables, tabs, feedback and dialogs
 - `layout.css` — public pages, shared portal shell and responsive layout
-- `themes.css` — token overrides only, including retained dark mode
+- `themes.css` — reserved for token-only brand variants; currently light only
 - `modules/jewellery.css` — genuinely module-specific jewellery structures
 - `print.css` — print-only presentation
 
