@@ -194,6 +194,18 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .chart-accounts-page .coa-filter-bar select,
 .chart-accounts-page .coa-filter-bar .button { min-height: 36px; height: 36px; padding: 6px 10px; font-size: 13px; }
 .chart-accounts-page .coa-filter-bar .coa-upload-toggle { width: 36px; padding: 0; }
+.chart-accounts-page .coa-table { width: 100%; min-width: 760px; border-collapse: collapse; border: 1px solid var(--color-border); font-size: 13px; }
+.chart-accounts-page .coa-table th,
+.chart-accounts-page .coa-table td { border: 1px solid var(--color-border); padding: 9px 12px; vertical-align: middle; }
+.chart-accounts-page .coa-table th { background: var(--color-primary-soft); color: var(--color-text); font-size: 12px; font-weight: 700; }
+.chart-accounts-page .coa-table td { background: var(--color-surface); }
+.chart-accounts-page .coa-table .coa-master-row td { background: var(--color-primary-soft); font-weight: 650; }
+.chart-accounts-page .coa-table .coa-group-row td { background: var(--color-surface-muted); }
+.chart-accounts-page .coa-table .coa-group-row td:nth-child(2) { font-weight: 600; }
+.chart-accounts-page .coa-table tbody tr:hover td { background: var(--color-primary-soft); }
+.chart-accounts-page .coa-table td:nth-child(2) { white-space: normal; min-width: 220px; overflow-wrap: anywhere; }
+.chart-accounts-page .coa-table .mbw-pill { font-size: 11px; padding: 3px 8px; }
+.chart-accounts-page .coa-row-actions { display: flex; align-items: center; gap: 10px; }
 .chart-accounts-page #coa-upload-menu .action-menu-options button { display: flex; width: 100%; padding: 12px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
 .chart-accounts-page #coa-upload-menu .action-menu-options button:hover,
 .chart-accounts-page #coa-upload-menu .action-menu-options button:focus-visible { background: var(--color-primary-soft); color: var(--color-primary); }

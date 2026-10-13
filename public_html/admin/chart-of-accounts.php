@@ -436,11 +436,11 @@ $coaRowPill = static function (string $status): string {
 
     <section class="mbw-card" id="coa-tree-panel" aria-label="Chart of accounts hierarchy">
         <div style="overflow-x:auto">
-            <table id="coa-tree">
-                <thead><tr><th style="width:120px">Code</th><th>Name</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th style="width:140px">Actions</th></tr></thead>
+            <table id="coa-tree" class="coa-table">
+                <thead><tr><th scope="col" style="width:240px">Code</th><th scope="col">Name</th><th scope="col" style="width:100px">Type</th><th scope="col" style="width:110px">Status</th><th scope="col" style="width:140px">Actions</th></tr></thead>
                 <tbody>
                 <?php foreach ($natureOrder as $nature => [$digit, $natureLabel]): ?>
-                    <tr class="coa-node" data-name="<?= e(strtolower($natureLabel)) ?>">
+                    <tr class="coa-node coa-master-row" data-name="<?= e(strtolower($natureLabel)) ?>">
                         <td><button type="button" class="coa-tgl" data-parent="m<?= e($digit) ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <strong style="color:var(--mbw-heading)"><?= e($digit) ?></strong></td>
                         <td><strong style="color:var(--mbw-heading)"><?= e($natureLabel) ?></strong></td>
                         <td><span class="mbw-pill tone-blue">Master</span></td>
@@ -449,7 +449,7 @@ $coaRowPill = static function (string $status): string {
                     </tr>
                     <?php foreach ($groupsByNature[$nature] as $g): ?>
                         <?php $gid = (int) $g['id']; ?>
-                        <tr class="coa-node coa-child" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
+                        <tr class="coa-node coa-child coa-group-row" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
                             <td style="padding-left:32px"><button type="button" class="coa-tgl" data-parent="g<?= $gid ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <?= e($g['code']) ?></td>
                             <td style="padding-left:18px"><?= e($g['name']) ?></td>
                             <td><span class="mbw-pill tone-purple">Group</span></td>
@@ -462,11 +462,11 @@ $coaRowPill = static function (string $status): string {
                                 <td style="padding-left:36px"><?= e($l['name']) ?></td>
                                 <td><span class="mbw-pill tone-teal">Ledger</span></td>
                                 <td><?= $statusPill((string) $l['status']) ?></td>
-                                <td style="display:flex;gap:10px">
+                                <td><div class="coa-row-actions">
                                     <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $l['id'])) ?>" title="View statement"><?= icon('search') ?></a>
                                     <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>" title="Edit"><?= icon('settings') ?></a>
                                     <a class="mbw-view-all" href="<?= e(url('admin/audit-trail.php')) ?>" title="History"><?= icon('admin') ?></a>
-                                </td>
+                                </div></td>
                             </tr>
                         <?php endforeach; ?>
                     <?php endforeach; ?>
@@ -488,7 +488,7 @@ $coaRowPill = static function (string $status): string {
 
     <section class="mbw-card" id="coa-posting-panel" aria-label="Posting accounts" hidden>
         <div style="overflow-x:auto">
-            <table>
+            <table class="coa-table">
                 <thead><tr><th>Posting role</th><th>Code</th><th>Ledger</th></tr></thead>
                 <tbody>
                 <?php foreach ($postingRows as $row): ?>
@@ -505,7 +505,7 @@ $coaRowPill = static function (string $status): string {
         <?php else: ?>
             <p style="padding:12px 16px">Latest 100 company activities.</p>
             <div style="overflow-x:auto">
-                <table>
+                <table class="coa-table">
                     <thead><tr><th>Date and time</th><th>User</th><th>Module</th><th>Action</th><th>Details</th></tr></thead>
                     <tbody>
                     <?php foreach ($coaAuditRows as $row): ?>
