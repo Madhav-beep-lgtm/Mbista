@@ -9,6 +9,7 @@ require_company_context();
 $repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Chart Ledgers';
+$pageHero = false;
 $pageSubtitle = 'Manage ledger accounts, edit rows, and remove unused ledgers.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 $company = current_company();
