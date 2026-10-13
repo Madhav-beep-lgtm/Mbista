@@ -12,7 +12,8 @@ require_company_context();
 $repairErrors = accounting_module_repair_database();
 
 $pageTitle = 'Reports Center';
-$pageSubtitle = 'Create, view and export your financial and operational reports.';
+$pageSubtitle = '';
+$pageHero = false;
 $company = current_company();
 $companyId = (int) ($company['id'] ?? 0);
 $companyBusinessType = company_accounting_business_type($companyId);
@@ -48,7 +49,7 @@ if (!isset($allowedReportRegistry[$reportId])) {
 }
 
 $fiscalYears = fiscal_years_for_company($companyId, false);
-$fiscalYearId = (int) ($_GET['fy'] ?? current_fiscal_year_id());
+$fiscalYearId = (int) current_fiscal_year_id();
 $selectedFiscalYear = null;
 foreach ($fiscalYears as $fiscalYearRow) {
     if ((int) $fiscalYearRow['id'] === $fiscalYearId) {
@@ -115,40 +116,26 @@ if ($fyClampStart !== '' && $fyClampEnd !== '') {
     }
 }
 
-$voucherTypes = ['payment', 'receipt', 'journal', 'sales', 'purchase', 'contra', 'debit_note', 'credit_note'];
-$voucherType = (string) ($_GET['vtype'] ?? '');
-if (!in_array($voucherType, $voucherTypes, true)) {
-    $voucherType = '';
-}
-
-$ledgerFilterId = (int) ($_GET['ledger_id'] ?? 0);
-$groupFilterId = (int) ($_GET['group_id'] ?? 0);
+$voucherType = '';
+$ledgerFilterId = $reportId === 'ledger-report' ? (int) ($_GET['ledger_id'] ?? 0) : 0;
+$groupFilterId = $reportId === 'group-report' ? (int) ($_GET['group_id'] ?? 0) : 0;
 $itemFilterId = (int) ($_GET['item_id'] ?? 0);
-$businessType = (string) ($_GET['biz'] ?? 'all');
-$businessTypeOptions = ['all' => 'All', 'service' => 'Service'];
-if ($companyBusinessProfile['show_inventory'] ?? false) {
-    $businessTypeOptions['trading'] = 'Trading';
-}
-if ($companyBusinessProfile['show_manufacturing'] ?? false) {
-    $businessTypeOptions['manufacturing'] = 'Manufacturing';
-}
-if (!array_key_exists($businessType, $businessTypeOptions)) {
-    $businessType = 'all';
-}
-
+$businessType = $companyBusinessType;
 $subsidiaries = child_companies_for_company($companyId);
-$scopeCompanyId = (int) ($_GET['scope_company'] ?? $companyId);
-$allowedScopeIds = array_merge([$companyId], array_map(static fn (array $row): int => (int) $row['id'], $subsidiaries));
-if (!in_array($scopeCompanyId, $allowedScopeIds, true)) {
-    $scopeCompanyId = $companyId;
-}
+$scopeCompanyId = $companyId;
 
 // Reporting dimensions (Branch / Department / Cost centre) captured on
 // vouchers. Options are the distinct values actually used, so the filters
 // only appear once dimension data exists for the scoped company.
 $dimensionLabels = ['location' => 'Branch / Location', 'department' => 'Department / Project', 'cost_centre' => 'Cost Centre'];
+$dimensionDefaults = [
+    'location' => ['Head Office', 'Branch Office', 'Client Site'],
+    'department' => ['Accounts & Finance', 'Administration', 'Operations', 'Consulting', 'Training', 'Sales & Marketing'],
+    'cost_centre' => ['General', 'Accounting Services', 'Advisory', 'Training', 'Administration'],
+];
 $dimensionOptions = [];
 $dimensionFilters = [];
+$supportsDimensions = in_array($reportId, ['trial-balance', 'profit-loss', 'balance-sheet', 'ledger-report', 'group-report'], true);
 foreach ($dimensionLabels as $dimColumn => $dimLabel) {
     try {
         $dimStmt = db()->prepare("SELECT DISTINCT {$dimColumn} FROM vouchers WHERE company_id = :cid AND {$dimColumn} IS NOT NULL AND {$dimColumn} <> '' ORDER BY {$dimColumn} ASC");
@@ -157,12 +144,16 @@ foreach ($dimensionLabels as $dimColumn => $dimLabel) {
     } catch (Throwable $exception) {
         $values = [];
     }
-    if ($values === []) {
-        continue;
+    if ($dimColumn === 'cost_centre' && column_exists('voucher_entries', 'cost_centre')) {
+        $lineDims = db()->prepare("SELECT DISTINCT e.cost_centre FROM voucher_entries e INNER JOIN vouchers v ON v.id = e.voucher_id WHERE v.company_id = ? AND e.cost_centre IS NOT NULL AND e.cost_centre <> ''");
+        $lineDims->execute([$companyId]);
+        $values = array_merge($values, $lineDims->fetchAll(PDO::FETCH_COLUMN));
     }
+    $values = array_values(array_unique(array_merge($dimensionDefaults[$dimColumn], $values)));
+    sort($values);
     $dimensionOptions[$dimColumn] = $values;
     $selected = trim((string) ($_GET['dim_' . $dimColumn] ?? ''));
-    if ($selected !== '' && in_array($selected, $values, true)) {
+    if ($supportsDimensions && $selected !== '' && in_array($selected, $values, true)) {
         $dimensionFilters[$dimColumn] = $selected;
     }
 }
@@ -443,30 +434,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <option value="<?= e(rc_url(['report' => $key])) ?>" <?= $key === $reportId ? 'selected' : '' ?>><?= e($label) ?></option>
             <?php endforeach; ?>
         </select>
-        <span class="rc2-caret"><?= icon('chevron') ?></span>
     </label>
-    <label class="rc2-quick" title="Apply a preset date range">
-        <?= icon('filter') ?>
-        <span class="sr-only">Quick filter</span>
-        <select id="rc2QuickFilter" aria-label="Quick date range">
-            <option value="">Quick Filter</option>
-            <option value="this-month">This Month</option>
-            <option value="last-month">Last Month</option>
-            <option value="this-quarter">This Quarter</option>
-            <option value="fy">This Fiscal Year</option>
-            <option value="last-30">Last 30 Days</option>
-            <option value="ytd">Year to Date</option>
-        </select>
-        <span class="rc2-caret"><?= icon('chevron') ?></span>
-    </label>
-    <label class="rc2-saved">
-        <span class="sr-only">Saved filters</span>
-        <select id="rc2SavedSelect" aria-label="Saved filters"></select>
-        <span class="rc2-caret"><?= icon('chevron') ?></span>
-    </label>
-    <button type="button" class="rc2-save-btn" id="rc2SaveFilter" title="Save the current filters in this browser">
-        <?= icon('star') ?>Save Filter
-    </button>
 </div>
 
 <?php if ($dateFilterNotice !== ''): ?>
@@ -479,7 +447,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <span class="rc2-filters-title">
             <?= icon('filter') ?>
             <strong>Filters</strong>
-            <em>Refine your report results</em>
+
         </span>
         <button type="button" class="rc2-collapse" data-rc2-collapse aria-expanded="true">
             <?= icon('chevron') ?><span>Collapse</span>
@@ -487,28 +455,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
     <div class="rc2-filters-body" data-rc2-body>
     <div class="rc-filter-grid">
-        <label>Fiscal Year
-            <select name="fy" id="rc2-fy-select">
-                <?php foreach ($fiscalYears as $fiscalYearRow): ?>
-                    <option value="<?= e((int) $fiscalYearRow['id']) ?>" <?= (int) $fiscalYearRow['id'] === $fiscalYearId ? 'selected' : '' ?>><?= e($fiscalYearRow['label']) ?> (<?= e(date('d M Y', strtotime((string) $fiscalYearRow['start_date']))) ?> - <?= e(date('d M Y', strtotime((string) $fiscalYearRow['end_date']))) ?>)</option>
-                <?php endforeach; ?>
-                <?php if ($fiscalYears === []): ?><option value="0">No fiscal year</option><?php endif; ?>
-            </select>
-        </label>
-        <script>
-        // Changing the fiscal year must not drag the previous year's dates
-        // along: clear them so the server defaults to the new year's range.
-        document.getElementById('rc2-fy-select').addEventListener('change', function () {
-            var form = this.form;
-            ['from', 'to', 'cfrom', 'cto'].forEach(function (name) {
-                var input = form.querySelector('[name="' + name + '"]');
-                if (input) { input.value = ''; }
-            });
-            form.submit();
-        });
-        </script>
         <label>From Date<input type="date" name="from" value="<?= e($fromDate) ?>"></label>
         <label>To Date<input type="date" name="to" value="<?= e($toDate) ?>"></label>
+        <?php if ($supportsDimensions): ?>
         <label>Branch
             <?php if (isset($dimensionOptions['location'])): ?>
                 <select name="dim_location">
@@ -521,14 +470,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <select disabled title="No branch/location has been recorded on vouchers yet. Set it in the voucher form's Location field."><option>All Branches</option></select>
             <?php endif; ?>
         </label>
-        <label>Company
-            <select name="scope_company">
-                <option value="<?= e($companyId) ?>" <?= $scopeCompanyId === $companyId ? 'selected' : '' ?>><?= e($company['name'] ?? 'Current company') ?></option>
-                <?php foreach ($subsidiaries as $subsidiary): ?>
-                    <option value="<?= e((int) $subsidiary['id']) ?>" <?= $scopeCompanyId === (int) $subsidiary['id'] ? 'selected' : '' ?>><?= e($subsidiary['name']) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
+
         <label>Department / Project
             <?php if (isset($dimensionOptions['department'])): ?>
                 <select name="dim_department">
@@ -553,6 +495,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <select disabled title="No cost centre has been recorded on vouchers yet. Set it in the voucher form's Cost Centre field."><option>All Cost Centers</option></select>
             <?php endif; ?>
         </label>
+        <?php endif; ?>
         <?php if ($reportId === 'salary-sheet'): ?>
             <label>Payroll Run
                 <select name="payroll_run">
@@ -565,14 +508,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </select>
             </label>
         <?php endif; ?>
-        <label>Voucher Type
-            <select name="vtype">
-                <option value="">All Voucher Types</option>
-                <?php foreach ($voucherTypes as $type): ?>
-                    <option value="<?= e($type) ?>" <?= $voucherType === $type ? 'selected' : '' ?>><?= e(ucfirst(str_replace('_', ' ', $type))) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
+
+        <?php if ($reportId === 'ledger-report'): ?>
         <label>Ledger
             <select name="ledger_id">
                 <option value="0">All Ledgers</option>
@@ -581,6 +518,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </label>
+        <?php endif; ?>
+        <?php if ($reportId === 'group-report'): ?>
         <label>Group
             <select name="group_id">
                 <option value="0">All Groups</option>
@@ -589,7 +528,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </label>
-        <?php if (($companyBusinessProfile['show_inventory'] ?? false) && $allItems !== []): ?>
+        <?php endif; ?>
+        <?php if ($reportId === 'stock-ledger' && $allItems !== []): ?>
             <label>Inventory Item
                 <select name="item_id">
                     <option value="0">First item by SKU (default)</option>
@@ -599,13 +539,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </select>
             </label>
         <?php endif; ?>
-        <label>Organization Type
-            <select name="biz">
-                <?php foreach ($businessTypeOptions as $bizValue => $bizLabel): ?>
-                    <option value="<?= e($bizValue) ?>" <?= $businessType === $bizValue ? 'selected' : '' ?>><?= e($bizLabel) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
+
         <?php if ($compareEnabled): ?>
             <label>Compare From<input type="date" name="cfrom" value="<?= e($compareFrom) ?>"></label>
             <label>Compare To<input type="date" name="cto" value="<?= e($compareTo) ?>"></label>
@@ -615,7 +549,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <button type="submit" class="rc2-apply"><?= icon('filter') ?>Apply Filters</button>
         <a class="rc2-reset" href="<?= e(url('admin/reports-center.php?report=' . $reportId)) ?>"><?= icon('reconcile') ?>Reset</a>
         <div class="rc2-export" data-rc2-export>
-            <button type="button" class="rc2-export-btn"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
+            <button type="button" class="rc2-export-btn" aria-haspopup="true" aria-expanded="false"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
             <div class="rc2-export-menu" role="menu">
                 <?php // Named in words. Three unlabelled icons in a row left people
                       // guessing which one was the spreadsheet, and the one they
@@ -756,84 +690,20 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         });
     }
 
-    // Quick Filter: preset date ranges applied to the form.
-    var quick = document.getElementById('rc2QuickFilter');
-    function iso(d) {
-        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    }
-    if (quick && form) {
-        quick.addEventListener('change', function () {
-            if (!quick.value) { return; }
-            var now = new Date();
-            var from = null;
-            var to = null;
-            if (quick.value === 'this-month') { from = new Date(now.getFullYear(), now.getMonth(), 1); to = new Date(now.getFullYear(), now.getMonth() + 1, 0); }
-            if (quick.value === 'last-month') { from = new Date(now.getFullYear(), now.getMonth() - 1, 1); to = new Date(now.getFullYear(), now.getMonth(), 0); }
-            if (quick.value === 'this-quarter') { var q = Math.floor(now.getMonth() / 3); from = new Date(now.getFullYear(), q * 3, 1); to = new Date(now.getFullYear(), q * 3 + 3, 0); }
-            if (quick.value === 'last-30') { to = now; from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29); }
-            if (quick.value === 'ytd') { from = new Date(now.getFullYear(), 0, 1); to = now; }
-            if (quick.value === 'fy' && form.dataset.fyStart && form.dataset.fyEnd) {
-                form.elements.from.value = form.dataset.fyStart;
-                form.elements.to.value = form.dataset.fyEnd;
-                form.submit();
-                return;
-            }
-            if (from && to) {
-                form.elements.from.value = iso(from);
-                form.elements.to.value = iso(to);
-                form.submit();
-            }
-        });
-    }
-
-    // Saved filters (stored in this browser via localStorage).
-    var savedSelect = document.getElementById('rc2SavedSelect');
-    var saveBtn = document.getElementById('rc2SaveFilter');
-    var STORE_KEY = 'rc2SavedFilters';
-    function readSaved() {
-        try { return JSON.parse(window.localStorage.getItem(STORE_KEY)) || []; } catch (e) { return []; }
-    }
-    function fillSaved() {
-        if (!savedSelect) { return; }
-        var items = readSaved();
-        savedSelect.innerHTML = '';
-        var placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = items.length ? 'Select a saved filter...' : 'No saved filters yet';
-        savedSelect.appendChild(placeholder);
-        items.forEach(function (item, index) {
-            var option = document.createElement('option');
-            option.value = String(index);
-            option.textContent = item.n;
-            savedSelect.appendChild(option);
-        });
-    }
-    fillSaved();
-    if (savedSelect) {
-        savedSelect.addEventListener('change', function () {
-            var item = readSaved()[Number(savedSelect.value)];
-            if (item) { window.location = window.location.pathname + item.q; }
-        });
-    }
-    if (saveBtn) {
-        saveBtn.addEventListener('click', function () {
-            var name = window.prompt('Name this filter set:');
-            if (!name) { return; }
-            var items = readSaved();
-            items.push({ n: name, q: window.location.search });
-            window.localStorage.setItem(STORE_KEY, JSON.stringify(items));
-            fillSaved();
-        });
-    }
-
     // Export dropdown menu.
     var exportWrap = document.querySelector('[data-rc2-export]');
     if (exportWrap) {
         exportWrap.querySelector('.rc2-export-btn').addEventListener('click', function (event) {
             event.stopPropagation();
             exportWrap.classList.toggle('is-open');
+            this.setAttribute('aria-expanded', exportWrap.classList.contains('is-open') ? 'true' : 'false');
         });
-        document.addEventListener('click', function () { exportWrap.classList.remove('is-open'); });
+        function closeExport() {
+            exportWrap.classList.remove('is-open');
+            exportWrap.querySelector('button').setAttribute('aria-expanded', 'false');
+        }
+        document.addEventListener('click', closeExport);
+        document.addEventListener('keydown', function (event) { if (event.key === 'Escape') closeExport(); });
     }
 
     // --- Unified statement hierarchy: display level, expand/collapse,

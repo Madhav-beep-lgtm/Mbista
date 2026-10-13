@@ -38,6 +38,17 @@ try {
     $csv = export_ledger_to_excel($cid, $fid);
     if (!str_contains(json_encode($csv), '200.00 Dr')) throw new RuntimeException('Export closing missing');
     if (str_ends_with(ledger_closing_balance_text(0), 'Dr')) throw new RuntimeException('Zero incorrectly marked debit');
+    db()->prepare("UPDATE vouchers v INNER JOIN voucher_entries e ON e.voucher_id = v.id SET v.location = 'Head Office', v.department = 'Operations', v.cost_centre = 'General' WHERE e.ledger_id = ?")->execute([$ids[0]]);
+    db()->prepare("UPDATE voucher_entries SET cost_centre = 'Training' WHERE ledger_id = ?")->execute([$ids[0]]);
+    $dims = ['location' => 'Head Office', 'department' => 'Operations', 'cost_centre' => 'Training'];
+    $filtered = rc_ledger_balances($cid, $fy['start_date'], $fy['end_date'], '', 0, $ids[0], $dims, $fy['start_date']);
+    if ((float) $filtered[0]['closing_net'] !== 100.0 || (float) $filtered[0]['tx_dr'] !== 30.0) throw new RuntimeException('Dimension selection or unallocated opening failed');
+    $dims['cost_centre'] = 'General';
+    $filtered = rc_ledger_balances($cid, $fy['start_date'], $fy['end_date'], '', 0, $ids[0], $dims, $fy['start_date']);
+    if ((float) $filtered[0]['closing_net'] !== 0.0) throw new RuntimeException('Header centre overrode explicit line centre');
+    $dims['cost_centre'] = 'Training';
+    $lines = rc_entry_lines($cid, [$ids[0]], $fy['start_date'], $fy['end_date'], $dims);
+    if (count($lines) !== 1 || (float) $lines[0]['amount'] !== 30.0) throw new RuntimeException('Filtered ledger entries or opening exclusion failed');
     echo "Closing, carry-forward, fiscal reset, status/date scope and export checks passed (rolled back).\n";
 } finally {
     db()->rollBack();

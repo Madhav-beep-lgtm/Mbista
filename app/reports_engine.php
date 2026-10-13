@@ -404,12 +404,20 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
     }
     // Optional voucher dimensions: branch = location, project = department,
     // cost centre = cost_centre (captured on the voucher form).
-    foreach (['location', 'department', 'cost_centre'] as $dimColumn) {
+    foreach (['location', 'department'] as $dimColumn) {
         $dimValue = trim((string) ($dims[$dimColumn] ?? ''));
         if ($dimValue !== '' && column_exists('vouchers', $dimColumn)) {
             $voucherWhere .= " AND {$dimColumn} = :dim_{$dimColumn}";
             $subParams['dim_' . $dimColumn] = $dimValue;
         }
+    }
+
+    // Cost centres belong to entries; header values are a legacy fallback.
+    $entryWhere = '';
+    $costCentre = trim((string) ($dims['cost_centre'] ?? ''));
+    if ($costCentre !== '') {
+        $entryWhere = " WHERE COALESCE(NULLIF(e.cost_centre, ''), d.cost_centre) = :entry_cost_centre";
+        $subParams['entry_cost_centre'] = $costCentre;
     }
 
     // An opening journal is dated on the fiscal year's first day, which is
@@ -444,10 +452,11 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
                    SUM(CASE WHEN d.vdate < :fy_start2 AND e.entry_type = 'credit' THEN e.amount ELSE 0 END) AS pre_fy_cr
             FROM voucher_entries e
             INNER JOIN (
-                SELECT id, voucher_date AS vdate, source_type
+                SELECT id, voucher_date AS vdate, source_type, cost_centre
                 FROM vouchers
                 WHERE {$voucherWhere}
             ) d ON d.id = e.voucher_id
+            {$entryWhere}
             GROUP BY e.ledger_id
         ) b ON b.ledger_id = l.id
         WHERE l.company_id = :company_id2
@@ -486,7 +495,8 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
         $opCr = (float) $row['op_cr'];
         // Direct openings pre-date the voucher register. They belong in the
         // opening column for every reporting window, never in movement.
-        $directOpening = round((float) ($row['opening_balance'] ?? 0), 2);
+        // Unallocated direct openings cannot be attributed to a dimension.
+        $directOpening = array_filter($dims) === [] ? round((float) ($row['opening_balance'] ?? 0), 2) : 0.0;
         if ($directOpening > 0.004) {
             if ((string) ($row['opening_side'] ?? 'debit') === 'credit') {
                 $opCr += $directOpening;
@@ -595,12 +605,21 @@ function rc_ledger_nature(array $row): string
 /**
  * Voucher entry lines for one or more ledgers, with running balance.
  */
-function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, string $to): array
+function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, string $to, array $dims = []): array
 {
     if ($ledgerIds === []) {
         return [];
     }
     $placeholders = implode(',', array_fill(0, count($ledgerIds), '?'));
+    $dimensionSql = '';
+    $dimensionParams = [];
+    foreach (['location', 'department', 'cost_centre'] as $key) {
+        if (trim((string) ($dims[$key] ?? '')) === '') continue;
+        $column = $key === 'cost_centre' ? "COALESCE(NULLIF(e.cost_centre, ''), v.cost_centre)" : 'v.' . $key;
+        $dimensionSql .= " AND {$column} = ?";
+        $dimensionParams[] = $dims[$key];
+    }
+    $openingSql = accounting_opening_source_sql('v.source_type');
     $sql = "
         SELECT e.ledger_id, e.entry_type, e.amount, e.memo,
                v.voucher_no, v.voucher_type, v.narration, v.reference_no,
@@ -611,11 +630,13 @@ function rc_entry_lines(int $scopeCompanyId, array $ledgerIds, string $from, str
         INNER JOIN ledgers l ON l.id = e.ledger_id
         WHERE e.ledger_id IN ({$placeholders})
           AND v.voucher_date BETWEEN ? AND ?
+          AND NOT (v.voucher_date = ? AND {$openingSql})
+          {$dimensionSql}
         ORDER BY vdate ASC, v.id ASC
         LIMIT 500
     ";
     $stmt = db()->prepare($sql);
-    $stmt->execute(array_merge([$scopeCompanyId], $ledgerIds, [$from, $to]));
+    $stmt->execute(array_merge([$scopeCompanyId], $ledgerIds, [$from, $to, $from], $dimensionParams));
     return $stmt->fetchAll();
 }
 
@@ -1037,7 +1058,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         case 'ledger-report': {
             // Account statement for one ledger (defaults to the cash ledger).
             $ledgerId = (int) $ctx['ledger_id'];
-            $allBalances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, [], rc_ctx_fy_start($ctx));
+            $allBalances = rc_ledger_balances($scopeCompanyId, $from, $to, '', 0, 0, (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
             $target = null;
             foreach ($allBalances as $b) {
                 if ($ledgerId > 0 && (int) $b['id'] === $ledgerId) {
@@ -1060,7 +1081,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
             ];
             $totalDr = 0.0;
             $totalCr = 0.0;
-            foreach (rc_entry_lines($scopeCompanyId, [(int) $target['id']], $from, $to) as $lineRow) {
+            foreach (rc_entry_lines($scopeCompanyId, [(int) $target['id']], $from, $to, (array) ($ctx['dims'] ?? [])) as $lineRow) {
                 $amount = (float) $lineRow['amount'];
                 $isDebit = (string) $lineRow['entry_type'] === 'debit';
                 $running += $isDebit ? $amount : -$amount;
@@ -1095,7 +1116,7 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
         }
 
         case 'group-report': {
-            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, $ctx['vtype'], 0, 0, [], rc_ctx_fy_start($ctx));
+            $balances = rc_ledger_balances($scopeCompanyId, $from, $to, $ctx['vtype'], 0, 0, (array) ($ctx['dims'] ?? []), rc_ctx_fy_start($ctx));
             $groups = [];
             foreach ($balances as $b) {
                 $groupName = (string) ($b['group_name'] ?? 'Ungrouped');
