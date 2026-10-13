@@ -15,3 +15,18 @@ function inventory_pages(): array
         'bom' => ['file'=>'manufacturing-bom.php', 'view'=>'manufacturing', 'title'=>'Bill of Materials'],
     ];
 }
+
+/** Keep bookmarked task URLs working without recreating the old combined screen. */
+function inventory_legacy_page(array $query): ?string
+{
+    if (isset($query['export']) || isset($query['opening_template'])) return null;
+    $task = (string) ($query['task'] ?? '');
+    $view = (string) ($query['view'] ?? 'inventory');
+    if ($view === 'valuation') $task = 'valuation';
+    if ($view === 'manufacturing' && $task === '') $task = 'manufacturing';
+    $page = inventory_pages()[$task]['file'] ?? null;
+    if ($task === 'item' || isset($query['edit_id'])) $page = 'items.php';
+    if ($page === null) return null;
+    unset($query['task'], $query['view']);
+    return 'admin/' . $page . ($query === [] ? '' : '?' . http_build_query($query));
+}

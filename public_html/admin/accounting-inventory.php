@@ -33,6 +33,10 @@ require_once __DIR__ . '/../../app/inventory_purchase_batch.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && !defined('INVENTORY_PAGE') && !defined('ITEMS_WORKSPACE') && !defined('PRODUCTION_VOUCHER') && !defined('STOCK_TRANSFER_VOUCHER')) {
+    $legacyDestination = inventory_legacy_page($_GET);
+    if ($legacyDestination !== null) redirect($legacyDestination);
+}
 if (in_array((string) ($_GET['task'] ?? ''), ['purchase', 'sale'], true)) {
     require_permission('accounting', 'view');
 }
@@ -237,6 +241,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (defined('STOCK_TRANSFER_VOUCHER') && ($action !== 'record_movement' || !inv_movement_is_location_only((string) ($_POST['transaction_type'] ?? '')))) {
         http_response_code(400);
         exit('Unsupported stock transfer action.');
+    }
+    if (defined('STOCK_TRANSFER_VOUCHER')) {
+        $_SESSION['stock_transfer_retry'][$companyId . ':' . $fiscalYearId] = array_intersect_key($_POST, array_flip([
+            'ref_no', 'transaction_date', 'transaction_type', 'warehouse_id', 'to_warehouse_id', 'item_id', 'quantity', 'notes',
+        ]));
     }
     if (defined('PRODUCTION_VOUCHER') && $action !== 'create_manufacturing_order') {
         http_response_code(400);
@@ -828,6 +837,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('error', 'Valid transfer number and quantity required.');
                 redirect(inv_back_url());
             }
+            if (trim((string)$notes) === '') {
+                flash('error', 'Enter a narration for the stock transfer.');
+                redirect(inv_back_url());
+            }
             if ($warehouseId === null || $toWarehouseId === null || $warehouseId === $toWarehouseId) {
                 flash('error', 'Select two different warehouses for a transfer (from and to).');
                 redirect(inv_back_url());
@@ -905,6 +918,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $inTxnId = (int) db()->lastInsertId();
                 db()->commit();
+                unset($_SESSION['stock_transfer_retry'][$companyId . ':' . $fiscalYearId]);
                 security_event('inventory_movement_posted', 'success', 'Transfer #' . $outTxnId . '/' . $inTxnId . ' (' . $type . ') posted for item #' . $itemId . '.', $companyId, $userId);
                 flash('success', 'Transfer recorded: ' . number_format($qty, 3) . ' ' . $item['unit'] . ' ' . $item['sku'] . ' moved. No GL entry — quantity relocated only (IAS 2 recognition unaffected).');
             } catch (Throwable $exception) {
@@ -1059,7 +1073,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $item = inventory_company_item($itemId, $companyId);
         if (!$item) {
             flash('error', 'Item not found for this company.');
-            redirect('admin/accounting-inventory.php?view=valuation');
+            redirect('admin/inventory-valuation.php');
         }
         $sellingPrice = round((float) ($_POST['selling_price'] ?? 0), 2);
         $completionCost = round((float) ($_POST['completion_cost'] ?? 0), 2);
@@ -1080,7 +1094,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($nrv['write_down'] <= 0 && $nrv['reversal'] <= 0) {
             flash('info', 'No write-down or reversal needed — carrying value already at lower of cost and NRV.');
-            redirect('admin/accounting-inventory.php?view=valuation');
+            redirect('admin/inventory-valuation.php');
         }
 
         $today = date('Y-m-d');
@@ -1181,7 +1195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             flash('error', 'Could not post NRV assessment: ' . $exception->getMessage());
         }
-        redirect('admin/accounting-inventory.php?view=valuation');
+        redirect('admin/inventory-valuation.php');
     }
 
     if ($action === 'delete_movement') {
@@ -1385,7 +1399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // The per-item panel drives this action now (the mapping tab is gone);
         // return to the item being edited so the panel re-renders in place.
         $backTo = $mapScope === 'item'
-            ? 'admin/accounting-inventory.php?edit_id=' . $mapItemId . '#create-item'
+            ? 'admin/items.php?edit_id=' . $mapItemId . '#create-item'
             : 'admin/accounting-inventory.php';
 
         $purposes = array_keys(inventory_mapping_purposes());
@@ -1515,6 +1529,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         try {
             $productionCosts = production_cost_lines($_POST, $companyId);
+            if (trim((string) ($_POST['notes'] ?? '')) === '') throw new RuntimeException('Enter a narration for production.');
             $productionDate = inventory_valid_date((string) ($_POST['voucher_date'] ?? ''));
             $productionFy = $productionDate ? fiscal_year_for_date($companyId, $productionDate) : null;
             if (!$productionFy || (int) $productionFy['id'] !== $fiscalYearId || (int) ($_POST['context_fiscal_year_id'] ?? 0) !== $fiscalYearId) {
@@ -1960,6 +1975,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+// History pages need only their paged registers, not item balances or cost-layer replay.
+if (defined('INVENTORY_PAGE') && in_array(INVENTORY_PAGE, ['purchase', 'sale', 'transfer'], true)) {
+    $invTask = INVENTORY_PAGE;
+    require_permission($invTask === 'transfer' ? 'inventory' : 'accounting', 'view');
+    $pageTitle = $inventoryPage['title'];
+    $pageHero = false;
+    $bodyClass = 'admin-layout accounting-module-page';
+    include __DIR__ . '/../../app/views/partials/admin_header.php';
+    echo '<section class="mbw-card inventory-history-card">';
+    if ($invTask === 'transfer') require __DIR__ . '/../../app/views/partials/stock_transfer_history.php';
+    else require __DIR__ . '/../../app/views/partials/inventory_voucher_history.php';
+    echo '</section>';
+    include __DIR__ . '/../../app/views/partials/admin_footer.php';
+    return;
+}
+
+// Voucher selectors do not display stock balances; validate availability only on posting.
+if (defined('STOCK_TRANSFER_VOUCHER') || defined('PRODUCTION_VOUCHER')) {
+    require_permission('inventory', 'create');
+    if (defined('PRODUCTION_VOUCHER')) {
+        require_permission('accounting', 'post');
+        if (empty($inventoryProfile['show_manufacturing'])) {
+            flash('error', 'Production is available for manufacturing companies.');
+            redirect('admin/items.php');
+        }
+    }
+    $selectorItems = db()->prepare("SELECT id, sku, name, unit, status FROM inventory_items WHERE company_id = ? AND status = 'active' ORDER BY sku");
+    $selectorItems->execute([$companyId]);
+    $items = $selectorItems->fetchAll(PDO::FETCH_ASSOC);
+    $warehouses = inv_company_warehouses($companyId);
+    $ledgers = [];
+    if (defined('PRODUCTION_VOUCHER')) {
+        $selectorLedgers = db()->prepare("SELECT id, code, name, type FROM ledgers WHERE company_id = ? AND status = 'active' AND type IN ('expense','asset','liability') ORDER BY code");
+        $selectorLedgers->execute([$companyId]);
+        $ledgers = $selectorLedgers->fetchAll(PDO::FETCH_ASSOC);
+    }
+    require __DIR__ . '/../../app/views/vouchers/' . (defined('PRODUCTION_VOUCHER') ? 'production.php' : 'stock_transfer.php');
+    return;
+}
+
 $editItem = null;
 $editId = (int) ($_GET['edit_id'] ?? 0);
 if ($editId > 0) {
@@ -2006,21 +2061,6 @@ $itemStmt = db()->prepare('
 ');
 $itemStmt->execute(['company_id' => $companyId]);
 $items = $itemStmt->fetchAll();
-if (defined('STOCK_TRANSFER_VOUCHER')) {
-    require_permission('inventory', 'create');
-    require __DIR__ . '/../../app/views/vouchers/stock_transfer.php';
-    return;
-}
-if (defined('PRODUCTION_VOUCHER')) {
-    require_permission('inventory', 'create');
-    require_permission('accounting', 'post');
-    if (empty($inventoryProfile['show_manufacturing'])) {
-        flash('error', 'Production is available for manufacturing companies.');
-        redirect('admin/items.php');
-    }
-    require __DIR__ . '/../../app/views/vouchers/production.php';
-    return;
-}
 
 // Discard retry data from the retired purchase grid without changing saved records.
 unset($_SESSION['inv_purchase_grid'], $_SESSION['inv_purchase_bills'], $_SESSION['inv_purchase_grid_errors']);
@@ -2052,25 +2092,28 @@ $movementStmt = db()->prepare('
 $movementStmt->execute($movementParams);
 $movements = $movementStmt->fetchAll();
 
+$orderCountStmt = db()->prepare("SELECT COUNT(*) AS total, COALESCE(SUM(status IN ('draft','in_progress')),0) AS open_count FROM manufacturing_orders WHERE company_id = ? AND fiscal_year_id = ?");
+$orderCountStmt->execute([$companyId, $fiscalYearId]);
+$orderCounts = $orderCountStmt->fetch(PDO::FETCH_ASSOC);
+$orderPages = max(1, (int) ceil((int)$orderCounts['total'] / 50));
+$orderPage = max(1, min($orderPages, (int)($_GET['page'] ?? 1)));
 $orderStmt = db()->prepare('
     SELECT mo.*, i.sku, i.name AS finished_item_name,
-           COALESCE(mi.input_lines, 0) AS input_lines, COALESCE(mi.input_cost, 0) AS input_cost
+           (SELECT COUNT(*) FROM manufacturing_order_inputs mi WHERE mi.manufacturing_order_id = mo.id) AS input_lines,
+           (SELECT COALESCE(SUM(mi.quantity * mi.rate), 0) FROM manufacturing_order_inputs mi WHERE mi.manufacturing_order_id = mo.id) AS input_cost
     FROM manufacturing_orders mo
     INNER JOIN inventory_items i ON i.id = mo.finished_item_id
-    LEFT JOIN (
-        SELECT manufacturing_order_id, COUNT(*) AS input_lines, SUM(quantity * rate) AS input_cost
-        FROM manufacturing_order_inputs GROUP BY manufacturing_order_id
-    ) mi ON mi.manufacturing_order_id = mo.id
-    WHERE mo.company_id = :company_id
+    WHERE mo.company_id = :company_id AND mo.fiscal_year_id = :fiscal_year_id
     ORDER BY FIELD(mo.status, \'in_progress\', \'draft\', \'completed\', \'cancelled\'), mo.created_at DESC
-    LIMIT 50
-');
-$orderStmt->execute(['company_id' => $companyId]);
+    LIMIT 50 OFFSET ' . (($orderPage - 1) * 50));
+$orderStmt->execute(['company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
 $manufacturingOrders = $orderStmt->fetchAll();
-$openOrderCount = count(array_filter($manufacturingOrders, static fn (array $order): bool => in_array((string) $order['status'], ['draft', 'in_progress'], true)));
+$openOrderCount = (int)$orderCounts['open_count'];
 
 // Real IAS 2 valuation from the perpetual cost layers (backfills legacy items).
-$inventoryValuation = inv_company_valuation($companyId, $items);
+$inventoryValuation = !defined('INVENTORY_PAGE') || INVENTORY_PAGE === 'valuation'
+    ? inv_company_valuation($companyId, $items)
+    : ['cost' => 0.0, 'lower' => 0.0, 'write_down' => 0.0];
 $stockValueAtCost = $inventoryValuation['cost'];
 $stockLowerOfCostNrv = $inventoryValuation['lower'];
 $stockNrvWriteDown = $inventoryValuation['write_down'];
@@ -2390,7 +2433,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
         <span class="mbw-chip tone-green"><?= icon('wallet') ?></span>
     </a>
-    <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>" title="Lower of cost and net realisable value (IAS 2)">
+    <a class="mbw-kpi" href="<?= e(url('admin/inventory-valuation.php')) ?>" title="Lower of cost and net realisable value (IAS 2)">
         <div>
             <span class="mbw-kpi-label">Lower of Cost &amp; NRV</span>
             <div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($stockLowerOfCostNrv, 2)) ?></div>
@@ -2398,7 +2441,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
         <span class="mbw-chip tone-teal"><?= icon('reports') ?></span>
     </a>
-    <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php?view=valuation')) ?>" title="Cumulative NRV write-down (cost above NRV)">
+    <a class="mbw-kpi" href="<?= e(url('admin/inventory-valuation.php')) ?>" title="Cumulative NRV write-down (cost above NRV)">
         <div>
             <span class="mbw-kpi-label">NRV Write-down</span>
             <div class="mbw-kpi-value" style="<?= $stockNrvWriteDown > 0 ? 'color:var(--mbw-amber)' : '' ?>"><?= e(site_currency_symbol()) ?><?= e(number_format($stockNrvWriteDown, 2)) ?></div>
@@ -2415,7 +2458,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <span class="mbw-chip tone-amber"><?= icon('tag') ?></span>
     </a>
     <?php if ($inventoryProfile['show_manufacturing']): ?>
-        <a class="mbw-kpi" href="<?= e(url('admin/accounting-inventory.php?view=manufacturing#manufacturing-orders')) ?>" title="Open the manufacturing workspace">
+        <a class="mbw-kpi" href="<?= e(url('admin/manufacturing-orders.php')) ?>" title="Open the manufacturing workspace">
             <div>
                 <span class="mbw-kpi-label">Open Production Orders</span>
                 <div class="mbw-kpi-value"><?= e((string) $openOrderCount) ?></div>
@@ -2470,8 +2513,7 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
     // view and anchors to the table above, so paging from here would have
     // landed the reader on a different screen than the one they were reading.
     $valPageUrl = static function (array $overrides) use ($valPerPage): string {
-        return url('admin/accounting-inventory.php?' . http_build_query(array_merge([
-            'view' => 'valuation',
+        return url('admin/inventory-valuation.php?' . http_build_query(array_merge([
             'per_page' => (string) $valPerPage,
         ], $overrides))) . '#valuation-nrv';
     };
@@ -2614,7 +2656,7 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
         <summary><span><strong><?= icon('documents') ?>Opening stock from a spreadsheet</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
         <p class="frm-optional" style="margin:0 0 12px">
             <strong>Uploading posts nothing.</strong> Check the preview, fix or remove rows, then Commit.
-            <a href="<?= e(url('admin/accounting-inventory.php?opening_template=xlsx')) ?>">Download template</a>
+            <a href="<?= e(url('admin/inventory-opening.php?opening_template=xlsx')) ?>">Download template</a>
         </p>
         <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
@@ -3049,8 +3091,8 @@ $invMoveItemOptions = static function () use ($items): string {
                     <td class="is-numeric"><?= (float) $item['reorder_level'] > 0 ? e(number_format((float) $item['reorder_level'], 3)) : '–' ?></td>
                     <td><span class="mbw-pill <?= $item['status'] === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e(ucfirst($item['status'])) ?></span></td>
                     <td style="white-space:nowrap">
-                        <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?edit_id=' . (int) $item['id'] . '#create-item')) ?>">Edit</a>
-                        <a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?task=adjust&move_item=' . (int) $item['id'] . '#movement-adjust')) ?>" title="Record a stock adjustment for this item">Move</a>
+                        <a class="button secondary" href="<?= e(url('admin/items.php?edit_id=' . (int) $item['id'] . '#create-item')) ?>">Edit</a>
+                        <a class="button secondary" href="<?= e(url('admin/inventory-adjustments.php?move_item=' . (int) $item['id'] . '#movement-adjust')) ?>" title="Record a stock adjustment for this item">Move</a>
                         <a class="button secondary" href="<?= e(url('admin/reports-center.php?report=stock-ledger&item_id=' . (int) $item['id'])) ?>" title="Open this item's stock ledger (running balance)">Ledger</a>
                     </td>
                 </tr>
@@ -3209,9 +3251,14 @@ $invMoveItemOptions = static function () use ($items): string {
         </div>
     </section>
 
+    <?php if ($orderPages > 1): ?><nav class="actions" aria-label="Production register pages">
+        <?php if ($orderPage > 1): ?><a class="button secondary" href="<?= e(url(inv_back_url('page=' . ($orderPage - 1)))) ?>">Previous</a><?php endif; ?>
+        <span><?= $orderPage ?> / <?= $orderPages ?></span>
+        <?php if ($orderPage < $orderPages): ?><a class="button secondary" href="<?= e(url(inv_back_url('page=' . ($orderPage + 1)))) ?>">Next</a><?php endif; ?>
+    </nav><?php endif; ?>
     <?php
     $varianceRows = table_exists('production_variances')
-        ? db()->query("SELECT pv.*, mo.order_no FROM production_variances pv JOIN manufacturing_orders mo ON mo.id = pv.manufacturing_order_id WHERE pv.company_id = " . $companyId . " ORDER BY pv.id DESC LIMIT 40")->fetchAll(PDO::FETCH_ASSOC)
+        ? db()->query("SELECT pv.*, mo.order_no FROM production_variances pv JOIN manufacturing_orders mo ON mo.id = pv.manufacturing_order_id WHERE pv.company_id = " . $companyId . " AND mo.fiscal_year_id = " . $fiscalYearId . " ORDER BY pv.id DESC LIMIT 40")->fetchAll(PDO::FETCH_ASSOC)
         : [];
     ?>
     <?php if ($varianceRows !== []): ?>

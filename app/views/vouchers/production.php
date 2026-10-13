@@ -6,6 +6,10 @@ $pageHero = false;
 $bodyClass = 'admin-layout accounting-module-page voucher-entry-page voucher-type-production';
 $spec = ['key'=>'production'];
 $productionNumber = 'PRD-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(4)));
+$productionDateDefault = max((string)$fiscalYear['start_date'], min((string)$fiscalYear['end_date'], date('Y-m-d')));
+$productionBlocked = inv_accounting_method($companyId) !== 'periodic'
+    ? 'Production vouchers require periodic inventory accounting.'
+    : (staff_accountant_forces_approval() ? 'Production requires an authorised posting user; approval-only entry is not available here.' : '');
 $productionRetry = $_SESSION['production_retry'][$companyId . ':' . $fiscalYearId] ?? [];
 unset($_SESSION['production_retry'][$companyId . ':' . $fiscalYearId]);
 include __DIR__ . '/../partials/admin_header.php';
@@ -14,6 +18,7 @@ include __DIR__ . '/../partials/admin_header.php';
     <a class="mbw-tab" href="<?= e(url('admin/manufacturing-orders.php')) ?>"><?= icon('journal') ?>Production Register</a>
     <a class="mbw-tab" href="<?= e(url('admin/accounting.php')) ?>"><?= icon('journal') ?>Voucher Register</a>
 </nav>
+<?php if ($productionBlocked !== ''): ?><div class="notice error"><?= e($productionBlocked) ?></div><?php endif; ?>
 <form method="post" action="<?= e(url('admin/voucher-form.php?type=production')) ?>" class="voucher-entry-form" id="production-voucher">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <input type="hidden" name="action" value="create_manufacturing_order">
@@ -23,7 +28,7 @@ include __DIR__ . '/../partials/admin_header.php';
             <div class="frm-grid vch-header-grid">
                 <?php include __DIR__ . '/type_strip.php'; ?>
                 <label>Voucher number<input name="order_no" value="<?= e($productionNumber) ?>" maxlength="60" readonly required></label>
-                <label>Date<input type="date" name="voucher_date" value="<?= e(date('Y-m-d')) ?>" required></label>
+                <label>Date<input type="date" name="voucher_date" value="<?= e($productionDateDefault) ?>" min="<?= e($fiscalYear['start_date']) ?>" max="<?= e($fiscalYear['end_date']) ?>" required></label>
             </div>
         </section>
         <section class="mbw-card frm-section">
@@ -48,7 +53,7 @@ include __DIR__ . '/../partials/admin_header.php';
         </section>
         <div class="frm-footer mbw-card">
             <a class="button secondary" href="<?= e(url('admin/manufacturing-orders.php')) ?>">Cancel</a>
-            <button class="button frm-submit" type="submit"><?= icon('save') ?>Post Production</button>
+            <button class="button frm-submit" type="submit" <?= $productionBlocked !== '' ? 'disabled' : '' ?>><?= icon('save') ?>Post Production</button>
         </div>
     </div>
 </form>
