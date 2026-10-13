@@ -65,6 +65,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 // every ledger, even when the user only needed one account. A shared search
 // covers ledger codes, names and their groups.
 $coaSearch = trim((string) ($_GET['q'] ?? ''));
+$coaViews = ['hierarchy' => 'Hierarchy', 'masters' => 'Masters', 'groups' => 'Groups', 'ledgers' => 'Ledgers', 'posting' => 'Posting accounts', 'audit' => 'Audit log'];
+$coaView = (string) ($_GET['view'] ?? 'hierarchy');
+if (!isset($coaViews[$coaView])) {
+    $coaView = 'hierarchy';
+}
 $coaWhere = ['company_id = :cid'];
 $coaBindings = ['cid' => $companyId];
 if ($coaSearch !== '') {
@@ -223,6 +228,19 @@ if (table_exists('company_ledger_mappings')) {
     $mappingsCount = (int) $mapStmt->fetchColumn();
 }
 $pageTitle = 'Chart of Accounts';
+$postingRows = [];
+if (table_exists('company_ledger_mappings')) {
+    $postingStmt = db()->prepare('SELECT m.map_key, l.code, l.name FROM company_ledger_mappings m LEFT JOIN ledgers l ON l.id = m.ledger_id AND l.company_id = m.company_id WHERE m.company_id = :cid ORDER BY m.map_key');
+    $postingStmt->execute(['cid' => $companyId]);
+    $postingRows = $postingStmt->fetchAll(PDO::FETCH_ASSOC);
+}
+$coaAuditRows = [];
+$coaCanViewAudit = user_can_do('accounting', 'view');
+if ($coaCanViewAudit && table_exists('activity_logs') && column_exists('activity_logs', 'company_id')) {
+    $coaAuditStmt = db()->prepare('SELECT al.created_at, al.entity_type, al.action, al.details, u.name AS actor_name FROM activity_logs al LEFT JOIN users u ON u.id = al.actor_id WHERE al.company_id = :cid ORDER BY al.created_at DESC, al.id DESC LIMIT 100');
+    $coaAuditStmt->execute(['cid' => $companyId]);
+    $coaAuditRows = $coaAuditStmt->fetchAll(PDO::FETCH_ASSOC);
+}
 $pageHero = false;
 $pageSubtitle = 'Manage masters, groups, ledgers, opening balances, and posting structure.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
@@ -246,13 +264,10 @@ $statusPill = static fn (string $status): string => $status === 'active'
 
 <form method="get" class="workspace-form-grid" style="margin:14px 0">
     <label>View
-        <select id="coa-section">
-            <option value="<?= e(url('admin/chart-of-accounts.php')) ?>">Hierarchy</option>
-            <option value="<?= e(url('admin/chart-masters.php')) ?>">Masters</option>
-            <option value="<?= e(url('admin/chart-groups.php')) ?>">Groups</option>
-            <option value="<?= e(url('admin/chart-ledgers.php')) ?>">Ledgers</option>
-            <option value="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting accounts</option>
-            <option value="<?= e(url('admin/audit-trail.php')) ?>">Audit log</option>
+        <select id="coa-section" name="view" aria-controls="coa-tree-panel coa-posting-panel coa-audit-panel">
+            <?php foreach ($coaViews as $viewKey => $viewLabel): ?>
+                <option value="<?= e($viewKey) ?>" <?= $coaView === $viewKey ? 'selected' : '' ?>><?= e($viewLabel) ?></option>
+            <?php endforeach; ?>
         </select>
     </label>
     <label>Ledger or group
@@ -429,7 +444,7 @@ $coaRowPill = static function (string $status): string {
 
 
 
-    <section class="mbw-card" aria-label="Chart of accounts hierarchy">
+    <section class="mbw-card" id="coa-tree-panel" aria-label="Chart of accounts hierarchy">
         <div style="overflow-x:auto">
             <table id="coa-tree">
                 <thead><tr><th style="width:120px">Code</th><th>Name</th><th style="width:90px">Type</th><th style="width:90px">Status</th><th style="width:140px">Actions</th></tr></thead>
@@ -478,39 +493,111 @@ $coaRowPill = static function (string $status): string {
                 </tbody>
             </table>
         </div>
+        <p id="coa-no-matches" hidden style="padding:16px">No matching accounts.</p>
     </section>
 
+    <section class="mbw-card" id="coa-posting-panel" aria-label="Posting accounts" hidden>
+        <div style="overflow-x:auto">
+            <table>
+                <thead><tr><th>Posting role</th><th>Code</th><th>Ledger</th></tr></thead>
+                <tbody>
+                <?php foreach ($postingRows as $row): ?>
+                    <tr data-coa-search-row><td><?= e(ucwords(str_replace('_', ' ', (string) $row['map_key']))) ?></td><td><?= e((string) ($row['code'] ?? '')) ?></td><td><?= e((string) ($row['name'] ?? 'Unassigned')) ?></td></tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <p data-coa-empty style="padding:16px" hidden>No matching posting accounts.</p>
+        </div>
+    </section>
+    <section class="mbw-card" id="coa-audit-panel" aria-label="Audit log" hidden>
+        <?php if (!$coaCanViewAudit): ?>
+            <p style="padding:16px">You do not have permission to view the audit log.</p>
+        <?php else: ?>
+            <p style="padding:12px 16px">Latest 100 company activities.</p>
+            <div style="overflow-x:auto">
+                <table>
+                    <thead><tr><th>Date and time</th><th>User</th><th>Module</th><th>Action</th><th>Details</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($coaAuditRows as $row): ?>
+                        <tr data-coa-search-row><td><?= e((string) $row['created_at']) ?></td><td><?= e((string) ($row['actor_name'] ?? 'System')) ?></td><td><?= e((string) $row['entity_type']) ?></td><td><?= e((string) $row['action']) ?></td><td><?= e((string) ($row['details'] ?? '')) ?></td></tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <p data-coa-empty style="padding:16px" hidden>No matching activity.</p>
+            </div>
+        <?php endif; ?>
+    </section>
 
 </div>
 
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    document.getElementById('coa-section').addEventListener('change', function () {
-        window.location.assign(this.value);
+    var view = document.getElementById('coa-section');
+    var search = document.getElementById('coa-search');
+    var rows = Array.from(document.querySelectorAll('#coa-tree .coa-node'));
+    var branches = {};
+    rows.forEach(function (row) {
+        var toggle = row.querySelector('.coa-tgl');
+        if (toggle) branches[toggle.getAttribute('data-parent')] = row;
     });
+    function updateView() {
+        var kind = view.value;
+        var q = search.value.trim().toLowerCase();
+        var treeVisible = ['hierarchy', 'masters', 'groups', 'ledgers'].indexOf(kind) !== -1;
+        document.getElementById('coa-tree-panel').hidden = !treeVisible;
+        document.getElementById('coa-posting-panel').hidden = kind !== 'posting';
+        document.getElementById('coa-audit-panel').hidden = kind !== 'audit';
+        var matches = new Set();
+        rows.forEach(function (row) {
+            var type = row.cells[2].textContent.trim().toLowerCase() + 's';
+            var parents = (row.getAttribute('data-parent-of') || '').split(' ').filter(Boolean);
+            var text = row.getAttribute('data-name') || '';
+            var match = !q || text.indexOf(q) !== -1 || parents.some(function (key) {
+                return branches[key] && (branches[key].getAttribute('data-name') || '').indexOf(q) !== -1;
+            });
+            if ((kind === 'hierarchy' || kind === type) && match) {
+                matches.add(row);
+                if (kind === 'hierarchy' && q) parents.forEach(function (key) {
+                    if (branches[key]) matches.add(branches[key]);
+                });
+            }
+        });
+        rows.forEach(function (row) {
+            var parents = (row.getAttribute('data-parent-of') || '').split(' ').filter(Boolean);
+            var collapsed = kind === 'hierarchy' && !q && parents.some(function (key) {
+                return branches[key] && branches[key].dataset.collapsed === 'true';
+            });
+            row.style.display = matches.has(row) && !collapsed ? '' : 'none';
+            var toggle = row.querySelector('.coa-tgl');
+            if (toggle) toggle.hidden = kind !== 'hierarchy';
+        });
+        document.getElementById('coa-no-matches').hidden = matches.size !== 0;
+        ['coa-posting-panel', 'coa-audit-panel'].forEach(function (id) {
+            var panel = document.getElementById(id);
+            var count = 0;
+            panel.querySelectorAll('[data-coa-search-row]').forEach(function (row) {
+                var match = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+                row.hidden = !match;
+                if (match) count++;
+            });
+            var empty = panel.querySelector('[data-coa-empty]');
+            if (empty) empty.hidden = count !== 0;
+        });
+    }
+    view.addEventListener('change', updateView);
+    search.addEventListener('input', updateView);
     // Collapse/expand branches.
     document.querySelectorAll('.coa-tgl').forEach(function (toggle) {
         toggle.addEventListener('click', function () {
             var key = toggle.getAttribute('data-parent');
             var open = toggle.textContent.trim() === '▾';
             toggle.textContent = open ? '▸' : '▾';
-            document.querySelectorAll('.coa-node.coa-child').forEach(function (row) {
-                var parents = (row.getAttribute('data-parent-of') || '').split(' ');
-                if (parents.indexOf(key) !== -1) {
-                    row.style.display = open ? 'none' : '';
-                }
-            });
+            branches[key].dataset.collapsed = open ? 'true' : 'false';
+            updateView();
         });
     });
-    // Live search across the tree.
-    var search = document.getElementById('coa-search');
-    search.addEventListener('input', function () {
-        var q = search.value.trim().toLowerCase();
-        document.querySelectorAll('.coa-node').forEach(function (row) {
-            row.style.display = q === '' || (row.getAttribute('data-name') || '').indexOf(q) !== -1 ? '' : 'none';
-        });
-    });
+    updateView();
 });
 </script>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
