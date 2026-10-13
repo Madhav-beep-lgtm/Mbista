@@ -185,7 +185,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php if ($tab === 'overview'): ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Client Business Type</h2><span class="frm-optional">Drives the statement formats and available features for this client</span></div>
+        <div class="mbw-card-head"><h2>Client Business Type</h2></div>
         <form method="post" style="display:flex;gap:8px;flex-wrap:wrap">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="set_client_business_type">

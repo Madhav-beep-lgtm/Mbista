@@ -686,7 +686,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?= icon('documents') ?>
         <span>
             <strong>Notes to Accounts</strong>
-            <small>Numbered notes for this statement — match them to the NOTE column and they print below the report.</small>
+            
         </span>
         <span class="mbw-pill <?= $reportNotes !== [] ? 'tone-green' : '' ?>"><?= count($reportNotes) ?> note<?= count($reportNotes) === 1 ? '' : 's' ?></span>
     </summary>

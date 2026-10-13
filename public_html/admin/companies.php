@@ -262,10 +262,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-card" data-collapsible id="banks">
     <div class="mbw-card-head"><h2>Company Bank Accounts</h2><?php if ($editBankAccount): ?><a class="mbw-view-all" href="<?= e(url('admin/companies.php#banks')) ?>">Cancel edit</a><?php endif; ?></div>
-    <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        Each company can keep several bank accounts. Invoices issued by a company print all its accounts marked
-        "Show on invoice", with the default account first.
-    </p>
+    
     <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_bank_account">

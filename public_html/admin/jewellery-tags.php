@@ -161,7 +161,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" aria-label="Print tags">
     <div class="mbw-card-head">
         <h2>Print tags</h2>
-        <span class="frm-optional">Tick the pieces, then print. The tag is drawn by the printer itself, so the barcode is as crisp as the ZD230 can make it. Ticks apply to the page you are on — print it, then move to the next.</span>
+        
     </div>
 
     <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
@@ -173,7 +173,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 
     <?php if ($allItems === []): ?>
-        <p class="frm-optional">No items match. Add stock first, or clear the search.</p>
+        
     <?php else: ?>
     <form id="tag-item-form">
         <div style="overflow-x:auto;max-height:460px;overflow-y:auto">
@@ -233,14 +233,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card" aria-label="Tag stock and printer">
     <div class="mbw-card-head">
         <h2>Tag stock &amp; printer</h2>
-        <span class="frm-optional">Measure a real tag with a ruler and type it here</span>
+        
     </div>
-    <p class="frm-optional" style="margin:0 0 12px">
-        <strong>Width is across the print head; height is along the direction of feed.</strong>
-        For a 75&nbsp;mm dumbbell strip that feeds end-first, that is width&nbsp;12 and height&nbsp;75 — not the
-        other way round. Save, then print a calibration tag: it draws a border the exact size these numbers claim,
-        so holding it against a real tag shows whether it is right and by how much it is out.
-    </p>
+    
 
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -300,13 +295,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-card" aria-label="Printer setup">
     <div class="mbw-card-head"><h2>One-time setup on each billing PC</h2></div>
-    <p class="frm-optional" style="margin:0">
-        Printing straight from this screen needs <strong>Zebra Browser Print</strong> installed on the PC doing the
-        printing — it is a small free agent from zebra.com that lets the browser reach the ZD230. Install it, make sure
-        its icon is in the system tray, and the Print buttons work. Without it, use <strong>Download .zpl</strong> and
-        send the file to the printer (drag it onto Zebra Setup Utilities, or copy it to the printer share); the tag
-        comes out identical either way, because it is the same ZPL.
-    </p>
+    
 </section>
 
 <script src="<?= e(asset_url('assets/js/zebra-tag-print.js')) ?>"></script>

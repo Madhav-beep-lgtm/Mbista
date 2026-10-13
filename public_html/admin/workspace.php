@@ -1894,13 +1894,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <h2>Work Modules</h2>
         </div>
         <div class="mbw-qa-grid">
-            <a class="mbw-qa" href="<?= e(url('admin/users.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('users') ?></span><div><strong>Users workflow</strong><span>Create, edit, filter, suspend, and delete users.</span></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('clients') ?></span><div><strong>Clients</strong><span>Profiles, credentials, industries, and providers.</span></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('teams') ?></span><div><strong>Teams</strong><span>Create teams from staff and assign leaders.</span></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><span class="mbw-chip is-square tone-green"><?= icon('contracts') ?></span><div><strong>Contracts</strong><span>Define service contracts and billing terms.</span></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><span class="mbw-chip is-square tone-amber"><?= icon('tasks') ?></span><div><strong>Tasks</strong><span>Track client tasks, stages, and completion.</span></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=invoices')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('invoices') ?></span><div><strong>Invoices</strong><span>Issue stage/task invoices with amount checks.</span></div></a>
-            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=staff')) ?>"><span class="mbw-chip is-square tone-gray"><?= icon('staff') ?></span><div><strong>Staff workload</strong><span>See what each staff member sees in their portal.</span></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/users.php')) ?>"><span class="mbw-chip is-square tone-blue"><?= icon('users') ?></span><div><strong>Users</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><span class="mbw-chip is-square tone-teal"><?= icon('clients') ?></span><div><strong>Clients</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><span class="mbw-chip is-square tone-purple"><?= icon('teams') ?></span><div><strong>Teams</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><span class="mbw-chip is-square tone-green"><?= icon('contracts') ?></span><div><strong>Contracts</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><span class="mbw-chip is-square tone-amber"><?= icon('tasks') ?></span><div><strong>Tasks</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=invoices')) ?>"><span class="mbw-chip is-square tone-red"><?= icon('invoices') ?></span><div><strong>Invoices</strong></div></a>
+            <a class="mbw-qa" href="<?= e(url('admin/workspace.php?view=staff')) ?>"><span class="mbw-chip is-square tone-gray"><?= icon('staff') ?></span><div><strong>Staff workload</strong></div></a>
         </div>
     </section>
     <?php endif; ?>
@@ -2364,7 +2364,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         
             <div class="form-card">
                 <h3>Create service contract</h3>
-                <p style="margin:4px 0 10px;color:var(--mbw-muted);font-size:12.5px">Saving opens the bilingual (नेपाली + English) agreement builder.</p>
+                
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="create_service_contract">
@@ -2614,8 +2614,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <summary>
                     <span class="stat-icon"><?= icon('insights') ?></span>
                     <span>
-                        <strong>Manage stages and completion</strong>
-                        <small>Add task stages or mark a stage/task as completed.</small>
+                        <strong>Stages</strong>
                     </span>
                     <span class="feature-disclosure-action"><?= icon('login') ?>Open forms</span>
                 </summary>
@@ -2686,7 +2685,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <?php if ($hasTaskAssignment): ?>
                 <h3 style="margin-top:18px;">Replace assigned staff (with progress handoff)</h3>
-                <p style="color:var(--mbw-muted); margin:4px 0 10px;">The replacement staff member receives the stage completion, billing position and handoff note as a message.</p>
+                
                 <form method="post" class="workspace-form-grid" style="margin-bottom:12px;">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="replace_task_staff">
@@ -2723,7 +2722,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <?php if ($hasTermination): ?>
                 <h3 style="margin-top:18px;" id="terminate-task">Terminate task mid-way</h3>
-                <p style="color:var(--mbw-muted); margin:4px 0 10px;">Stops further work. Completed stages stay invoiceable from the Invoices tab.</p>
+                
                 <form method="post" class="workspace-form-grid" onsubmit="return confirm('Terminate this task? Remaining work stops; completed stages remain invoiceable.');">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="terminate_task">
@@ -2944,7 +2943,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                             <label style="font-size:12px;font-weight:600">Method<input type="text" name="advance_method" value="Cash" style="min-height:32px"></label>
                                             <label style="font-size:12px;font-weight:600">Received on<input type="date" name="advance_date" value="<?= e(date('Y-m-d')) ?>" style="min-height:32px"></label>
                                             <button type="submit">Record advance</button>
-                                            <small style="font-size:11px;color:var(--mbw-muted,#5b6b64);font-weight:400">Posts Dr Bank / Cr Advances-from-Customers and offsets the task's next invoice.</small>
+                                            
                                         </form>
                                     </details>
                                 </div>

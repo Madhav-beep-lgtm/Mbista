@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     ?>
     <section class="mbw-card">
         <div class="mbw-card-head"><h2>System upgrade — 17 Jul 2026</h2></div>
-        <p class="muted" style="margin:0 0 12px">This one-time upgrade applies migration 052 (RESTRICT ledger deletion), repairs any one-legged posted vouchers, retro-posts missing discount vouchers, and prints a books tie-out. Every step checks before it changes anything, so it is safe to run more than once.</p>
+        
         <form method="post" action="<?= e(url('admin/run-upgrade-20260717.php')) ?>">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <button type="submit" class="button primary">Run the upgrade now</button>

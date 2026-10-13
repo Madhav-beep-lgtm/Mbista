@@ -2318,7 +2318,7 @@ $tabHeadings = [
                 <section>
                     <h4 id="party-ledger">Party Ledger <a target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) $selectedParty['id']])) ?>">Print</a></h4>
                     <?php if ($partyLedgerRows === []): ?>
-                        <p class="muted">No transactions for this party in the selected period.</p>
+                        
                     <?php else: ?>
                         <table class="party-ledger-table">
                             <thead><tr><th>Date</th><th>Ref</th><th>Particulars</th><th>Dr</th><th>Cr</th><th>Balance</th></tr></thead>
@@ -2368,7 +2368,7 @@ $tabHeadings = [
             <?php endif; ?>
             <a class="button secondary" target="_blank" href="<?= e(parties_page_url(['statement' => 1, 'party_id' => (int) $selectedParty['id']])) ?>"><?= icon('documents') ?>Send Statement</a>
         <?php else: ?>
-            <section><h3>No party selected</h3><p class="muted">Create a customer or supplier to populate this panel.</p></section>
+            <section><h3>No party selected</h3></section>
         <?php endif; ?>
     </aside>
     <?php endif; ?>

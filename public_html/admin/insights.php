@@ -243,7 +243,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php if ($posts === []): ?><tr><td colspan="7">No posts yet — write the first one above.</td></tr><?php endif; ?>
             <?php foreach ($posts as $post): ?>
                 <tr>
-                    <td style="max-width:340px"><strong><?= e($post['title']) ?></strong><?= $post['summary'] ? '<br><small style="color:var(--mbw-muted)">' . e(mb_strimwidth((string) $post['summary'], 0, 90, '…')) . '</small>' : '' ?></td>
+                    <td style="max-width:340px"><strong><?= e($post['title']) ?></strong><?= $post['summary'] ? '<br>' : '' ?></td>
                     <td><?= e($categories[$post['category']] ?? $post['category']) ?></td>
                     <td><span class="mbw-pill <?= $post['status'] === 'published' ? 'tone-green' : ($post['status'] === 'draft' ? 'tone-amber' : 'tone-gray') ?>"><?= e(ucfirst((string) $post['status'])) ?></span></td>
                     <td><?= $post['published_at'] ? e(date('d M Y', strtotime((string) $post['published_at']))) : '—' ?></td>

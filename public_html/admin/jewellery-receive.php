@@ -234,7 +234,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="frm-section-head">
         <span class="mbw-chip is-square tone-green"><?= icon('scale') ?></span>
         <h2>Receiving <?= e((string) $target['assignment_no']) ?> — <?= e((string) $target['karigar_name']) ?></h2>
-        <span class="frm-optional">Weigh what came back; the rest the assignment already knows</span>
+        
     </div>
 
     <?php // Everything read off the assignment, shown but not asked for. ?>
@@ -274,7 +274,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Rate for his own metal
                 <input type="number" name="rate" step="0.01" min="0" value="<?= e($typedRate) ?>"
                        placeholder="per fine <?= e((string) $target['unit_code']) ?>">
-                <small class="frm-optional">Blank uses the day's rate, or this item's average cost</small>
+                
             </label>
         <?php else: ?>
             <label>Wastage to allow (fine)
@@ -284,7 +284,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php endif; ?>
         <label>Receive date <em>*</em>
             <input type="date" name="on" value="<?= e($typedDate) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>" required>
-            <?php if ($isWorkOrder): ?><small class="frm-optional">The day his metal is priced at</small><?php endif; ?>
+            <?php if ($isWorkOrder): ?><?php endif; ?>
         </label>
         <label style="align-self:end"><button type="submit" class="button secondary"><?= icon('scale') ?>Work it out</button></label>
     </form>

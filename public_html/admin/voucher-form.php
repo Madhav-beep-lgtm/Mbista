@@ -894,7 +894,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <span class="vch-upload-icon"><?= icon('documents') ?></span>
                         <span class="vch-upload-copy">
                             <strong>Attach supporting files</strong>
-                            <small>PDF, Excel, JPG or PNG · maximum 10MB each</small>
+                            
                         </span>
                         <span class="vch-upload-action">Choose files</span>
                         <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">

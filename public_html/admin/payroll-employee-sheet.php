@@ -145,6 +145,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </tbody>
     </table>
     </div>
-    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">SST = Social Security Tax (the 1% first slab); the remainder of the monthly withholding is Remuneration Tax. Cancelled runs are excluded.</p>
+    
 </section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

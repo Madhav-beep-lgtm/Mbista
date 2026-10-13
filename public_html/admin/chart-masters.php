@@ -37,7 +37,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </nav>
 
 <section class="mbw-card" aria-label="Masters">
-    <div class="mbw-card-head"><h2>Masters</h2><span class="frm-optional">Fixed accounting taxonomy — groups attach to a master, ledgers to a group</span></div>
+    <div class="mbw-card-head"><h2>Masters</h2></div>
     <div style="overflow-x:auto"><table>
         <thead><tr><th>Master</th><th>Nature</th><th class="is-numeric">Groups</th><th class="is-numeric">Ledgers</th></tr></thead>
         <tbody>
@@ -65,12 +65,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
       // form, and the preview has to be shown somewhere — next to the chart it
       // is about to change is where it belongs. ?>
 <section class="mbw-card" aria-label="Bulk import">
-    <div class="mbw-card-head"><h2>Import a Chart of Accounts</h2><span class="frm-optional">Excel or CSV — groups, ledgers and opening balances in one sheet</span></div>
-    <p class="frm-optional" style="margin:0 0 12px">
-        Upload a spreadsheet to create groups and ledgers together. Every row is previewed
-        before anything is written: what will be created, what exists already, and what was
-        rejected and why.
-    </p>
+    <div class="mbw-card-head"><h2>Import a Chart of Accounts</h2></div>
+    
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <a class="button" href="<?= e(url('admin/chart-of-accounts.php#coa-import')) ?>"><?= icon('layers') ?>Open the importer</a>
         <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php?import_template=xlsx')) ?>">Download the template</a>

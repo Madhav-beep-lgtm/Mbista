@@ -746,7 +746,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             <div class="mbw-card-head"><h2>Leave Types</h2></div>
             <details class="feature-disclosure">
                 <summary>
-                    <span><strong><?= icon('leave') ?>Create type</strong><small>Add a leave type for this company.</small></span>
+                    <span><strong><?= icon('leave') ?>Create type</strong></span>
                     <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
                 </summary>
                 <form method="post" class="workspace-form-grid">

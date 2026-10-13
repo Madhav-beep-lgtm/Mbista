@@ -208,9 +208,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </tbody>
     </table>
     </div>
-    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-        A week crossing two months is judged whole. Each overtime hour is dated to the day worked and paid by
-        the run covering that date. Greyed dates belong to the neighbouring month's run.
-    </p>
+    
 </section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

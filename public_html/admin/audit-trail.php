@@ -205,7 +205,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <section class="mbw-card">
     <div class="mbw-card-head"><h2>Approval Queue (Pending Action)</h2></div>
     <?php if (!approvals_enabled()): ?>
-        <p style="color:var(--mbw-muted)">Approval workflow is currently <strong>off</strong>. Vouchers post immediately. Turn it on in Settings → Fiscal &amp; Accounting Controls to route new manual vouchers through this queue.</p>
+        
     <?php endif; ?>
     <div style="overflow-x:auto">
         <table class="rc-table">

@@ -206,7 +206,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <span class="mbw-pill tone-green"><?= count($recentlyReconciled) ?> shown</span>
         </div>
         <?php if ($recentlyReconciled === []): ?>
-            <p style="color:var(--mbw-muted);font-size:13.5px">No reconciled entries yet for this account.</p>
+            
         <?php else: ?>
             <div style="overflow-x:auto">
                 <table>

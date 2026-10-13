@@ -2454,14 +2454,14 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 <input type="radio" name="inventory_accounting" value="perpetual" <?= $invMethod === 'perpetual' ? 'checked' : '' ?> style="margin-top:4px">
                 <span>
                     <strong>Perpetual</strong><br>
-                    <small style="color:var(--mbw-muted)">Purchases debit Inventory. Each sale posts its own cost of sales.</small>
+                    
                 </span>
             </label>
             <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
                 <input type="radio" name="inventory_accounting" value="periodic" <?= $invMethod === 'periodic' ? 'checked' : '' ?> style="margin-top:4px">
                 <span>
                     <strong>Periodic</strong><br>
-                    <small style="color:var(--mbw-muted)">Purchases debit Purchases. Cost of sales is derived at period end.</small>
+                    
                 </span>
             </label>
             <?php if ($methodMapped !== []): ?>
@@ -2792,7 +2792,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             <label>Sales rate<input type="number" step="0.01" name="sales_rate" value="<?= e($editItem['sales_rate'] ?? '0.00') ?>"></label>
             <label>Purchase rate<input type="number" step="0.01" name="purchase_rate" value="<?= e($editItem['purchase_rate'] ?? '0.00') ?>"></label>
             <label>Opening qty<input type="number" step="0.001" name="opening_qty" value="<?= e($editItem['opening_qty'] ?? '0.000') ?>"></label>
-            <label>Opening value <span class="frm-optional">total amount — frozen, like an accounting opening balance</span>
+            <label>Opening value 
                 <input type="number" step="0.01" min="0" name="opening_amount" value="<?= e($editItem['opening_amount'] ?? '0.00') ?>" placeholder="qty × cost at opening"></label>
             <label>Reorder level<input type="number" step="0.001" name="reorder_level" value="<?= e($editItem['reorder_level'] ?? '0.000') ?>"></label>
             <label>Default warehouse<select name="default_warehouse_id"><option value="0">— none —</option><?php foreach ($warehouses as $warehouse): ?><option value="<?= e((int) $warehouse['id']) ?>" <?= (int) ($editItem['default_warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e($warehouse['name'] . ($warehouse['code'] ? ' (' . $warehouse['code'] . ')' : '')) ?></option><?php endforeach; ?></select></label>
@@ -2863,7 +2863,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
             ?>
             <?php if ($jwOn): ?>
                 <input type="hidden" name="jw_enabled" value="1">
-                <label>Metal <span class="frm-optional">leave blank for a plain stock item</span>
+                <label>Metal 
                     <select name="jw_metal_id" id="jwMetal">
                         <option value="0">— not a jewellery item —</option>
                         <?php foreach (jewellery_metals_list($companyId) as $jwMetal): ?>
@@ -3178,7 +3178,7 @@ $invMoveItemOptions = static function () use ($items): string {
                     <div class="inv-bill-dialog-head">
                         <div class="inv-bill-dialog-title">
                             <span class="inv-bill-dialog-icon" aria-hidden="true"><?= icon('box') ?></span>
-                            <span><strong>Bill items <span class="inv-dialog-ref"></span></strong><small>Add the products and tax treatment shown on the supplier's invoice.</small></span>
+                            <span><strong>Bill items <span class="inv-dialog-ref"></span></strong></span>
                         </div>
                         <button type="button" class="button inv-bill-close"><?= icon('badge-check') ?> Done</button>
                     </div>
@@ -3337,13 +3337,13 @@ $invMoveItemOptions = static function () use ($items): string {
                         <button type="submit"><?= icon('badge-check') ?>Merge <?= count($purMergePlan) ?> bill(s) into one entry each</button>
                     </form>
                 <?php else: ?>
-                    <p style="margin:8px 0 0;font-size:12px;color:var(--mbw-muted)">Merging them needs the <strong>accounting · post</strong> permission.</p>
+                    
                 <?php endif; ?>
             </div>
         <?php endif; ?>
 
         <?php if ($purBills === []): ?>
-            <p style="color:var(--mbw-muted);padding:12px">No purchase or opening entries yet. Record one above and it appears here.</p>
+            
         <?php else: ?>
         <div class="rc-table-scroll"><table class="rc-table">
             <thead><tr><th>Voucher</th><th>Items</th><th>Dates</th><th>Entry</th><th class="align-right">Amount</th><th>Status</th><th></th></tr></thead>
@@ -3432,7 +3432,7 @@ $invMoveItemOptions = static function () use ($items): string {
 
     <?php if ($invShows('movement-sale')): ?>
     <details class="feature-disclosure" id="movement-sale">
-        <summary><span><strong><?= icon('tasks') ?>Record Sale / Sales Return</strong><small>Manual, non-invoiced stock-outs — inventory-sourced invoices auto-post their own sale movement via invoice.php.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <summary><span><strong><?= icon('tasks') ?>Record Sale / Sales Return</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid" id="saleMovementForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_movement">
@@ -3465,7 +3465,7 @@ $invMoveItemOptions = static function () use ($items): string {
 
     <?php if ($invShows('movement-adjust')): ?>
     <details class="feature-disclosure" id="movement-adjust">
-        <summary><span><strong><?= icon('tasks') ?>Adjustments &amp; Write-offs</strong><small>Stock count corrections, write-offs, damage, and expiry.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <summary><span><strong><?= icon('tasks') ?>Adjustments &amp; Write-offs</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid" id="adjustForm">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_movement">
@@ -3510,7 +3510,7 @@ $invMoveItemOptions = static function () use ($items): string {
 
     <?php if ($invShows('movement-transfer')): ?>
     <details class="feature-disclosure" id="movement-transfer">
-        <summary><span><strong><?= icon('tasks') ?>Warehouse / Departmental Transfer</strong><small>Move stock between locations — quantity only, no GL impact.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+        <summary><span><strong><?= icon('tasks') ?>Warehouse / Departmental Transfer</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
             <input type="hidden" name="action" value="record_movement">
@@ -3526,7 +3526,7 @@ $invMoveItemOptions = static function () use ($items): string {
             <label>Reference<input type="text" name="ref_no" maxlength="120"></label>
             <label>Quantity<input type="number" step="0.001" min="0.001" name="quantity" required></label>
             <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-            <div class="workspace-span-2"><small style="color:var(--mbw-muted)">No GL entry — quantity moves between locations only (IAS 2 recognition unaffected).</small></div>
+            <div class="workspace-span-2"></div>
             <button type="submit"><?= icon('tasks') ?>Record transfer</button>
         </form>
     </details>
@@ -3536,7 +3536,7 @@ $invMoveItemOptions = static function () use ($items): string {
     <?php if ($inventoryProfile['show_manufacturing'] && $invView === 'manufacturing'): ?>
         <?php if ($invShows('manufacturing')): ?>
         <details class="feature-disclosure" id="manufacturing" open>
-            <summary><span><strong><?= icon('settings') ?>Production Order</strong><small>Start production (materials move to Work in Progress) or complete it in one step.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+            <summary><span><strong><?= icon('settings') ?>Production Order</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
             <form method="post" class="workspace-form-grid">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                 <input type="hidden" name="action" value="create_manufacturing_order">
@@ -3561,7 +3561,7 @@ $invMoveItemOptions = static function () use ($items): string {
                 <label>Abnormal waste cost <small style="color:var(--mbw-muted)">(expensed, never inventoried)</small><input type="number" step="0.01" min="0" name="abnormal_waste_cost" value="0.00"></label>
                 <div class="workspace-span-2">
                     <strong style="font-size:13px;color:var(--mbw-heading)">Input materials</strong>
-                    <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Leave the rate blank to use the item's purchase rate. Rows without an item are ignored.</p>
+                    
                     <div style="overflow-x:auto">
                     <table id="mo-input-lines">
                         <thead><tr><th>Input item</th><th class="is-numeric" style="width:150px">Quantity</th><th class="is-numeric" style="width:170px">Rate</th><th style="width:44px"></th></tr></thead>
@@ -3590,7 +3590,7 @@ $invMoveItemOptions = static function () use ($items): string {
 
         <?php if ($invShows('bom')): ?>
         <details class="feature-disclosure" id="bom">
-            <summary><span><strong><?= icon('documents') ?>Bill of Materials</strong><small>Define the standard recipe (components, expected waste, standard costs) for variance reporting.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
+            <summary><span><strong><?= icon('documents') ?>Bill of Materials</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open / New</span></summary>
             <form method="post" class="workspace-form-grid">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><?= $invTaskField ?? '' ?>
                 <input type="hidden" name="action" value="save_bom">
@@ -3601,7 +3601,7 @@ $invMoveItemOptions = static function () use ($items): string {
                 <label>Std overhead / batch<input type="number" step="0.01" min="0" name="std_overhead_cost" value="0.00"></label>
                 <div class="workspace-span-2">
                     <strong style="font-size:13px;color:var(--mbw-heading)">Components</strong>
-                    <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">Add as many component lines as the recipe needs. Rows without a component are ignored.</p>
+                    
                     <div style="overflow-x:auto">
                     <table id="bom-component-lines">
                         <thead><tr><th>Component</th><th class="is-numeric" style="width:150px">Std qty / batch</th><th class="is-numeric" style="width:150px">Expected waste %</th><th class="is-numeric" style="width:170px">Std rate</th><th style="width:44px"></th></tr></thead>

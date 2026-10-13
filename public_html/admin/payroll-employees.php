@@ -662,16 +662,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <option value="inactive" <?= ($editEmployee['status'] ?? '') === 'inactive' ? 'selected' : '' ?>>Inactive</option>
             </select>
         </label>
-        <label>Overtime hourly rate <small>(optional — blank derives from basic salary)</small><input type="number" step="0.0001" min="0" name="ot_hourly_rate" value="<?= ($editEmployee['ot_hourly_rate'] ?? null) !== null ? e(number_format((float) $editEmployee['ot_hourly_rate'], 4, '.', '')) : '' ?>"></label>
+        <label>Overtime hourly rate <input type="number" step="0.0001" min="0" name="ot_hourly_rate" value="<?= ($editEmployee['ot_hourly_rate'] ?? null) !== null ? e(number_format((float) $editEmployee['ot_hourly_rate'], 4, '.', '')) : '' ?>"></label>
         <label class="checkbox-line" style="align-self:end"><input type="checkbox" name="sc_eligible" <?= (int) ($editEmployee['sc_eligible'] ?? 1) === 1 ? 'checked' : '' ?>> Eligible for service charge</label>
         <?php if ($components !== []): ?>
             <div class="workspace-span-2">
                 <strong style="font-size:13px;color:var(--mbw-heading)">Pay structure — component suggestions</strong>
-                <p style="margin:4px 0 8px;color:var(--mbw-muted);font-size:12px">
-                    Amounts here are payroll-preparation SUGGESTIONS, not fixed values — each month they can be accepted,
-                    changed, zeroed, or removed on the salary sheet (with an audited reason). Blank every field to remove
-                    the assignment. Overtime and service-charge components fill from their own workflows.
-                </p>
+                
                 <div style="overflow-x:auto">
                 <table>
                     <thead><tr><th>Component</th><th class="is-numeric">Suggested amount</th><th class="is-numeric">Suggested % of basic</th><th>From</th><th>To</th><th>Remarks</th></tr></thead>
@@ -727,10 +723,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php if (($editEmployee ?? null) && $isAdmin): ?>
 <section class="mbw-card" data-collapsible aria-label="Tax profile and projections" id="taxprofile">
     <div class="mbw-card-head"><h2>Tax Profile &amp; Projections — <?= e($editEmployee['employee_code']) ?> (<?= e($fiscalYear['label'] ?? '') ?>)</h2></div>
-    <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        These figures feed the PROJECTED annual tax only — they never post to accounting or Salary Payable.
-        Prior-employment figures and manual projections count only after approval.
-    </p>
+    
     <div class="workspace-form-grid">
         <div>
             <strong style="font-size:13px;color:var(--mbw-heading)">Prior employment &amp; opening adjustments
@@ -940,7 +933,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <label>Amount (max <?= e(number_format((float) $loan['balance'], 2)) ?>)<input type="number" step="0.01" min="0.01" max="<?= e(number_format((float) $loan['balance'], 2, '.', '')) ?>" name="amount" required></label>
                                     <label>Date<input type="date" name="repay_date" value="<?= e(date('Y-m-d')) ?>"></label>
                                     <button type="submit">Record repayment</button>
-                                    <small>For cash returned outside payroll. Payroll runs keep recovering the installment automatically.</small>
+                                    
                                 </form>
                             </details>
                         <?php else: ?>–<?php endif; ?>

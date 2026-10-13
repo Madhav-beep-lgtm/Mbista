@@ -284,13 +284,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <input type="hidden" name="fiscal_year_id" value="<?= e($fiscalYearId) ?>">
                 <label>Reason for unlocking (required, min 10 chars)<input type="text" name="reason" minlength="10" required placeholder="e.g. Prior-year audit adjustment received"></label>
                 <button type="submit">Unlock opening balances</button>
-                <small>Returns the batch to finalized so corrections can be made. Audited and re-lockable.</small>
+                
             </form>
         </details>
         <?php endif; ?>
     </div>
     <?php if (!$prevFy): ?>
-        <p class="muted" style="margin-top:10px">First fiscal year: there is nothing to carry forward. Enter opening balances as adjustments, or on each ledger. Opening Balance Adjustments holds any difference until the set balances.</p>
+        
     <?php endif; ?>
 </section>
 
@@ -382,7 +382,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                     <label>Reason (required, min 10 chars)<input type="text" name="reason" minlength="10" required></label>
                                     <label>Reference / document<input type="text" name="reference" placeholder="optional"></label>
                                     <button type="submit">Save adjustment</button>
-                                    <small>A balanced adjustment journal is posted; a full audit record is kept.</small>
+                                    
                                 </form>
                             </details>
                             <?php endif; ?>
@@ -470,7 +470,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="action" value="backfill_inventory_opening">
                         <button type="submit" class="button secondary" style="min-height:34px"><?= icon('reconcile') ?>Post missing opening-stock vouchers</button>
-                        <small style="color:var(--mbw-muted)">Backfills the opening voucher for items that have cost layers but none. Items with a zero purchase rate are skipped.</small>
+                        
                     </form>
                 </td>
             </tr>
@@ -484,7 +484,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </tbody>
     </table>
     </div>
-    <p class="muted" style="margin-top:8px;font-size:12px">Each party posts to its own ledger, so sub-ledger totals equal the control-account openings. Inventory and fixed-asset openings are read-only, derived from the sub-ledgers at the fiscal-year start.</p>
+    
 </section>
 
 <?php $invObRows = inv_ob_rows($companyId, $fiscalYearId); $invObTotal = 0.0; foreach ($invObRows as $ior) { $invObTotal += (float) $ior['amount']; } ?>
@@ -503,10 +503,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endif; ?>
         </div>
     </div>
-    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-        Exactly like the accounting opening balances: <strong>quantity + amount only — no rate</strong> (rate is never stored, so a later purchase-rate change can never re-value an opening).
-        Carried from the previous year's closing. Adjustable with a reason; locked with the batch above.
-    </p>
+    
     <div style="overflow-x:auto">
     <table>
         <thead><tr>
@@ -540,7 +537,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <label>Opening amount<input type="number" step="0.01" min="0" name="ob_amount" value="<?= e(number_format((float) $ior['amount'], 2, '.', '')) ?>"></label>
                                 <label>Reason (required, min 10 chars)<input type="text" name="reason" minlength="10" required></label>
                                 <button type="submit">Save opening</button>
-                                <small>First year syncs the item master, layers and opening voucher. Later years post the difference as an adjustment journal.</small>
+                                
                             </form>
                         </details>
                     </td>
@@ -579,7 +576,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php else: ?>
 <section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Preview — opening balances that would be generated</h2></div>
-    <p class="muted">No batch exists for this fiscal year yet. Below are the balances carried forward from the previous year; income and expense accounts open at zero. Use <strong>Generate opening balances</strong> above.</p>
+    
     <div style="overflow-x:auto">
     <table>
         <thead><tr><th>Code</th><th>Account</th><th>Type</th><th class="is-numeric">Opening Dr</th><th class="is-numeric">Opening Cr</th></tr></thead>

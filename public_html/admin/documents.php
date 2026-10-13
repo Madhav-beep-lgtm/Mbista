@@ -336,7 +336,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 <summary>
                     <span>
                         <strong><?= icon('documents') ?>Create request</strong>
-                        <small>Ask a client to upload a specific document.</small>
+                        
                     </span>
                     <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
                 </summary>
@@ -449,7 +449,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 <summary>
                     <span>
                         <strong><?= icon('documents') ?>Upload document</strong>
-                        <small>Add a document to a client's library.</small>
+                        
                     </span>
                     <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
                 </summary>

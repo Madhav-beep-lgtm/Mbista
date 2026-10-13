@@ -111,7 +111,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div class="accounting-page-head">
     <div>
         <h2 style="color:var(--mbw-heading)">Automated Posting Accounts</h2>
-        <p style="color:var(--mbw-muted)">Map company ledgers to the roles used by invoices, receipts, taxes, and revenue posting.</p>
+        
     </div>
     <div class="accounting-actions">
         <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('accounting') ?>Overview</a>

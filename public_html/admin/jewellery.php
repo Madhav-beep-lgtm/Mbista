@@ -1415,7 +1415,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             $jwStockSet = array_unique(array_values($jwStockPurposes));
             $jwActiveStock = jewellery_item_stock_purpose($jwItemType);
             ?>
-            <p class="frm-optional" style="grid-column:1/-1;margin:8px 0 0"><strong>Where this item posts</strong> — leave a row on inherit to use the company default.</p>
+            
             <?php foreach ($jwFormPurposes as $jwPurpose): ?>
                 <?php
                 $jwIsStock = in_array($jwPurpose, $jwStockSet, true);
@@ -1433,7 +1433,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                 </label>
             <?php endforeach; ?>
             <label style="grid-column:1/-1">Notes<input type="text" name="notes" maxlength="255" value="<?= e((string) ($editItem['notes'] ?? '')) ?>"></label>
-            <p class="frm-optional" style="grid-column:1/-1;margin:0">Creates the item / style master. Trace IDs are created when stock is received against it.</p>
+            
             <div style="grid-column:1/-1"><button type="submit" class="button"><?= $editItem ? 'Update Item' : 'Create New Item' ?></button></div>
         </form>
     </section>
@@ -1936,9 +1936,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php endif; ?>
         </div>
         <?php if ($openingAll === []): ?>
-            <p class="frm-optional" style="margin:0">Nothing has been brought forward into this year yet. Press
-                <strong>Bring forward</strong> to replay last year&rsquo;s closing — per item, and per whoever was
-                holding it on the last day.</p>
+            
         <?php else: ?>
             <?php // Shown apart because each has a ledger behind it: the shelf against
                   // the stock ledgers, a kaligad against his own "Metal with" account.
@@ -2025,7 +2023,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
             <?php endif; ?>
         </div>
 
-        <p class="frm-optional" style="margin:0 0 10px">Spreadsheet columns appear first, in template order. Existing item, status and actions are review controls. Rows stay editable until committed.</p>
+        
         <div class="mbw-tablewrap jw-opening-import-wrap"><table class="jw-opening-import-table">
             <thead><tr>
                 <th>Source Excel Row</th><th>Stock Type *</th><th>Stock Group *</th><th>Item Code *</th><th>Item Name *</th>
@@ -2195,9 +2193,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
     <?php if ($canEdit && $openingIsCarried): ?>
     <section class="mbw-card" style="margin-top:14px">
         <div class="mbw-card-head"><h2>Recording an opening by hand</h2></div>
-        <p class="frm-optional" style="margin:0">An opening is typed only in a company&rsquo;s first year.
-            If a physical count disagrees with a line above, use <strong>Correct</strong> on that line to
-            record the reason and post the difference.</p>
+        
     </section>
     <?php endif; ?>
 

@@ -420,8 +420,7 @@ $coaRowPill = static function (string $status): string {
             </form>
         </div>
         <?php if ($readyCount === 0): ?>
-            <p class="frm-optional" style="margin-top:8px">There is nothing to create from this file — every row
-                either already exists or was rejected.</p>
+            
         <?php endif; ?>
     <?php endif; ?>
 </details>

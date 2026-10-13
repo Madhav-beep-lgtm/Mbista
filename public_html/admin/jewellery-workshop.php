@@ -1091,10 +1091,7 @@ jw_filter_bar_styles();
                       // paying as the customer actually used. ?>
                 <div style="margin-top:12px;border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px">
                     <h3 style="margin:0 0 4px;font-size:1rem">Advance taken now — optional</h3>
-                    <p style="margin:0 0 8px;color:var(--mbw-muted,#64748b)">
-                        Leave the amounts at zero if nothing is being put down.
-                        The advance posts with the order and is held for this customer.
-                    </p>
+                    
                     <div class="workspace-form-grid">
                         <label>Advance date<input type="date" name="advance_date" value="<?= e($todayInFy) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
                         <?php $tenderGrid('Old gold'); ?>
@@ -1352,7 +1349,7 @@ jw_filter_bar_styles();
             dialog.addEventListener('click', function (event) { if (event.target === dialog) { dialog.close(); } });
         })();
         </script>
-        <p style="color:var(--mbw-muted);font-size:12px;margin:0 0 12px"><strong>Made to order</strong> went to a kaligad · <strong>From showroom stock</strong> was set aside off the shelf.</p>
+        
         <div class="mbw-tablewrap"><table>
             <thead><tr>
                 <th><a href="?view=orders&sort=<?= strpos($sortParam, 'order_no') === 0 && strpos($sortParam, '_asc') ? 'order_no_desc' : 'order_no_asc' ?>" style="cursor:pointer;text-decoration:none">No. <?= strpos($sortParam, 'order_no') === 0 ? (strpos($sortParam, '_asc') ? '▲' : '▼') : '▼' ?></a></th>
@@ -1931,12 +1928,7 @@ jw_filter_bar_styles();
                 <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-            <strong>Made to order</strong> — the piece went out to a kaligad for this customer and has come back; they are waiting for it.
-            <strong>From showroom stock</strong> — the customer chose a piece already on the shelf, so it was set aside rather than made.
-            <strong>Showroom replenishment</strong> — the shop's own work to restock the shelf; nobody is waiting for it.
-            Any column heading sorts; click it again to reverse.
-        </p>
+        
     </section>
 
 

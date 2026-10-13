@@ -330,7 +330,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <a class="button soft" href="<?= e(url('admin/voucher-import.php?template=csv')) ?>"><?= icon('documents') ?>Download CSV template</a>
                         <a class="button soft" href="<?= e(url('admin/voucher-import.php?template=ledgers')) ?>"><?= icon('tree') ?>Download ledger list</a>
                     </p>
-                    <p class="frm-optional">The ledger list gives every active ledger with its code and group. Use the code or the exact name in the Ledger column.</p>
+                    
                     <p><button type="submit" class="button frm-submit"><?= icon('chevron-right') ?>Upload &amp; Preview</button></p>
                 </div>
             </div>
@@ -376,7 +376,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </tbody>
         </table>
         </div>
-        <p class="frm-optional">A Bank/Cash group ledger sits under a Chart of Accounts group flagged Bank/Cash. The ledger list marks them.</p>
+        
     </section>
 </div>
 

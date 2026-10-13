@@ -559,7 +559,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <details class="pr-adjust">
                 <summary class="button secondary" style="min-height:38px;display:inline-flex;align-items:center">Employees: all</summary>
                 <div class="pr-adjust-form" style="width:280px;max-height:280px;overflow:auto">
-                    <small>Tick employees for a single-staff / subset run. Leave all unticked to run the whole company. Employees already on another run of the same month are refused.</small>
+                    
                     <?php foreach ($rosterForRun as $rosterEmp): ?>
                         <label style="display:flex;gap:8px;align-items:center;font-weight:500">
                             <input type="checkbox" name="employee_ids[]" value="<?= (int) $rosterEmp['id'] ?>" onchange="var d=this.closest('details'),n=d.querySelectorAll('input:checked').length;d.querySelector('summary').textContent='Employees: '+(n===0?'all':n+' selected');">
@@ -894,7 +894,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                         <button type="submit" class="button secondary" style="min-height:32px">Add for this month</button>
                                     </form>
                                 <?php endif; ?>
-                                <small>Zero keeps the row visible without pay or posting. Overtime and service-charge lines change in their own workflows.</small>
+                                
                             </div>
                         </details>
                         <details class="pr-adjust">
@@ -908,7 +908,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <label>Extra deduction<input type="number" step="0.01" min="0" name="adj_deduction" value="<?= e(number_format($adjD, 2, '.', '')) ?>"></label>
                                 <label>Remark<input type="text" name="adj_remark" maxlength="255" value="<?= e((string) ($line['adj_remark'] ?? '')) ?>" placeholder="e.g. Dashain bonus"></label>
                                 <button type="submit">Save &amp; recalculate</button>
-                                <small>Set both to 0 to clear. Tax and net pay recompute; the value survives Recalculate.</small>
+                                
                             </form>
                         </details>
                         <details class="pr-adjust">
@@ -926,7 +926,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <?php if (($line['tax_override'] ?? null) !== null): ?>
                                     <button type="submit" name="clear" value="1" class="button secondary">Clear — restore system tax</button>
                                 <?php endif; ?>
-                                <small>The system figure stays stored and visible; the override is audited.</small>
+                                
                             </form>
                         </details>
                         <?php endif; ?>
@@ -994,7 +994,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <aside class="mbw-card pr-inspector" aria-label="Calculation inspector" id="prInspector">
     <div class="mbw-card-head"><h2><?= icon('analytics') ?> Tax &amp; Pay Calculation</h2></div>
-    <div id="prInspectorBody"><p style="color:var(--mbw-muted);font-size:12.5px">Select an employee row to see the annualized income, retirement limit applied, slab-wise tax and withholding method — including the exact tax configuration version used.</p></div>
+    <div id="prInspectorBody"></div>
 </aside>
 </div>
 
@@ -1060,7 +1060,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </tbody>
         </table>
         </div>
-        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">Amber cells were edited for this month (hover shows the suggested value and reason). Edit amounts via each row's "Components" button in the worksheet above.</p>
+        
     <?php endif; ?>
 </section>
 
@@ -1081,7 +1081,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     <?php endif; ?>
     <?php if ($journalPreview === []): ?>
-        <p style="color:var(--mbw-muted);font-size:12.5px;margin:0">Calculate the run and resolve blocking issues to preview the accrual voucher.</p>
+        
     <?php else: ?>
         <div style="overflow-x:auto">
         <table>

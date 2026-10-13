@@ -230,7 +230,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             <summary>
                 <span>
                     <strong><?= icon('messages') ?>New message</strong>
-                    <small>Start a conversation with a client or an internal team member.</small>
+                    
                 </span>
                 <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
             </summary>

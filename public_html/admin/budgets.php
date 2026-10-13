@@ -85,9 +85,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <button type="submit"><?= icon('tasks') ?>Save Budgets</button>
         </div>
     </div>
-    <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        Yearly amount per income and expense ledger. Empty or zero removes the line. Actuals are posted movements this fiscal year.
-    </p>
+    
     <div style="overflow-x:auto">
         <table>
             <thead>

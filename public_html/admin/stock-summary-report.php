@@ -524,7 +524,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
             <details class="ssr-msel">
                 <summary><?= $filters['warehouse_ids'] === [] ? 'All locations' : count($filters['warehouse_ids']) . ' selected' ?></summary>
                 <div class="ssr-msel-list" data-msel-all="All locations">
-                    <?php if ($warehouses === []): ?><small style="color:var(--mbw-muted)">No warehouses defined — everything reports company-wide.</small><?php endif; ?>
+                    <?php if ($warehouses === []): ?><?php endif; ?>
                     <?php foreach ($warehouses as $wh): ?>
                         <label><input type="checkbox" name="warehouses[]" value="<?= (int) $wh['id'] ?>" <?= in_array((int) $wh['id'], $filters['warehouse_ids'], true) ? 'checked' : '' ?>> <?= e((string) $wh['name']) ?></label>
                     <?php endforeach; ?>
@@ -598,7 +598,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
                         <input type="checkbox" checked data-col-group="<?= e($groupClass) ?>"> <?= e($groupLabel) ?>
                     </label>
                 <?php endforeach; ?>
-                <small>Hide column groups you don't need; the choice is remembered on this device.</small>
+                
             </div>
         </details>
     </div>
@@ -612,7 +612,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         </div>
     </div>
     <?php if (!sc_table_ready()): ?>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">Counted closing stock is not set up on this database yet. Reload the page once.</p>
+        
     <?php elseif ($countScope === null): ?>
         <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">
             <?= count($filters['warehouse_ids']) ?> locations are selected. A count is taken at ONE place — pick a single location,
@@ -653,7 +653,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
             An item with unmapped ledgers is left unposted, with its reason.
         </p>
         <?php elseif (!$canPostCount): ?>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Punched counts are listed in the sheet below. Posting them to the books needs the <strong>accounting · post</strong> permission.</p>
+        
         <?php else: ?>
         <p style="margin:0;color:var(--mbw-muted);font-size:12px">Nothing is waiting to be posted for <?= e($to) ?>. Enter a counted quantity in the sheet below to post one.</p>
         <?php endif; ?>
@@ -966,14 +966,14 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
             </label>
             <button type="submit"><?= icon('badge-check') ?>Reconcile now</button>
         </form>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Anything that cannot post is listed afterwards with its reason. See Reports Center → Inventory-to-GL Reconciliation.</p>
+        
     <?php endif; ?>
 </section>
 <?php endif; ?>
 
 <section class="mbw-card" aria-label="Location-specific item types">
     <div class="mbw-card-head"><h2><?= icon('sliders') ?>Item type by department / location</h2></div>
-    <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">The same item can be <strong>FG</strong> for the department that produces it and <strong>RM</strong> for the department that consumes it. Set the type per location here; the item master type stays the fallback. The report resolves the type for the selected location.</p>
+    
     <?php if (user_can_do('inventory', 'edit')): ?>
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

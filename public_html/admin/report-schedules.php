@@ -121,7 +121,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <span class="mbw-chip is-square <?= $key === $reportKey ? 'tone-green' : 'tone-blue' ?>"><?= icon($iconName) ?></span>
                 <div>
                     <strong><?= e($label) ?></strong>
-                    <span><?= e($description) ?></span>
                 </div>
             </a>
         <?php endforeach; ?>
@@ -134,7 +133,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:.85rem"><?= e($reportRegistry[$reportKey][1]) ?></span></div>
     </div>
     <?php if (!mail_is_configured()): ?>
-        <p style="color:var(--mbw-muted);font-size:.85rem">SMTP is not configured. Delivery previews are stored locally until MAIL_* is set in <code>.env</code>.</p>
+        
     <?php endif; ?>
     <form method="post" class="rc-schedule-form">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -176,7 +175,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <div class="mbw-card-tools"><span style="color:var(--mbw-muted);font-size:.85rem"><?= $schedules !== [] ? e((string) count($schedules)) . ' schedules' : 'No schedules yet' ?></span></div>
     </div>
     <?php if ($schedules === []): ?>
-        <p style="color:var(--mbw-muted)">No schedules created for this report yet.</p>
+        
     <?php else: ?>
         <div style="overflow-x:auto">
             <table>

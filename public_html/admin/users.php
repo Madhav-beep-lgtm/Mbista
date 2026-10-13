@@ -821,7 +821,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <span class="uw-action-icon"><?= icon('users') ?></span>
         <div>
             <strong>User Access Management</strong>
-            <small>Manage accounts, access levels, approvals, and KYC records.</small>
+            
         </div>
     </div>
 
@@ -1359,7 +1359,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <input type="hidden" name="action" value="save_client_accounting_access">
                             <input type="hidden" name="user_id" value="<?= e((int) $viewUser['id']) ?>">
                             <?php if ($accessClients === []): ?>
-                                <p class="muted">No active clients are available in your authorized scope.</p>
+                                
                             <?php else: ?>
                                 <div class="actions" style="margin-bottom:12px;">
                                     <button type="button" class="button secondary" data-client-grants="all">Select all</button>
@@ -1397,7 +1397,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php if (in_array(($viewUser['role'] ?? ''), ['staff', 'admin'], true)): ?>
                 <div class="form-card">
                     <h3>Public profile</h3>
-                    <p class="muted">Only these fields appear on the public team page. The member stays hidden until "Show on public team page" is ticked.</p>
+                    
                     <form method="post" enctype="multipart/form-data">
                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                         <input type="hidden" name="action" value="save_staff_profile">
@@ -1652,7 +1652,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
                 <details class="users-permission-template">
                     <summary>Set custom module permissions instead of the access-level default</summary>
-                    <p class="muted">Leave closed to use the access-level default. Any action selected here makes it a custom override.</p>
+                    
                     <label class="users-full"><input type="checkbox" name="use_custom_permissions" value="1"> Use the selected custom permissions for this user</label>
                     <div class="rc-table-scroll">
                         <table class="rc-table role-matrix-table perm-matrix-table">

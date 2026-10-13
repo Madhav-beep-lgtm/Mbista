@@ -204,7 +204,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
         </div>
     </div>
-    <p style="margin:0 0 12px;color:var(--mbw-muted)">One place for the ledger record and its actions.</p>
+    
     <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_ledger">

@@ -1273,7 +1273,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table></div>
-            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Weighted GP % = category GP ÷ category net sales.</p>
+            
         </section>
     </div>
 
@@ -1715,7 +1715,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Mapping does not change the sales record. Several descriptions may map to one menu item.</p>
+        
     </section>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Approved Mappings &amp; Ignores</h2></div>
@@ -2099,7 +2099,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endif; ?>
             </tbody>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">Weighted GP % = category estimated GP ÷ category net sales × 100.</p>
+        
     </section>
 
     <section class="mbw-card" data-collapsible>
@@ -2239,7 +2239,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <input type="hidden" name="back_view" value="sales-upload">
             <label class="workspace-span-2">Sales workbook — both sheets (.xlsx, max 10 MB)
                 <input type="file" name="sales_file" accept=".xlsx" required>
-                <small style="color:var(--mbw-muted)">One file holding the <strong>item-wise</strong> and <strong>invoice-wise</strong> sheets, in either order.</small>
+                
             </label>
             <div class="workspace-span-2">
                 <button type="submit"><?= icon('upload') ?>Upload &amp; Preview</button>
@@ -2432,12 +2432,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <button type="submit" class="button secondary"><?= icon('trash') ?>Delete selected</button>
                 <span id="hsSelectedCount" style="color:var(--mbw-muted);font-size:12.5px">Nothing selected.</span>
             </div>
-            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12.5px">
-                Deleting removes the daily voucher and the uploaded lines behind it.
-                To correct a figure, delete the day and upload it again.
-            </p>
+            
         <?php elseif ($canDeleteSales ?? false): ?>
-            <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12.5px">Nothing here carries a posted voucher yet.</p>
+            
         <?php endif; ?>
         </form>
         <?php if ($showSelect): ?>
@@ -2658,9 +2655,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
-            Discount is already deducted from the credit; Taxable Sales is net of it.
-        </p>
+        
     </section>
 
     <section class="mbw-card" data-collapsible>
@@ -2892,10 +2887,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         ?>
         <section class="mbw-card">
             <div class="mbw-card-head"><h2>Sheet Editor</h2></div>
-            <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:13px">
-                Correct an uploaded sheet here and post it without re-uploading.
-                The uploaded file is left unchanged; what posts is what is on this screen.
-            </p>
+            
             <?php if ($heldUploads === []): ?>
                 <div class="notice">
                     Nothing is waiting to be edited. Upload a sheet on
@@ -2922,7 +2914,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table></div>
-                <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">Uploads are held for six hours, then cleared.</p>
+                
             <?php endif; ?>
         </section>
 
@@ -3082,11 +3074,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php endif; ?>
                     <button type="submit" name="action" value="sheet_editor_clear" class="secondary" formnovalidate>Discard</button>
                 </div>
-                <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-                    <strong>Save &amp; check</strong> re-reads every row as an upload would.
-                    Row buttons recalculate the amounts, or clear the line. Dates may be AD or BS.
-                    <br>Category and Item are chosen from a list to keep names consistent.
-                </p>
+                
             </section>
         </form>
         <script>
@@ -3202,11 +3190,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Sales Category Ledgers &amp; VAT (<?= count($ledgerMapRows) ?> categor<?= count($ledgerMapRows) === 1 ? 'y' : 'ies' ?>)</h2></div>
-        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            One row per sales category. Taxable sales are <strong>credited</strong> to its ledger, VAT to the one below.
-            The <strong>Default</strong> row covers categories without one.
-            <br>The debit side comes from the <strong>Party Ledger Code</strong> on the invoice sheet.
-        </p>
+        
         <?php if (!$canEdit): ?><div class="notice">You have view-only access to this setup.</div><?php endif; ?>
         <form method="post" <?= $canEdit ? '' : 'style="pointer-events:none;opacity:.7"' ?>>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -3216,7 +3200,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <thead><tr><th>Category (as written in the sheet)</th><th>Sales ledger (credit)</th><th>Notes</th><th>Active</th></tr></thead>
                 <tbody>
                     <tr style="background:var(--mbw-soft,rgba(0,0,0,.03))">
-                        <td><strong>Default / all other categories</strong><br><small style="color:var(--mbw-muted)">Fallback when a category has no row below.</small></td>
+                        <td><strong>Default / all other categories</strong><br></td>
                         <td><?= $ledgerSelect('post_sales_ledger_id', (int) ($settings['post_sales_ledger_id'] ?? 0)) ?></td>
                         <td><small style="color:var(--mbw-muted)">—</small></td>
                         <td><span class="mbw-pill tone-blue">Always</span></td>
@@ -3247,7 +3231,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="workspace-form-grid" style="margin-top:12px">
                 <label>VAT payable ledger (credit — common for all categories)<?= $ledgerSelect('post_vat_ledger_id', (int) ($settings['post_vat_ledger_id'] ?? 0)) ?></label>
                 <label>VAT rate %<input type="number" step="0.01" min="0" max="99.99" name="post_vat_rate" value="<?= e(number_format((float) ($settings['post_vat_rate'] ?? 13), 2, '.', '')) ?>">
-                    <small style="color:var(--mbw-muted)">Only used when a sheet has no VAT column of its own.</small></label>
+                    </label>
                 <?php if ($canEdit): ?><div style="align-self:end"><button type="submit"><?= icon('settings') ?>Save Category Ledgers</button></div><?php endif; ?>
             </div>
         </form>
@@ -3272,9 +3256,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     ?>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Inventory Posting Ledgers</h2></div>
-        <p class="frm-optional" style="margin:0 0 12px">
-            The same mappings the Inventory module uses.
-        </p>
+        
         <?php if ($canEdit && $invMapGaps !== []): ?>
         <div class="mbw-note tone-amber" style="margin:0 0 12px">
             <p style="margin:0 0 8px"><strong><?= count($invMapGaps) ?> unmapped:</strong>
@@ -3359,10 +3341,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </label>
             <?php if ($canEdit): ?><div class="workspace-span-2"><button type="submit"><?= icon('settings') ?>Save Settings</button></div><?php endif; ?>
         </form>
-        <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
-            Recipe costs only. Labour, rent, depreciation and overheads are excluded.
-            Recalculation requires the hospitality adjust permission.
-        </p>
+        
     </section>
 <?php endif; ?>
 

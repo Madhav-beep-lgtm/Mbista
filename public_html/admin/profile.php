@@ -68,7 +68,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
  <section class="mbw-card"><div class="mbw-card-head"><h2>Profile details</h2></div>
   <form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="<?=e(csrf_token())?>"><input type="hidden" name="action" value="update_profile">
    <?php if(!empty($profile['photo_path'])):?><img class="admin-self-photo" src="<?=e(url((string)$profile['photo_path']))?>" alt="Profile photo"><?php endif;?>
-   <label>Profile photo<input type="file" name="profile_photo" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG or WEBP; maximum 2 MB.</small></label>
+   <label>Profile photo<input type="file" name="profile_photo" accept="image/jpeg,image/png,image/webp"></label>
    <label>Full name<input type="text" name="name" value="<?=e($user['name']??'')?>" required></label><label>Phone<input type="text" name="phone" value="<?=e($user['phone']??'')?>"></label>
    <label>Job title<input type="text" name="job_title" value="<?=e($profile['job_title']??'')?>"></label><label>Department<input type="text" name="department" value="<?=e($profile['department']??'')?>"></label>
    <label>About<textarea name="bio" rows="4"><?=e($profile['bio']??'')?></textarea></label><button type="submit"><?=icon('settings')?>Save profile</button>

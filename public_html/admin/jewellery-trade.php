@@ -1426,7 +1426,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                       // fresh page, not a sale being saved. ?>
                 <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                     <button type="button" id="jw-bill-ticked-orders" class="button secondary"><?= icon('journal') ?>Bill the ticked orders</button>
-                    <small style="color:var(--mbw-muted,#64748b)">Anything left unticked stays waiting for its own bill.</small>
+                    
                 </div>
                 <script type="application/json" id="jw-order-prefills"><?= json_encode($clientOrderPrefills, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
                 <div id="jw-order-prefill-note" class="mbw-note tone-green" style="display:none;margin-top:10px" role="status"></div>
@@ -1455,10 +1455,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
             <?php if ($openAdvances !== []): ?>
             <fieldset style="border:1px solid var(--mbw-border,#d9e2ec);border-radius:10px;padding:12px;margin:12px 0">
                 <legend style="padding:0 6px;font-weight:600">Advances this customer holds — tick what pays this bill</legend>
-                <p style="margin:0 0 8px;color:var(--mbw-muted,#64748b)">
-                    Every entry still held is listed — this order's, earlier orders', all of it.
-                    Nothing is applied unless you put an amount against it.
-                </p>
+                
                 <div style="overflow-x:auto"><table>
                     <thead><tr><th>Date</th><th>Ref</th><th>Order</th><th>How it was paid</th>
                         <th class="is-numeric">Still held</th><th class="is-numeric" style="min-width:140px">Apply (<?= e($sym) ?>)</th><th></th></tr></thead>
@@ -1539,11 +1536,11 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                     </p>
                     <label class="jw-excess-choice">
                         <input type="radio" name="excess_mode" value="advance" <?= $excessMode !== 'refund' ? 'checked' : '' ?>>
-                        <span><strong>Hold as advance</strong><small>Stays as this customer's credit and can be applied to their next bill. Needs a customer chosen.</small></span>
+                        <span><strong>Hold as advance</strong></span>
                     </label>
                     <label class="jw-excess-choice">
                         <input type="radio" name="excess_mode" value="refund" <?= $excessMode === 'refund' ? 'checked' : '' ?>>
-                        <span><strong>Refund the excess</strong><small>Handed back over the counter now, out of the ledger below.</small></span>
+                        <span><strong>Refund the excess</strong></span>
                     </label>
                     <label data-jw-excess-ledger<?= $excessMode === 'refund' ? '' : ' hidden' ?>>Refund paid out of
                         <select name="excess_ledger_id">

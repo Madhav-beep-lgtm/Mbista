@@ -637,13 +637,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
         <div class="mbw-card-head">
             <h2><?= e(jw_sales_group_options()[$groupBy]) ?> (<?= count($bif['rows']) ?>)</h2>
         </div>
-        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
-            <strong>Metal + Making + Stone/diamond + (Other charges − Discount) = Net before SPT / VAT</strong>,
-            then <strong>+ SPT + VAT = TOTAL</strong>.
-            Net before SPT / VAT is the figure that reaches the profit and loss.
-            Wastage is not a separate term; the column shows its share of the metal amount.
-            Other charges and discount are per bill, allocated across its rows.
-        </p>
+        
         <div style="overflow-x:auto"><table>
             <thead>
                 <tr>
@@ -731,7 +725,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                         <td class="is-numeric"><?= $fmt((float) $r['metal_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['making_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['stone_side']) ?></td>
-                        <td class="is-numeric"><?= (float) $r['vat_amount'] > 0 ? $fmt((float) $r['vat_amount']) . '<br><small>' . e(str_replace('_', ' ', (string) $r['vat_base'])) . '</small>' : '—' ?></td>
+                        <td class="is-numeric"><?= (float) $r['vat_amount'] > 0 ? $fmt((float) $r['vat_amount']) . '<br>' : '—' ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['cogs_amount']) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['gross_profit']) ?></td>
                     </tr>
@@ -791,9 +785,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                     <th class="is-numeric"><?= $fmt((float) $report['totals']['vat_amount']) ?></th>
                 </tr></tfoot>
             </table></div>
-            <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12px">
-                Old gold carries no supplier invoice and no input VAT, so it is shown beside the purchase bills.
-            </p>
+            
         <?php endif; ?>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Date</th><th>Document</th><th>Party</th><th>How it came in</th><th>Item</th><th>Purity</th><th class="is-numeric">Gross</th><th class="is-numeric">Fine</th><th class="is-numeric">Rate</th><th class="is-numeric">Metal</th><th class="is-numeric">Making</th><th class="is-numeric">Stone / diamond</th><th class="is-numeric">VAT</th><th class="is-numeric">Landed cost</th></tr></thead>
@@ -1367,8 +1359,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
                             <small><?= e((string) ($r['item_code'] ?? '')) ?> <?= e((string) ($r['purity_code'] ?? '')) ?></small><?php endif; ?></td>
                         <td class="is-numeric"><?= $fmt((float) $r['amount']) ?></td>
                         <td class="is-numeric"><?= (float) $r['gross_weight'] > 0
-                            ? $fmt((float) $r['gross_weight'], 4) . ' <small>' . e((string) ($r['unit_code'] ?? '')) . '</small><br><small>'
-                                . $fmt((float) $r['fine_weight'], 4) . ' fine</small>'
+                            ? $fmt((float) $r['gross_weight'], 4) . ' <br>'
                             : '—' ?></td>
                         <td class="is-numeric"><?= $isRefund ? '—' : $fmt((float) $r['allocated']) ?></td>
                         <td class="is-numeric"><?= $isRefund ? '—' : '<strong>' . $fmt((float) $r['remaining']) . '</strong>' ?></td>
@@ -1385,10 +1376,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
     </section>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Advance Adjustment Register (<?= count($report['adjustments']) ?> applications)</h2></div>
-        <p style="margin:0 0 10px;color:var(--mbw-muted,#64748b)">
-            One row per application: what each bill took from which advance.
-            Nothing is deleted; a reversed bill releases the money back to the advance.
-        </p>
+        
         <div style="overflow-x:auto"><table>
             <thead><tr>
                 <th>Advance entry</th><th>Applied to bill</th><th>Bill date</th><th>Customer</th>
@@ -1414,10 +1402,7 @@ $reportPager = static function (int $page, int $count, int $total) use ($reportP
     <?php $report = jw_report_order_profitability($companyId, $from, $to); ?>
     <section class="mbw-card" data-collapsible style="margin-top:14px">
         <div class="mbw-card-head"><h2>Order Profitability (<?= count($report['rows']) ?> delivered orders)</h2></div>
-        <p style="margin:0 0 10px;color:var(--mbw-muted,#64748b)">
-            Revenue and cost of metal come from the bill. Kaligad wages and wastage borne come from the
-            workshop receipts of the same order, shown beside the making charge.
-        </p>
+        
         <div style="overflow-x:auto"><table>
             <thead><tr>
                 <th>Order</th><th>Customer</th><th>Bill</th><th>Billed on</th>

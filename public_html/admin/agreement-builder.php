@@ -448,7 +448,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
         <div>
             <div class="mbw-card" style="padding:12px">
                 <h3 style="margin:0 0 8px">Outline</h3>
-                <?php if ($tree === []): ?><p style="font-size:12.5px;color:var(--mbw-muted)">No sections yet — add the first one below or insert from the clause library.</p><?php endif; ?>
+                <?php if ($tree === []): ?><?php endif; ?>
                 <?php $renderOutline($tree); ?>
                 <?php if ($editable && $canEdit): ?>
                     <details class="ab-block">
@@ -563,7 +563,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                             echo '<p style="margin:4px 0 2px ' . ($depth * 16) . 'px;font-size:13px"><strong>' . e((string) $node['number']) . '.</strong> ' . e($title) . '</p>';
                             $body = (string) ($node['body_en'] ?? '') !== '' ? (string) $node['body_en'] : (string) ($node['body_np'] ?? '');
                             if ($body !== '') {
-                                echo '<p style="margin:0 0 6px ' . (($depth + 1) * 16) . 'px;font-size:12px;color:var(--mbw-muted)">' . e(mb_strimwidth(trim(strip_tags(agreement_resolve_text($body, $placeholderMap))), 0, 220, '…')) . '</p>';
+                                echo '';
                             }
                             if (!empty($node['children'])) {
                                 $preview($node['children'], $depth + 1);
@@ -572,7 +572,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                     };
                     $preview($tree);
                     ?>
-                    <p style="font-size:12px;color:var(--mbw-muted)">Select a section in the outline to edit it. Use the Print buttons above for the full formatted document.</p>
+                    
                 </div>
             <?php endif; ?>
 
@@ -709,7 +709,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                         <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
-                <?php if ($linkedTasks === []): ?><p style="font-size:12.5px;color:var(--mbw-muted)">No tasks linked yet. An agreement can be drafted without tasks; you will be warned (not blocked) at activation.</p><?php endif; ?>
+                <?php if ($linkedTasks === []): ?><?php endif; ?>
                 <?php if (!agreement_is_frozen($sa) && $canEdit): ?>
                     <?php if ($clientTasks === []): ?>
                         <p style="font-size:12px;color:var(--mbw-muted)"><?= (int) ($sa['client_id'] ?? 0) > 0 ? 'This client has no tasks yet — create one in the ' : 'Select a client first, then link its tasks or create one in the ' ?><a href="<?= e(url('admin/workspace.php?view=tasks')) ?>">Work Portal → Tasks</a>.</p>
@@ -746,7 +746,7 @@ $renderOutline = function (array $nodes, int $depth = 0) use (&$renderOutline, $
                         <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
-                <?php if ($versions === []): ?><p style="font-size:12.5px;color:var(--mbw-muted)">No versions yet — a snapshot is taken automatically when the draft is submitted for review.</p><?php endif; ?>
+                <?php if ($versions === []): ?><?php endif; ?>
             </div>
 
             <div class="mbw-card" style="padding:12px">

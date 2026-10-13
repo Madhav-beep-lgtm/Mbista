@@ -1036,7 +1036,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="number" name="line_rate[]" step="0.01" min="0" placeholder="Rate">
                                 <input type="number" name="line_vat_rate[]" step="0.01" min="0" placeholder="VAT %" value="13.00">
                             </div>
-                            <small class="text-muted">Inventory invoices issue the selected quantities from stock when issued or paid. Manufacturing invoices apply the configured excise rate.</small>
+                            
                         </div>
 
                         <div class="full">
@@ -1076,7 +1076,7 @@ require __DIR__ . '/../../app/views/partials/admin_header.php';
                     })();
                     </script>
                     <?php if ($taskOptions === []): ?>
-                        <p style="margin-bottom: 0; color: var(--mbw-muted);">No tasks available yet. Create a task in Work Portal first, then return here to issue invoices.</p>
+                        
                     <?php endif; ?>
             </section>
 

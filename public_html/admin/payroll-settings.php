@@ -373,7 +373,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <label>Salary expense (Dr)<?= $ledgerSelect('salary_expense_ledger_id', (int) ($settings['salary_expense_ledger_id'] ?? 0), ['expense']) ?></label>
         <label>Employer contribution expense (Dr)<?= $ledgerSelect('employer_contrib_expense_ledger_id', (int) ($settings['employer_contrib_expense_ledger_id'] ?? 0), ['expense']) ?></label>
         <label>Remuneration tax (TDS) payable (Cr)<?= $ledgerSelect('tds_payable_ledger_id', (int) ($settings['tds_payable_ledger_id'] ?? 0), ['liability']) ?></label>
-        <label>Social Security Tax payable (Cr) <span class="frm-optional">1% first slab — falls back to the TDS ledger</span><?= $ledgerSelect('sst_payable_ledger_id', (int) ($settings['sst_payable_ledger_id'] ?? 0), ['liability']) ?></label>
+        <label>Social Security Tax payable (Cr) <?= $ledgerSelect('sst_payable_ledger_id', (int) ($settings['sst_payable_ledger_id'] ?? 0), ['liability']) ?></label>
         <label>Retirement fund payable (Cr)<?= $ledgerSelect('retirement_payable_ledger_id', (int) ($settings['retirement_payable_ledger_id'] ?? 0), ['liability']) ?></label>
         <label>Salary payable (Cr)<?= $ledgerSelect('salary_payable_ledger_id', (int) ($settings['salary_payable_ledger_id'] ?? 0), ['liability']) ?></label>
         <label>Employee advance ledger<?= $ledgerSelect('advance_ledger_id', (int) ($settings['advance_ledger_id'] ?? 0), ['asset']) ?></label>
@@ -385,7 +385,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
               // says all three rather than only the one it was introduced for. ?>
         <label>Working days per month
             <input type="number" step="0.5" min="1" max="31" name="standard_working_days" value="<?= e((string) ($settings['standard_working_days'] ?? '30')) ?>">
-            <small style="display:block;color:var(--mbw-muted)">The days a full month is paid for. Worked days and the unpaid-leave day rate are measured against it.</small>
+            
         </label>
         <?php // Only offered where migration 120 has been applied; the engine uses 8
               // either way, so a server without the column is not misinformed. ?>
@@ -413,11 +413,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-card" data-collapsible aria-label="Pay components" id="components">
     <div class="mbw-card-head"><h2>Pay Components</h2></div>
-    <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        Each pay head is a component with its own accounting treatment. Amounts are defaults; payroll
-        preparation may change, zero, add or remove them per employee and month, with a reason.
-        Ledger mappings here take priority over the control ledgers above.
-    </p>
+    
     <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_component">
@@ -481,7 +477,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label style="display:flex;gap:8px;align-items:flex-start">
                 <input type="checkbox" name="prorate_worked_days" value="1" <?= (int) ($editComponent['prorate_worked_days'] ?? 0) === 1 ? 'checked' : '' ?>>
                 <span>Also pro-rate this one by worked days
-                    <small style="display:block;color:var(--mbw-muted)">An allowance or benefit inside gross pay <strong>already</strong> pro-rates whenever worked days are typed on the salary sheet &mdash; leave this alone for those. Tick it only for something that would not otherwise scale: a deduction, or an item paid outside gross.</small>
+                    
                 </span>
             </label>
             <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="allow_zero" <?= (int) ($editComponent['allow_zero'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Zero allowed</label>
@@ -572,9 +568,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <section class="mbw-card" data-collapsible aria-label="Income tax configuration" id="tax">
     <div class="mbw-card-head"><h2>Income Tax Configuration — <?= e($fiscalYear['label'] ?? '') ?></h2></div>
-    <p style="margin:0 0 12px;color:var(--mbw-muted);font-size:12.5px">
-        Slabs and limits are versioned and effective-dated. Enter values from the IRD publication of the Income Tax Act, 2058 as amended, and cite it in the legal reference. Published versions are immutable.
-    </p>
+    
     <form method="post" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="action" value="save_tax_version">

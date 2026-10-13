@@ -349,7 +349,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
                 <summary>
                     <span>
                         <strong><?= icon('compliance') ?>Create deadline</strong>
-                        <small>Add a statutory deadline for a client.</small>
+                        
                     </span>
                     <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
                 </summary>
@@ -509,7 +509,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             <summary>
                 <span>
                     <strong><?= icon('compliance') ?>Create type</strong>
-                    <small>Add a new compliance type for this company.</small>
+                    
                 </span>
                 <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
             </summary>
@@ -658,6 +658,6 @@ $overdueDeadlines = $overdueStmt->fetchAll();
             </form>
         <?php endif; ?>
     <?php endif; ?>
-    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">VAT: 15% p.a. simple interest per started Nepali month, plus 10% p.a. additional duty counted daily. SST and other Duties &amp; Taxes heads: 15% p.a. simple interest per started Nepali month. A part month counts in full.</p>
+    
 </section>
 <?php include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_footer' : 'staff_footer') . '.php'; ?>

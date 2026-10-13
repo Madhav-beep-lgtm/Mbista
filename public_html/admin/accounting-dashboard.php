@@ -988,31 +988,31 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="mbw-qa-grid">
         <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=journal')) ?>">
             <span class="mbw-chip is-square tone-green"><?= icon('journal') ?></span>
-            <div><strong>Journal Voucher</strong><span>Create new journal entry</span></div>
+            <div><strong>Journal Voucher</strong></div>
         </a>
         <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=receipt')) ?>">
             <span class="mbw-chip is-square tone-blue"><?= icon('receipt-voucher') ?></span>
-            <div><strong>Receipt Voucher</strong><span>Record customer receipt</span></div>
+            <div><strong>Receipt Voucher</strong></div>
         </a>
         <a class="mbw-qa" href="<?= e(url('admin/voucher-form.php?type=payment')) ?>">
             <span class="mbw-chip is-square tone-amber"><?= icon('card') ?></span>
-            <div><strong>Payment Voucher</strong><span>Make vendor payment</span></div>
+            <div><strong>Payment Voucher</strong></div>
         </a>
         <a class="mbw-qa" href="<?= e(url('admin/reconciliation.php')) ?>">
             <span class="mbw-chip is-square tone-purple"><?= icon('reconcile') ?></span>
-            <div><strong>Bank Reconciliation</strong><span>Reconcile bank statements</span></div>
+            <div><strong>Bank Reconciliation</strong></div>
         </a>
         <a class="mbw-qa" href="<?= e(url('admin/chart-of-accounts.php')) ?>">
             <span class="mbw-chip is-square tone-blue"><?= icon('tree') ?></span>
-            <div><strong>Chart of Accounts</strong><span>View account structure</span></div>
+            <div><strong>Chart of Accounts</strong></div>
         </a>
         <a class="mbw-qa" href="<?= e(url('admin/reports-center.php')) ?>">
             <span class="mbw-chip is-square tone-green"><?= icon('reports') ?></span>
-            <div><strong>Financial Reports</strong><span>View reports &amp; statements</span></div>
+            <div><strong>Financial Reports</strong></div>
         </a>
         <a class="mbw-qa" href="<?= e(url('admin/chart-ledgers.php')) ?>">
             <span class="mbw-chip is-square tone-teal"><?= icon('documents') ?></span>
-            <div><strong>Add Ledger</strong><span>Create a posting account</span></div>
+            <div><strong>Add Ledger</strong></div>
         </a>
         <a class="mbw-qa" href="<?= e(accounting_dashboard_report_url('trial-balance', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>">
             <span class="mbw-chip is-square tone-gray"><?= icon('accounting') ?></span>
@@ -1021,13 +1021,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php if ($showInventoryFeatures): ?>
             <a class="mbw-qa" href="<?= e(url('admin/accounting-inventory.php')) ?>">
                 <span class="mbw-chip is-square tone-purple"><?= icon('layers') ?></span>
-                <div><strong>Stock Movement</strong><span>Record inventory transaction</span></div>
+                <div><strong>Stock Movement</strong></div>
             </a>
         <?php endif; ?>
         <?php if ($showManufacturingFeatures): ?>
             <a class="mbw-qa" href="<?= e(url('admin/accounting-inventory.php')) ?>">
                 <span class="mbw-chip is-square tone-amber"><?= icon('settings') ?></span>
-                <div><strong>Production Order</strong><span>Create manufacturing order</span></div>
+                <div><strong>Production Order</strong></div>
             </a>
         <?php endif; ?>
     </div>
@@ -1132,7 +1132,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(accounting_dashboard_report_url('group-report', $fiscalYearId, $fromDate, $toDate, $businessType)) ?>">View Report</a></div>
         </div>
         <div class="ad-expense-list">
-            <?php if ($expenseGroups === []): ?><p style="color:var(--mbw-muted);font-size:13px">No expense postings in this fiscal year.</p><?php endif; ?>
+            <?php if ($expenseGroups === []): ?><?php endif; ?>
             <?php foreach ($expenseGroups as $expense): ?>
                 <?php $percent = ((float) $expense['amount'] / $topExpenseAmount) * 100; ?>
                 <div><span><b><?= e($expense['group_name']) ?></b><em><?= e($fmtMoney((float) $expense['amount'])) ?></em></span><progress max="100" value="<?= e(number_format($percent, 2, '.', '')) ?>"><?= e(number_format($percent, 1)) ?>%</progress></div>

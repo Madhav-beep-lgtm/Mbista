@@ -684,7 +684,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <details class="mbw-card stc-card" data-section="accounting" open>
     <summary class="stc-head">
         <span class="mbw-chip is-square tone-<?= e($sectionDefs['fiscal']['tone']) ?>"><?= icon($sectionDefs['fiscal']['icon']) ?></span>
-        <span class="stc-title"><strong><?= e($sectionDefs['fiscal']['title']) ?></strong><small><?= e($sectionDefs['fiscal']['blurb']) ?></small></span>
+        <span class="stc-title"><strong><?= e($sectionDefs['fiscal']['title']) ?></strong></span>
         <span class="mbw-pill <?= $sectionCompleteness['fiscal'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['fiscal'] ?>% Complete</span>
         <span class="stc-caret"><?= icon('chevron') ?></span>
     </summary>
@@ -704,7 +704,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <details class="mbw-card stc-card" data-section="accounting" open>
     <summary class="stc-head">
         <span class="mbw-chip is-square tone-blue"><?= icon('calendar') ?></span>
-        <span class="stc-title"><strong>Create Fiscal Year</strong><small>Fiscal years drive voucher posting, reports, and period locks.</small></span>
+        <span class="stc-title"><strong>Create Fiscal Year</strong></span>
         <span class="stc-caret"><?= icon('chevron') ?></span>
     </summary>
     <form method="post" class="frm-grid frm-grid-4" style="padding-top:14px">
@@ -846,8 +846,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endforeach; ?>
             </tbody>
         </table></div>
-        <p style="color:var(--mbw-muted);font-size:12px;margin:8px 0 0">Lifecycle: Upcoming → Open → Closed → Locked. Closed and locked years stay viewable and exportable but reject accounting changes. Reopening requires a reason and is audited.</p>
-        <p style="color:var(--mbw-muted);font-size:12px;margin:4px 0 0">Continuity: each year's closing balance is the next year's opening, and the next year opens the following day. Gaps are rejected on creation. Permanent accounts carry forward; income and expense restart at zero, with prior profits in Retained Earnings b/f.</p>
+        
+        
     </div>
 </details>
 
@@ -863,7 +863,7 @@ if (table_exists('company_shareholdings')) {
 <details class="mbw-card stc-card" data-section="accounting">
     <summary class="stc-head">
         <span class="mbw-chip is-square tone-purple"><?= icon('companies') ?></span>
-        <span class="stc-title"><strong>Shareholding &amp; Consolidation</strong><small>Set subsidiary, associate, joint venture, and investment treatment for consolidated reports.</small></span>
+        <span class="stc-title"><strong>Shareholding &amp; Consolidation</strong></span>
         <span class="stc-caret"><?= icon('chevron') ?></span>
     </summary>
     <form method="post" class="frm-grid frm-grid-4" style="padding-top:14px">
@@ -908,7 +908,7 @@ if (table_exists('company_shareholdings')) {
     <details class="mbw-card stc-card" data-section="branding" open>
         <summary class="stc-head">
             <span class="mbw-chip is-square tone-blue"><?= icon('companies') ?></span>
-            <span class="stc-title"><strong>Company Profile &amp; Branding</strong><small><?= e($sectionDefs['branding']['blurb']) ?></small></span>
+            <span class="stc-title"><strong>Company Profile &amp; Branding</strong></span>
             <span class="mbw-pill <?= $sectionCompleteness['branding'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['branding'] ?>% Complete</span>
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
@@ -935,7 +935,7 @@ if (table_exists('company_shareholdings')) {
     <details class="mbw-card stc-card" data-section="branding">
         <summary class="stc-head">
             <span class="mbw-chip is-square tone-amber"><?= icon('home') ?></span>
-            <span class="stc-title"><strong>Home Page Content</strong><small><?= e($sectionDefs['homepage']['blurb']) ?></small></span>
+            <span class="stc-title"><strong>Home Page Content</strong></span>
             <span class="mbw-pill <?= $sectionCompleteness['homepage'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['homepage'] ?>% Complete</span>
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
@@ -949,7 +949,7 @@ if (table_exists('company_shareholdings')) {
     <details class="mbw-card stc-card" data-section="payments">
         <summary class="stc-head">
             <span class="mbw-chip is-square tone-purple"><?= icon('card') ?></span>
-            <span class="stc-title"><strong>Payment Settings</strong><small><?= e($sectionDefs['payments']['blurb']) ?></small></span>
+            <span class="stc-title"><strong>Payment Settings</strong></span>
             <span class="mbw-pill <?= $sectionCompleteness['payments'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['payments'] ?>% Complete</span>
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
@@ -971,7 +971,7 @@ if (table_exists('company_shareholdings')) {
             <label>Payment note<input type="text" name="payment_note" value="<?= e($settings['payment_note'] ?? '') ?>"></label>
             <div style="grid-column:1/-1; border-top:1px solid var(--mbw-border); margin-top:6px; padding-top:12px">
                 <strong style="color:var(--mbw-heading)"><?= icon('card') ?> Online payment gateways</strong>
-                <p style="margin:4px 0 8px; font-size:12.5px; color:var(--mbw-muted)">Online payment via eSewa, Khalti, Fonepay or Stripe. A confirmed payment posts a receipt automatically. The bank details above are offered as manual bank transfer.</p>
+                
                 <a class="button secondary" href="<?= e(url('admin/payment-gateways.php')) ?>"><?= icon('login') ?> Configure online gateways</a>
             </div>
         </div>
@@ -980,7 +980,7 @@ if (table_exists('company_shareholdings')) {
     <details class="mbw-card stc-card" data-section="invoice">
         <summary class="stc-head">
             <span class="mbw-chip is-square tone-teal"><?= icon('invoices') ?></span>
-            <span class="stc-title"><strong>Invoice Settings</strong><small><?= e($sectionDefs['invoice']['blurb']) ?></small></span>
+            <span class="stc-title"><strong>Invoice Settings</strong></span>
             <span class="mbw-pill <?= $sectionCompleteness['invoice'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['invoice'] ?>% Complete</span>
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
@@ -1003,7 +1003,7 @@ if (table_exists('company_shareholdings')) {
     <details class="mbw-card stc-card" data-section="notifications">
         <summary class="stc-head">
             <span class="mbw-chip is-square tone-red"><?= icon('messages') ?></span>
-            <span class="stc-title"><strong>Notification Access</strong><small><?= e($sectionDefs['notifications']['blurb']) ?></small></span>
+            <span class="stc-title"><strong>Notification Access</strong></span>
             <span class="mbw-pill <?= $sectionCompleteness['notifications'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['notifications'] ?>% Complete</span>
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
@@ -1041,7 +1041,7 @@ if (table_exists('company_shareholdings')) {
     <details class="mbw-card stc-card" data-section="sync">
         <summary class="stc-head">
             <span class="mbw-chip is-square tone-blue"><?= icon('reconcile') ?></span>
-            <span class="stc-title"><strong>Portal Sync &amp; Visibility Rules</strong><small><?= e($sectionDefs['sync']['blurb']) ?></small></span>
+            <span class="stc-title"><strong>Portal Sync &amp; Visibility Rules</strong></span>
             <span class="mbw-pill <?= $sectionCompleteness['sync'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['sync'] ?>% Complete</span>
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
@@ -1055,14 +1055,14 @@ if (table_exists('company_shareholdings')) {
             <label class="frm-toggle-wrap">Home Page
                 <span class="frm-toggle"><input type="checkbox" name="sync_home_page" value="1"<?= $checked('sync_home_page', '1') ?>><i></i></span>
             </label>
-            <p style="grid-column:1/-1;margin:0;color:var(--mbw-muted);font-size:12px">Branding, contact and payment details appear on the client portal and home page when their toggles are on.</p>
+            
         </div>
     </details>
 
     <details class="mbw-card stc-card" data-section="security">
         <summary class="stc-head">
             <span class="mbw-chip is-square tone-green"><?= icon('admin') ?></span>
-            <span class="stc-title"><strong>Security &amp; Access Controls</strong><small><?= e($sectionDefs['security']['blurb']) ?></small></span>
+            <span class="stc-title"><strong>Security &amp; Access Controls</strong></span>
             <span class="mbw-pill <?= $sectionCompleteness['security'] >= 90 ? 'tone-green' : 'tone-amber' ?>"><?= (int) $sectionCompleteness['security'] ?>% Complete</span>
             <span class="stc-caret"><?= icon('chevron') ?></span>
         </summary>
@@ -1070,7 +1070,7 @@ if (table_exists('company_shareholdings')) {
             <label class="frm-toggle-wrap">Require 2FA
                 <span class="frm-toggle"><input type="checkbox" name="security_2fa_required" value="1"<?= $checked('security_2fa_required') ?>><i></i></span>
             </label>
-            <p style="grid-column:1/-1;margin:0;color:var(--mbw-muted);font-size:12px">Applies to admin and staff sign-in. Every change is recorded in the audit trail.</p>
+            
         </div>
     </details>
 </form>
@@ -1086,7 +1086,7 @@ if (table_exists('company_shareholdings')) {
 <aside class="frm-rail">
     <section class="mbw-card frm-rail-card">
         <div class="frm-section-head"><span class="mbw-chip is-square tone-blue"><?= icon('portal') ?></span><h2>Apply Changes To</h2></div>
-        <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12px">Choose where these settings should be applied.</p>
+        
         <div style="display:grid;gap:8px">
             <label class="frm-toggle-wrap" style="display:flex;justify-content:space-between;border:1px solid var(--mbw-border);border-radius:10px;padding:9px 12px">Admin Portal
                 <span class="frm-toggle"><input type="checkbox" checked disabled><i></i></span>

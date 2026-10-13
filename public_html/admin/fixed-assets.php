@@ -2305,7 +2305,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
         <div class="fa-policy-callout">
             <strong>Class-wide control</strong>
-            <span>Individual assets cannot use a different model from their class.</span>
         </div>
     </section>
 
@@ -2343,7 +2342,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </select>
                         <?php if ($lockedToCost): ?>
                             <input type="hidden" name="measurement_model" value="cost">
-                            <small>Revaluation is not available for this class in this workflow.</small>
+                            
                         <?php endif; ?>
                     </label>
                     <label>Effective date
@@ -2353,7 +2352,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php if ($classKey === 'intangible'): ?>
                         <label class="fa-checkbox-field workspace-span-2">
                             <input type="checkbox" name="active_market_confirmed" value="1" <?= $activeMarket ? 'checked' : '' ?>>
-                            <span><strong>Active market confirmed</strong><small>Required before the revaluation model can be selected for intangible assets.</small></span>
+                            <span><strong>Active market confirmed</strong></span>
                         </label>
                     <?php endif; ?>
 
@@ -2373,10 +2372,10 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <section class="mbw-card fa-model-rules">
         <div class="mbw-card-head"><h2>Enforced rules</h2></div>
         <div class="fa-rule-grid">
-            <div><strong>Cost model</strong><span>Cost less accumulated depreciation and impairment. Revaluation batches are blocked.</span></div>
-            <div><strong>Revaluation model</strong><span>All eligible assets in the selected class enter the same class-wide batch.</span></div>
-            <div><strong>Historical protection</strong><span>Approved revaluations are preserved. A simple switch back to cost is blocked.</span></div>
-            <div><strong>Future depreciation</strong><span>Approved fair value, revised residual value and revised useful life apply prospectively.</span></div>
+            <div><strong>Cost model</strong></div>
+            <div><strong>Revaluation model</strong></div>
+            <div><strong>Historical protection</strong></div>
+            <div><strong>Future depreciation</strong></div>
         </div>
     </section>
     <?php // FIXED ASSET MEASUREMENT MODEL PAGE END ?>
@@ -2528,7 +2527,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?php if ($batchEditable): ?>
                                 <label class="workspace-span-2">Replace valuation report
                                     <input type="file" name="valuation_report" accept=".pdf,.jpg,.jpeg,.png">
-                                    <small>Optional. PDF, JPG or PNG, maximum 10 MB.</small>
+                                    
                                 </label>
                             <?php endif; ?>
                         </div>
@@ -2720,7 +2719,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <?php if ($revaluationEnabledClasses === []): ?>
                         <div class="fa-empty-policy workspace-span-2">
                             <strong>No class currently uses the Revaluation model.</strong>
-                            <span>Open Measurement Models and change the required complete asset class first.</span>
                             <a class="button secondary" href="<?= e(url('admin/fixed-assets.php?view=models')) ?>">Open Measurement Models</a>
                         </div>
                     <?php else: ?>
@@ -2755,7 +2753,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         </label>
                         <label>Valuation report
                             <input type="file" name="valuation_report" accept=".pdf,.jpg,.jpeg,.png" required>
-                            <small>PDF, JPG or PNG, maximum 10 MB.</small>
+                            
                         </label>
                         <label class="workspace-span-2">Reason
                             <textarea name="reason" rows="3" required></textarea>
@@ -2882,11 +2880,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <button type="submit"><?= icon('accounting') ?>Post period <?= e((string) $nextUnposted['period_no']) ?> (interest <?= e(site_currency_symbol()) ?><?= e(number_format((float) $nextUnposted['interest'], 2)) ?> + principal <?= e(site_currency_symbol()) ?><?= e(number_format((float) $nextUnposted['principal'], 2)) ?>)</button>
                 </form>
             <?php else: ?>
-                <p style="color:var(--mbw-muted);font-size:12.5px;margin:0 0 12px">All periods for this lease are posted.</p>
+                
             <?php endif; ?>
             <?php if ((string) $activeLease['status'] === 'active'): ?>
             <details class="feature-disclosure" style="margin-bottom:12px">
-                <summary><span><strong><?= icon('settings') ?>Modify lease (change payment / term / rate)</strong><small>IFRS 16: the liability is remeasured to the PV of the revised payments, the RoU asset adjusted by the same amount and the remaining schedule regenerated. Posted periods are untouched.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('settings') ?>Modify lease (change payment / term / rate)</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid" data-confirm="Remeasure this lease? Unposted schedule periods are replaced with the revised terms.">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="modify_lease">
@@ -3031,7 +3029,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if (user_can_do('accounting', 'edit')): ?>
     <section class="mbw-card" data-collapsible id="edit-asset">
         <div class="mbw-card-head"><h2>Edit asset details</h2>
-            <span class="frm-optional">Cost, code and class cannot be changed here. Cost changes by an addition.</span>
+            
         </div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
@@ -3101,7 +3099,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                    title="Charge = monthly charge × days/30.">
                         </label>
                         <div><button type="submit"><?= icon('accounting') ?>Post depreciation</button></div>
-                        <small class="muted">A part period is charged pro-rata at days/30.</small>
+                        
                     </form>
                 <?php endif; ?>
             </div>
@@ -3121,7 +3119,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         $purposeMeta = fa_mapping_purposes();
         ?>
         <details class="feature-disclosure" style="margin-top:16px">
-            <summary><span><strong><?= icon('accounting') ?>This asset posts to (ledgers)</strong><small>Every ledger this asset uses — acquisition, depreciation, impairment, disposal. Applies to this asset only.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+            <summary><span><strong><?= icon('accounting') ?>This asset posts to (ledgers)</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <input type="hidden" name="action" value="save_asset_ledgers">
@@ -3154,7 +3152,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php if (!in_array((string) $detailAsset['status'], ['disposed'], true)): ?>
         <div class="workspace-feature-stack" style="margin-top:16px">
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('reports') ?>Impairment (IAS 36)</strong><small>Recoverable = higher of fair value less costs of disposal and value in use.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('reports') ?>Impairment (IAS 36)</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="post_impairment"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Fair value less costs of disposal<input type="number" step="0.01" name="fvlcd" value="0.00"></label>
@@ -3163,9 +3161,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </form>
             </details>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('reconcile') ?>Reverse impairment (IAS 36.117)</strong><small>Reversal is capped at the carrying amount that would have applied without the impairment.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('reconcile') ?>Reverse impairment (IAS 36.117)</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <?php if ((float) $detailAsset['accumulated_impairment'] <= 0): ?>
-                    <p style="color:var(--mbw-muted);font-size:12.5px;margin:0 0 10px">No accumulated impairment on this asset — nothing to reverse yet.</p>
+                    
                 <?php endif; ?>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="reverse_impairment"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
@@ -3175,7 +3173,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </form>
             </details>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('tag') ?>Classify held for sale (IFRS 5)</strong><small>Measure at lower of carrying and fair value less costs to sell; depreciation stops.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('tag') ?>Classify held for sale (IFRS 5)</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="classify_held_for_sale"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Fair value<input type="number" step="0.01" name="fair_value" value="0.00"></label>
@@ -3186,7 +3184,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <div class="feature-disclosure fa-revaluation-callout">
                 <div>
                     <strong><?= icon('wallet') ?>Revaluation batch</strong>
-                    <small>Open the class-wide IAS 16 / IAS 38 workflow. Direct single-asset posting is disabled.</small>
+                    
                 </div>
                 <a class="button secondary"
                    href="<?= e(url('admin/fixed-assets.php?view=revaluation&asset_id=' . (int) $detailAsset['id'])) ?>">
@@ -3195,7 +3193,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
             <?php if ((string) $detailAsset['asset_class'] === 'cwip'): ?>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('wallet') ?>Capitalize borrowing cost (IAS 23)</strong><small>Interest = borrowing × annual rate × months ÷ 12, added to CWIP cost. Stops when the asset is ready for use.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('wallet') ?>Capitalize borrowing cost (IAS 23)</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="capitalize_borrowing_cost"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Borrowing / expenditure amount<input type="number" step="0.01" name="borrowing_amount" value="<?= e(number_format((float) $detailAsset['cost'], 2, '.', '')) ?>"></label>
@@ -3211,7 +3209,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </form>
             </details>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('upload') ?>Complete &amp; transfer to fixed asset</strong><small>Posts Dr PPE / Cr Capital WIP, reclassifies the asset and starts depreciation.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('upload') ?>Complete &amp; transfer to fixed asset</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="capitalize_cwip"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Target class<select name="new_asset_class">
@@ -3227,7 +3225,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </details>
             <?php endif; ?>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('download') ?>Dispose / derecognize</strong><small>Reverse cost + accumulated depreciation, recognise proceeds and gain/loss.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('download') ?>Dispose / derecognize</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid" data-confirm="Dispose of this asset? This derecognizes it and posts the disposal voucher.">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="dispose_asset"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Sale proceeds<input type="number" step="0.01" name="proceeds" value="0.00"></label>
@@ -3250,7 +3248,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </form>
             </details>
             <details class="feature-disclosure">
-                <summary><span><strong><?= icon('upload') ?>Add cost (subsequent expenditure)</strong><small>Capitalise additional cost: Dr asset cost / Cr supplier, cash or clearing.</small></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
+                <summary><span><strong><?= icon('upload') ?>Add cost (subsequent expenditure)</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
                 <form method="post" class="workspace-form-grid">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="add_asset_cost"><input type="hidden" name="asset_id" value="<?= e((int) $detailAsset['id']) ?>">
                     <label>Additional cost<input type="number" step="0.01" name="amount" value="0.00" required></label>
@@ -3333,7 +3331,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 <?php else: ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Register a fixed asset</h2><span class="frm-optional">These ledgers apply to this asset only. Registration creates a draft; post it below.</span></div>
+        <div class="mbw-card-head"><h2>Register a fixed asset</h2></div>
         <?php
         $regDefCost = fa_resolve_mapping($companyId, 'ppe_cost');
         $regDefFunding = fa_resolve_mapping($companyId, 'acquisition_clearing');
@@ -3380,7 +3378,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Voucher posting date<input type="date" name="posting_date" value="<?= e(date('Y-m-d')) ?>"></label>
             <label>Supplier bill / reference<input type="text" name="purchase_ref" maxlength="120" placeholder="supplier invoice no"></label>
             <label>VAT on purchase<input type="number" step="0.01" min="0" name="vat_amount" value="0.00" data-fa-vat>
-                <span class="frm-optional">Recoverable — debited to VAT, never added to the asset cost</span>
+                
             </label>
             <label>VAT on purchase ledger (debit)
                 <?= fa_ledger_select('vat_ledger_id', $ledgers, (int) ($regDefVat['id'] ?? 0)) ?>
@@ -3465,9 +3463,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     }
     ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Acquisition entries</h2><span class="frm-optional">A draft is not in the books until it is posted.</span></div>
+        <div class="mbw-card-head"><h2>Acquisition entries</h2></div>
         <?php if ($acqRows === []): ?>
-            <p class="frm-optional" style="padding:12px">No acquisition entries yet. Register an asset above and its entry appears here.</p>
+            
         <?php else: ?>
         <div class="rc-table-scroll"><table class="rc-table">
             <thead><tr><th>Voucher</th><th>Asset</th><th>Dates</th><th>Entry</th><th class="align-right">Amount</th><th>Status</th><th></th></tr></thead>
@@ -3535,7 +3533,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <span class="frm-optional"><?= e($depFrom) ?> to <?= e($depTo) ?> — each period charged into its own period, up to <?= e(date('Y-m-d')) ?>; periods that have not ended are not charged</span>
         </div>
         <?php if ($depPlans === []): ?>
-            <p class="frm-optional" style="padding:12px">No depreciable assets for this company yet.</p>
+            
         <?php else: ?>
         <div class="rc-table-scroll"><table class="rc-table">
             <thead><tr>
@@ -3597,7 +3595,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <button type="submit"><?= icon('tasks') ?>Post this schedule (<?= (int) $depTotals['months'] ?> months, <?= e(number_format((float) $depTotals['to_post'], 2)) ?>)</button>
             </form>
         <?php else: ?>
-            <p class="frm-optional" style="padding:12px">Every month in this window is already charged — nothing left to post.</p>
+            
         <?php endif; ?>
         <p class="frm-optional" style="padding:0 12px 12px">
             Only periods that have <strong>ended</strong> are charged &mdash; depreciation is a charge for time that has passed, and a voucher
@@ -3857,10 +3855,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </tfoot>
             <?php endif; ?>
         </table></div>
-        <p class="frm-optional" style="padding:8px 12px">
-            Carrying amount = cost, plus revaluation, less accumulated depreciation and impairment, at both opening and closing. The four carrying columns do not foot on their own; the charge for the period is in the two blocks to the left.
-            Only posted depreciation is counted; an unposted schedule row is not a charge.
-        </p>
+        
     </section>
 <?php endif; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
