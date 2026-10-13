@@ -424,21 +424,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <div class="alert alert-info">Accounting entries dated on or before <?= e($lockedThrough) ?> are locked for this fiscal year.</div>
 <?php endif; ?>
 
-<section class="mbw-card" data-collapsible>
-    <div class="mbw-card-head">
-        <h2><?= approvals_enabled() && !user_can('approve') ? 'Submit a voucher' : 'Post a voucher' ?></h2>
-        
-    </div>
-    <div class="mbw-qa-grid" id="post-voucher">
-        <?php foreach (voucher_entry_type_catalog() as $qaTypeKey => $qaType): ?>
-            <a class="mbw-qa" href="<?= e(url(voucher_type_url($qaTypeKey))) ?>">
-                <span class="mbw-chip is-square tone-<?= e((string) $qaType['tone']) ?>"><?= icon((string) $qaType['icon']) ?></span>
-                <div><strong><?= e((string) $qaType['label']) ?></strong></div>
-            </a>
-        <?php endforeach; ?>
-    </div>
-</section>
-
 <?php if ($shareholdings !== []): ?>
 <section class="mbw-card" data-collapsible>
     <div class="mbw-card-head"><h2>Shareholding and consolidation rules</h2></div>
@@ -463,9 +448,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 </section>
 <?php endif; ?>
 
-<section class="mbw-card" data-collapsible>
-    <div class="mbw-card-head"><h2>Posted vouchers</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/ledgers.php')) ?>">Ledgers</a> <a class="mbw-view-all" href="<?= e(url('admin/day-book.php')) ?>">Day Book</a> <a class="mbw-view-all" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a></div></div>
-    <form method="get" action="<?= e(url('admin/accounting.php')) ?>" class="mbw-filter-bar">
+<section class="mbw-card" aria-label="Voucher register">
+    <form method="get" action="<?= e(url('admin/accounting.php')) ?>" class="voucher-register-filters" style="display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
         <?php if (!empty($_GET['fiscal_year_id'])): ?><input type="hidden" name="fiscal_year_id" value="<?= (int) $_GET['fiscal_year_id'] ?>"><?php endif; ?>
         <input type="date" name="from" value="<?= e($vDateOk($vFrom) ? $vFrom : '') ?>" class="field-compact" aria-label="From date">
         <input type="date" name="to" value="<?= e($vDateOk($vTo) ? $vTo : '') ?>" class="field-compact" aria-label="To date">
@@ -481,9 +465,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <option value="draft" <?= $vStatus === 'draft' ? 'selected' : '' ?>>Draft</option>
             <option value="cancelled" <?= $vStatus === 'cancelled' ? 'selected' : '' ?>>Cancelled</option>
         </select>
-        <input type="search" name="q" value="<?= e($vSearch) ?>" class="field-compact" style="min-width:230px" placeholder="Search voucher no, reference, narration, party">
+        <input type="search" name="q" value="<?= e($vSearch) ?>" class="field-compact voucher-register-search" aria-label="Search vouchers" placeholder="Search vouchers…">
         <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
         <?php if ($vSearch !== '' || $vType !== '' || $vStatus !== '' || $vDateOk($vFrom) || $vDateOk($vTo)): ?><a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>">Clear</a><?php endif; ?>
+        <div class="actions" style="margin-left:auto">
+            <a class="button secondary" href="<?= e(url('admin/ledgers.php')) ?>">Ledgers</a>
+            <a class="button secondary" href="<?= e(url('admin/day-book.php')) ?>">Day Book</a>
+            <a class="button" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a>
+        </div>
     </form>
     <div style="overflow-x:auto">
     <table>

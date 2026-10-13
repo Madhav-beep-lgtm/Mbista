@@ -190,6 +190,13 @@ hr { border: 0; border-top: 1px solid var(--color-border); }
 /* Shared controls, surfaces, tables, feedback and application patterns. */
 
 /* Controls */
+.accounting-module-page .voucher-register-filters > input:not([type="hidden"]),
+.accounting-module-page .voucher-register-filters > select,
+.accounting-module-page .voucher-register-filters > .ss-wrap { flex: 0 1 155px; width: 155px; min-width: 0; }
+.accounting-module-page .voucher-register-filters > .voucher-register-search { flex-basis: 210px; width: 210px; }
+.accounting-module-page .voucher-register-filters input:not([type="hidden"]),
+.accounting-module-page .voucher-register-filters select,
+.accounting-module-page .voucher-register-filters .button { min-height: 36px; height: 36px; padding: 6px 10px; font-size: 13px; }
 .button, .btn, button.button, input[type="submit"], input[type="button"] {
   display: inline-flex; min-height: var(--control-height); padding: 0 15px;
   align-items: center; justify-content: center; gap: var(--space-2);
