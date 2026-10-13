@@ -408,7 +408,9 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .auth2-left { display: flex; padding: clamp(36px, 6vw, 84px); flex-direction: column; justify-content: center; background: var(--color-primary-soft); }
 .auth2-right { display: grid; padding: clamp(28px, 5vw, 72px); place-items: center; background: var(--color-surface); }
 .auth2-wordmark, .auth2-feature, .auth2-encrypt, .auth2-row, .auth2-remember, .auth2-head { display: flex; align-items: center; gap: var(--space-3); }
-.auth2-wordmark-text, .auth2-copy, .auth2-features, .auth2-field { display: grid; gap: var(--space-2); }
+.auth2-wordmark-text, .auth2-copy, .auth2-field { display: grid; gap: var(--space-2); }
+.auth2-features { display: grid; margin-top: var(--space-5); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.auth2-feature { min-height: 52px; padding: 5px 0; }
 .auth2-mark, .auth2-feature-icon, .auth2-encrypt-icon { display: grid; width: 42px; height: 42px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-control); background: var(--color-primary); color: #fff; }
 .auth2-gold { color: var(--color-primary); }
 .auth2-rule { width: 48px; height: 2px; margin-block: var(--space-4); background: var(--color-primary); }

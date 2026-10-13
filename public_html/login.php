@@ -86,33 +86,24 @@ include __DIR__ . '/../app/views/partials/header.php';
                 <span>Stronger Financial Futures.</span>
             </h1>
             <div class="auth2-rule"></div>
-            <p>Your trusted partner in assurance, advisory, taxation, and compliance. Secure access to your financial world&mdash;anytime, anywhere.</p>
         </div>
         <div class="auth2-features">
             <div class="auth2-feature">
                 <span class="auth2-feature-icon"><?= icon('admin') ?></span>
                 <strong>Secure Access</strong>
-                <small>Bank-grade security to protect your data.</small>
             </div>
             <div class="auth2-feature">
                 <span class="auth2-feature-icon"><?= icon('award') ?></span>
                 <strong>Trusted by Clients</strong>
-                <small>Reliable. Confidential. Professional.</small>
             </div>
             <div class="auth2-feature">
                 <span class="auth2-feature-icon"><?= icon('reports') ?></span>
                 <strong>Expert Advisory</strong>
-                <small>Insights that drive better decisions.</small>
             </div>
             <div class="auth2-feature">
                 <span class="auth2-feature-icon"><?= icon('attendance') ?></span>
                 <strong>Always Available</strong>
-                <small>Access your documents and reports 24/7.</small>
             </div>
-        </div>
-        <div class="auth2-encrypt">
-            <span class="auth2-encrypt-icon"><?= icon('lock') ?></span>
-            Your data is protected with enterprise-grade encryption and strict confidentiality.
         </div>
     </div>
 
@@ -120,19 +111,18 @@ include __DIR__ . '/../app/views/partials/header.php';
         <div class="auth2-card">
             <span class="auth2-badge"><?= icon('admin') ?></span>
             <h2>Welcome back</h2>
-            <p class="auth2-sub">Sign in to continue to your secure portal.</p>
             <form method="post" class="auth2-form">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                 <label>Email address
                     <span class="auth2-input">
                         <?= icon('profile') ?>
-                        <input type="email" name="email" required autocomplete="email" placeholder="you@example.com">
+                        <input type="email" name="email" required autocomplete="email">
                     </span>
                 </label>
                 <label>Password
                     <span class="auth2-input">
                         <?= icon('lock') ?>
-                        <input type="password" name="password" id="auth2Password" required autocomplete="current-password" placeholder="Your password">
+                        <input type="password" name="password" id="auth2Password" required autocomplete="current-password">
                         <button type="button" class="auth2-eye" id="auth2Eye" aria-label="Show password" title="Show password"><?= icon('eye') ?></button>
                     </span>
                 </label>
@@ -142,7 +132,6 @@ include __DIR__ . '/../app/views/partials/header.php';
                 </div>
                 <button type="submit" class="auth2-submit"><?= icon('login') ?>Sign in</button>
             </form>
-            <p class="auth2-note">Admin, staff, and client accounts all sign in here. You are taken to the right workspace automatically.</p>
         </div>
     </div>
 
@@ -150,7 +139,6 @@ include __DIR__ . '/../app/views/partials/header.php';
         <span><?= brand_logo('light', 'mbw-logo mbw-logo-auth') ?></span>
         <span>&copy; <?= e(date('Y')) ?> <?= e(setting('brand_name', 'M. Bista & Associates')) ?>. All rights reserved. &nbsp;<?= powered_by_mbworld() ?></span>
         <span><?= icon('headset') ?>Need help? Contact <a href="mailto:<?= e($authSupportEmail) ?>"><?= e($authSupportEmail) ?></a></span>
-        <span><?= icon('lock') ?>This is a secure login page.</span>
     </div>
 </section>
 <script>
