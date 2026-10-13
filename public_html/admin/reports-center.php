@@ -119,7 +119,7 @@ if ($fyClampStart !== '' && $fyClampEnd !== '') {
 $voucherType = '';
 $ledgerFilterId = $reportId === 'ledger-report' ? (int) ($_GET['ledger_id'] ?? 0) : 0;
 $groupFilterId = $reportId === 'group-report' ? (int) ($_GET['group_id'] ?? 0) : 0;
-$itemFilterId = (int) ($_GET['item_id'] ?? 0);
+$itemFilterId = $reportId === 'stock-ledger' ? (int) ($_GET['item_id'] ?? 0) : 0;
 $businessType = $companyBusinessType;
 $subsidiaries = child_companies_for_company($companyId);
 $scopeCompanyId = $companyId;
@@ -309,6 +309,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 // Print / PDF view (standalone, browser print dialog handles PDF).
 // ---------------------------------------------------------------------------
 $hasGroups = rc_has_group_columns($report);
+$hasHierarchy = (bool) array_filter($report['rows'] ?? [], static fn (array $row): bool => isset($row['meta']['level']));
 
 $reportMeta = [
     'report_label' => $reportLabel,
@@ -424,6 +425,13 @@ if (table_exists('inventory_items')) {
 }
 
 $bodyClass = 'admin-layout accounting-module-page reports-center-page';
+$showItemFilter = $reportId === 'stock-ledger' && $allItems !== [] && ($companyBusinessProfile['show_inventory'] ?? false);
+// Balance the visible report-specific controls across two desktop rows.
+$filterControlCount = 2 + ($supportsDimensions ? 3 : 0)
+    + (in_array($reportId, ['ledger-report', 'group-report', 'salary-sheet'], true) ? 1 : 0)
+    + ($showItemFilter ? 1 : 0) + ($compareEnabled ? 2 : 0)
+    + 3 + ($reportId === 'trial-balance' ? 1 : 0) + ($hasHierarchy ? 1 : 0);
+$filterColumns = (int) ceil($filterControlCount / 2);
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="rc2-toolbar mbw-card">
@@ -432,7 +440,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <span class="sr-only">Report view</span>
         <select onchange="if (this.value) { window.location = this.value; }" aria-label="Choose report">
             <?php foreach ($allowedReportRegistry as $key => [$label, $description, $iconName]): ?>
-                <option value="<?= e(rc_url(['report' => $key])) ?>" <?= $key === $reportId ? 'selected' : '' ?>><?= e($label) ?></option>
+                <option value="<?= e(rc_url(['report' => $key, 'ledger_id' => null, 'group_id' => null, 'item_id' => null, 'payroll_run' => null, 'hide_zero' => null])) ?>" <?= $key === $reportId ? 'selected' : '' ?>><?= e($label) ?></option>
             <?php endforeach; ?>
         </select>
     </label>
@@ -444,7 +452,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <form method="get" action="<?= e(url('admin/reports-center.php')) ?>" class="rc-filter-card rc2-filters" id="rc2FilterForm" data-fy-start="<?= e((string) ($selectedFiscalYear['start_date'] ?? '')) ?>" data-fy-end="<?= e((string) ($selectedFiscalYear['end_date'] ?? '')) ?>">
     <input type="hidden" name="report" value="<?= e($reportId) ?>">
     <?php if ($compareEnabled): ?><input type="hidden" name="compare" value="1"><?php endif; ?>
-    <div class="rc2-filters-body">
+    <div class="rc2-filters-body" style="--rc-filter-columns:<?= $filterColumns ?>">
     <div class="rc-filter-grid">
         <label>From Date<input type="date" name="from" value="<?= e($fromDate) ?>"></label>
         <label>To Date<input type="date" name="to" value="<?= e($toDate) ?>"></label>
@@ -503,7 +511,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php if ($reportId === 'ledger-report'): ?>
         <label>Ledger
             <select name="ledger_id">
-                <option value="0">All Ledgers</option>
+                <option value="0">Default cash ledger</option>
                 <?php foreach ($allLedgers as $ledger): ?>
                     <option value="<?= e((int) $ledger['id']) ?>" <?= $ledgerFilterId === (int) $ledger['id'] ? 'selected' : '' ?>><?= e($ledger['code'] . ' - ' . $ledger['name']) ?></option>
                 <?php endforeach; ?>
@@ -520,7 +528,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </select>
         </label>
         <?php endif; ?>
-        <?php if ($reportId === 'stock-ledger' && $allItems !== []): ?>
+        <?php if ($showItemFilter): ?>
             <label>Inventory Item
                 <select name="item_id">
                     <option value="0">First item by SKU (default)</option>
@@ -542,6 +550,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php if ($reportId === 'trial-balance'): ?>
             <label class="rc2-zero-toggle"><input type="checkbox" name="hide_zero" value="1" <?= ($_GET['hide_zero'] ?? '') === '1' ? 'checked' : '' ?>>Hide zero balances</label>
         <?php endif; ?>
+        <?php if ($hasHierarchy): ?>
         <label class="rc2-view-select">Display Level
             <select id="rc2Level" aria-label="Display level">
                 <option value="master">Summary — Masters</option>
@@ -550,6 +559,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <option value="compact">Compact Detail</option>
             </select>
         </label>
+        <?php endif; ?>
         <div class="rc2-export" data-rc2-export>
             <button type="button" class="rc2-export-btn" aria-haspopup="true" aria-expanded="false"><?= icon('download') ?>Export<span class="rc2-caret"><?= icon('chevron') ?></span></button>
             <div class="rc2-export-menu" role="menu">
