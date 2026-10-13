@@ -717,13 +717,13 @@ function rc_generate(string $reportId, int $scopeCompanyId, string $from, string
                     ? 'Unclassified — these groups belong to no head and are excluded from the P&L'
                     : (string) (LEDGER_MASTERS[$masterKey]['label'] ?? ucwords(str_replace('_', ' ', $masterKey)));
                 $sum = $section['sum'] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-                $rows[] = rc_row(array_merge(['', $mi . '. ' . strtoupper($masterLabel)], array_map('rc_fmt', $sum)), 'bold', ['level' => 0, 'node' => $node, 'label_cell' => 1]);
+                $rows[] = rc_row(array_merge([(string) $mi, strtoupper($masterLabel)], array_map('rc_fmt', $sum)), 'bold', ['level' => 0, 'node' => $node, 'label_cell' => 1]);
                 $gi = 0;
                 foreach ($section['groups'] as $groupName => $groupData) {
                     $gi++;
                     $gnode = $node . '.' . $gi;
                     $gsum = $groupData['sum'] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-                    $rows[] = rc_row(array_merge(['', $mi . '.' . $gi . ' ' . $groupName], array_map('rc_fmt', $gsum)), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node, 'label_cell' => 1]);
+                    $rows[] = rc_row(array_merge([$mi . '.' . $gi, $groupName], array_map('rc_fmt', $gsum)), 'bold', ['level' => 1, 'node' => $gnode, 'parent' => $node, 'label_cell' => 1]);
                     foreach ($groupData['ledgers'] as $ledgerLine) {
                         $rows[] = rc_row(array_merge([(string) $ledgerLine['b']['code'], (string) $ledgerLine['b']['name']], array_map('rc_fmt', $ledgerLine['vals'])), '', ['level' => 2, 'parent' => $gnode, 'ledger_id' => (int) $ledgerLine['b']['id'], 'label_cell' => 1]);
                     }
