@@ -476,6 +476,11 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
 
     $useFyReset = $fyStart !== null && $fyStart !== '';
     $retainedBroughtForward = 0.0; // net CREDIT = cumulative prior-years profit
+    // Direct openings are entered ONE SIDE AT A TIME, so unlike a voucher they
+    // do not balance among themselves. Their net is the figure every ledger
+    // account is short of — reported below as its own line rather than parked
+    // in a real account somebody could post to.
+    $directOpeningNet = 0.0; // debit-positive
     foreach ($rows as &$row) {
         $opDr = (float) $row['op_dr'];
         $opCr = (float) $row['op_cr'];
@@ -485,8 +490,10 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
         if ($directOpening > 0.004) {
             if ((string) ($row['opening_side'] ?? 'debit') === 'credit') {
                 $opCr += $directOpening;
+                $directOpeningNet -= $directOpening;
             } else {
                 $opDr += $directOpening;
+                $directOpeningNet += $directOpening;
             }
         }
         if ($useFyReset) {
@@ -498,10 +505,15 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
                 $retainedBroughtForward += (float) $row['pre_fy_cr'] - (float) $row['pre_fy_dr'];
                 $opDr -= (float) $row['pre_fy_dr'];
                 $opCr -= (float) $row['pre_fy_cr'];
-                $row['op_dr'] = $opDr;
-                $row['op_cr'] = $opCr;
             }
         }
+        // Written back for EVERY row, not just the temporary ones. op_dr and
+        // op_cr are the raw opening columns reports read; leaving them as the
+        // SQL returned them while opening_net carried the direct opening left
+        // the two disagreeing, and a trial balance summing op_dr/op_cr came up
+        // short by exactly the openings entered on the ledgers themselves.
+        $row['op_dr'] = $opDr;
+        $row['op_cr'] = $opCr;
         $opening = $opDr - $opCr;
         $closing = $opening + (float) $row['tx_dr'] - (float) $row['tx_cr'];
         $row['opening_net'] = $opening;
@@ -530,6 +542,34 @@ function rc_ledger_balances(int $scopeCompanyId, string $from, string $to, strin
             'opening_net' => $opening, 'closing_net' => $opening,
             'op_side_dr' => max(0.0, $opening), 'op_side_cr' => max(0.0, -$opening),
             'cl_side_dr' => max(0.0, $opening), 'cl_side_cr' => max(0.0, -$opening),
+        ];
+    }
+
+    if (abs($directOpeningNet) >= 0.005 && $groupId <= 0 && $ledgerId <= 0) {
+        // The counterpart of an opening balance is not an account. It is the
+        // rest of the opening balances.
+        //
+        // This used to be a real equity ledger, "Opening Balance Adjustments",
+        // credited by a contra leg on every opening journal. That made a plug
+        // figure look like an account: it held a balance on the balance sheet,
+        // it appeared in the chart, and anybody could post to it by hand.
+        //
+        // Entered one side at a time, the openings no longer balance among
+        // themselves, and the amount they are short by IS the difference. It
+        // is computed, carries no transactions, and cannot be posted to. It
+        // sits in opening and closing alike, because nothing happened to it
+        // during the period — the whole point is that it is not an event.
+        $difference = -$directOpeningNet; // debit-positive convention
+        $rows[] = [
+            'id' => 0, 'code' => '', 'name' => 'Difference in Opening Balances',
+            'type' => 'equity', 'group_name' => 'Difference in Opening Balances',
+            'master_key' => 'equity', 'is_cash_or_bank' => 0,
+            'op_dr' => max(0.0, $difference), 'op_cr' => max(0.0, -$difference),
+            'tx_dr' => 0.0, 'tx_cr' => 0.0,
+            'pre_fy_dr' => 0.0, 'pre_fy_cr' => 0.0,
+            'opening_net' => $difference, 'closing_net' => $difference,
+            'op_side_dr' => max(0.0, $difference), 'op_side_cr' => max(0.0, -$difference),
+            'cl_side_dr' => max(0.0, $difference), 'cl_side_cr' => max(0.0, -$difference),
         ];
     }
 

@@ -515,6 +515,70 @@ $obMissing = array_values(array_diff($obWanted, accounting_opening_source_types(
 ok($obMissing === [], 'Every opening writer is named in accounting_opening_source_types()'
     . ($obMissing === [] ? '' : ' — missing ' . implode(', ', $obMissing)));
 
+// ---------------------------------------------------------------------------
+// The counterpart of an opening balance is not an account.
+// ---------------------------------------------------------------------------
+// Openings are entered one side at a time, so unlike a voucher they do not
+// balance among themselves. What they are short by is a DIFFERENCE, and it is
+// computed and reported as its own line.
+//
+// It used to be a real equity ledger, "Opening Balance Adjustments", credited
+// by a contra leg on every opening journal. That made a plug figure look like
+// an account: it carried a balance on the balance sheet, it sat in the chart,
+// and anybody could post to it by hand.
+echo "\n8. A single-sided opening is balanced by a computed difference\n";
+
+$diffLedger = $mkLedger('PCF-1300', 'Single Sided Debtor', 'asset', 'assets');
+db()->prepare("UPDATE ledgers SET opening_balance = 65000.00, opening_side = 'debit' WHERE id = ?")
+    ->execute([$diffLedger]);
+
+$diffRows = $balancesFor($FY1_START, $FY1_END, $FY1_START);
+ok(near((float) ($diffRows[$diffLedger]['op_dr'] ?? 0), 65000.00),
+    'The ledger opens at 65,000 Dr, from the ledger itself and not from a voucher');
+ok(round((float) ($diffRows[$diffLedger]['tx_dr'] ?? 0), 2) === 0.00,
+    '  ...and nothing of it appears as movement in the period');
+
+$diffRow = null;
+foreach (rc_ledger_balances($cid, $FY1_START, $FY1_END, '', 0, 0, [], $FY1_START) as $candidate) {
+    if ((string) ($candidate['name'] ?? '') === 'Difference in Opening Balances') { $diffRow = $candidate; break; }
+}
+ok($diffRow !== null, 'A "Difference in Opening Balances" line is reported');
+ok($diffRow !== null && near((float) $diffRow['op_cr'], 65000.00),
+    '  ...for 65,000 Cr — exactly what the one-sided opening is short by, got '
+        . money((float) ($diffRow['op_cr'] ?? 0)));
+ok($diffRow !== null && near((float) $diffRow['tx_dr'], 0.0) && near((float) $diffRow['tx_cr'], 0.0),
+    '  ...carrying no transactions, because it is not something that happened');
+
+// The figure that matters: both columns foot.
+$sumOpDr = $sumOpCr = $sumClDr = $sumClCr = 0.0;
+foreach (rc_ledger_balances($cid, $FY1_START, $FY1_END, '', 0, 0, [], $FY1_START) as $tbRow) {
+    $sumOpDr += (float) $tbRow['op_dr'];
+    $sumOpCr += (float) $tbRow['op_cr'];
+    $sumClDr += (float) $tbRow['cl_side_dr'];
+    $sumClCr += (float) $tbRow['cl_side_cr'];
+}
+ok(near($sumOpDr, $sumOpCr),
+    'The OPENING column foots: ' . money($sumOpDr) . ' Dr = ' . money($sumOpCr) . ' Cr');
+ok(near($sumClDr, $sumClCr),
+    'The CLOSING column foots: ' . money($sumClDr) . ' Dr = ' . money($sumClCr) . ' Cr');
+
+// op_dr/op_cr are the raw columns reports read. They used to be written back
+// only for revenue and expense rows, so a permanent account's direct opening
+// reached opening_net and never reached these — and a trial balance summing
+// them came up short by exactly the openings typed on the ledgers.
+ok(near((float) $diffRows[$diffLedger]['op_dr'] - (float) $diffRows[$diffLedger]['op_cr'],
+        (float) $diffRows[$diffLedger]['opening_net']),
+    'op_dr less op_cr agrees with opening_net on a permanent account');
+
+// No opening, no line. The difference is a real figure or it is absent; it is
+// never a nought printed to look thorough.
+db()->prepare("UPDATE ledgers SET opening_balance = 0, opening_side = NULL WHERE id = ?")->execute([$diffLedger]);
+$diffGone = false;
+foreach (rc_ledger_balances($cid, $FY1_START, $FY1_END, '', 0, 0, [], $FY1_START) as $candidate) {
+    if ((string) ($candidate['name'] ?? '') === 'Difference in Opening Balances') { $diffGone = true; }
+}
+ok(!$diffGone, 'With the opening cleared the difference line is gone, not shown as nought');
+
 pcf_cleanup();
 echo "
 " . str_repeat('=', 62) . "

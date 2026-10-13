@@ -61,14 +61,29 @@ function coaimp_csv(array $rows): string
 }
 
 /** Net debit-positive movement on a ledger, straight from the postings. */
+/**
+ * The ledger's net position, debit-positive — however it is held.
+ *
+ * An opening balance is no longer a voucher. It is a single-sided figure on
+ * the ledger itself, so reading only voucher_entries reports an imported
+ * opening as nought and says the import did nothing.
+ */
 function coaimp_ledger_net(int $companyId, int $ledgerId): float
 {
     $stmt = db()->prepare("SELECT COALESCE(SUM(CASE WHEN ve.entry_type = 'debit' THEN ve.amount ELSE -ve.amount END), 0)
         FROM voucher_entries ve INNER JOIN vouchers v ON v.id = ve.voucher_id
         WHERE v.company_id = :cid AND ve.ledger_id = :lid");
     $stmt->execute(['cid' => $companyId, 'lid' => $ledgerId]);
+    $posted = (float) $stmt->fetchColumn();
 
-    return round((float) $stmt->fetchColumn(), 2);
+    $openStmt = db()->prepare('SELECT opening_balance, opening_side FROM ledgers
+        WHERE id = :lid AND company_id = :cid LIMIT 1');
+    $openStmt->execute(['lid' => $ledgerId, 'cid' => $companyId]);
+    $opening = $openStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $amount = (float) ($opening['opening_balance'] ?? 0);
+    $posted += (string) ($opening['opening_side'] ?? 'debit') === 'credit' ? -$amount : $amount;
+
+    return round($posted, 2);
 }
 
 function coaimp_ledger_id(int $companyId, string $name): int

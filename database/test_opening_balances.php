@@ -325,12 +325,15 @@ ok(substr_count($obSrc, 'if ($canAdjustNow)') >= 2 && strpos($obSrc, 'if ($canAd
     'UI: both the Reason-column header and the per-line Adjust cell gate on $canAdjustNow, not $isLocked');
 
 echo "\nAn opening balance typed on the ledger reaches the batch\n";
-// A user creating a ledger types its opening balance right there.
-// post_ledger_opening_balance() dates that voucher ON the fiscal-year start —
-// the only date belonging to no earlier period that still sits inside this
-// year. But the batch is built from what is brought FORWARD, struck strictly
-// BEFORE the window opens, so the figure landed in the period movement and
-// never appeared on the screen meant to show it. It was simply lost.
+// A user creating a ledger types its opening balance right there, and it is
+// held ON THE LEDGER — one side only, no voucher.
+//
+// It used to be posted as a journal dated on the fiscal-year start, with a
+// contra to an "Opening Balance Adjustments" equity account. Two things were
+// wrong with that: nothing happened on day one, so a dated transaction was a
+// fiction; and the counterpart of an opening balance is not an account, it is
+// the rest of the opening balances. The imbalance is now computed and reported
+// as its own line instead of being parked somewhere postable.
 // Contiguous with the fixture's last year, and its OWN variable — $fy3 is
 // already the 2026/27 year the tests above rely on.
 $fyDirect = create_fiscal_year($cid, 'OB Direct 2027/28', '2027-07-16', '2028-07-15', false);
@@ -342,10 +345,15 @@ $lDirect = $mkLedger($gCash, 'OB-DIR', 'Direct Opening Cash', 'asset');
 $directErr = post_ledger_opening_balance($cid, $lDirect, 250000.00, 'debit', $userId);
 ok($directErr === null, 'An opening balance is posted from the ledger itself' . ($directErr ? " — $directErr" : ''));
 
-$directVoucherDate = (string) db()->query("SELECT voucher_date FROM vouchers
-    WHERE company_id = $cid AND source_type = 'ledger_opening' AND source_id = $lDirect")->fetchColumn();
-ok($directVoucherDate === '2027-07-16',
-    'Its voucher sits ON the fiscal-year start — which is why it used to fall outside the brought-forward figure');
+// It is held on the ledger, on one side, and posts nothing at all.
+$directStored = db()->query("SELECT opening_balance, opening_side FROM ledgers WHERE id = $lDirect")->fetch(PDO::FETCH_ASSOC);
+ok(near((float) ($directStored['opening_balance'] ?? 0), 250000.00)
+    && (string) ($directStored['opening_side'] ?? '') === 'debit',
+    'It is held on the ledger itself as 250,000 Dr, one side only');
+$directVouchers = (int) db()->query("SELECT COUNT(*) FROM vouchers
+    WHERE company_id = $cid AND source_type = 'ledger_opening'")->fetchColumn();
+ok($directVouchers === 0,
+    '  ...and no journal is posted for it — nothing happened on day one, so nothing is dated there');
 
 $directRows = ob_computed_opening_rows($cid, (int) $fyDirect['id']);
 $directRow = null;
