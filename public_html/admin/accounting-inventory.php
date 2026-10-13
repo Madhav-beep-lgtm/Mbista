@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../app/jewellery_stock.php';
 // show the SAME table rather than each keeping a copy of the list.
 require_once __DIR__ . '/../../app/inventory_mapping.php';
 require_once __DIR__ . '/../../app/inventory_coding.php';
+require_once __DIR__ . '/../../app/inventory_stock_types.php';
 require_once __DIR__ . '/../../app/opening_stock_import.php';
 // An inventory item can also BE a recipe ingredient. Pure definitions — the
 // kitchen list is only touched for a company that has hospitality switched on
@@ -209,9 +210,19 @@ function inventory_post_production_voucher(int $companyId, int $fiscalYearId, in
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
-    if (defined('ITEMS_WORKSPACE') && !in_array($action, ['save_item', 'save_item_unit'], true)) {
+    if (defined('ITEMS_WORKSPACE') && !in_array($action, ['save_item', 'save_item_unit', 'save_stock_type'], true)) {
         http_response_code(400);
         exit('Unsupported Items action.');
+    }
+    if (defined('ITEMS_WORKSPACE') && $action === 'save_stock_type') {
+        require_permission('inventory', 'create');
+        try {
+            inv_stock_type_create($companyId, (string)($_POST['stock_type_name'] ?? ''));
+            flash('success', 'Stock type created.');
+        } catch (Throwable $error) {
+            flash('error', (string)$error->getCode() === '23000' ? 'That stock type already exists.' : $error->getMessage());
+        }
+        redirect('admin/items.php?section=types');
     }
     if (defined('ITEMS_WORKSPACE') && $action === 'save_item_unit') {
         require_permission('inventory', 'create');
@@ -276,7 +287,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $itemId = (int) ($_POST['item_id'] ?? 0);
         $sku = strtoupper(trim((string) ($_POST['sku'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
-        $itemType = (string) ($_POST['item_type'] ?? 'stock');
+        $itemType = 'stock';
+        $existing = null;
+        $stockTypeId = (int)($_POST['stock_type_id'] ?? 0);
+        try { inv_stock_type_validate($companyId, $stockTypeId); }
+        catch (InvalidArgumentException $error) { flash('error', $error->getMessage()); redirect(inv_back_url()); }
         $status = (string) ($_POST['status'] ?? 'active');
         // When editing, the item may carry a type outside this business
         // profile's list (e.g. finished_good in a trading company): keep it
@@ -291,6 +306,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!in_array((string) $existing['item_type'], $allowedTypes, true)) {
                 $allowedTypes[] = (string) $existing['item_type'];
             }
+            $itemType = (string)$existing['item_type'];
         }
         if (!in_array($itemType, $allowedTypes, true) || !in_array($status, ['active', 'inactive'], true)) {
             flash('error', 'Item type and status are required.');
@@ -359,7 +375,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'reorder_level' => max(0.0, round((float) ($_POST['reorder_level'] ?? 0), 3)),
             'default_warehouse_id' => inventory_company_warehouse_id((int) ($_POST['default_warehouse_id'] ?? 0), $companyId),
             'status' => $status,
-            'notes' => trim((string) ($_POST['notes'] ?? '')) ?: null,
+            'notes' => $existing['notes'] ?? null,
         ];
         // Ticking this is what puts the item in the kitchen's ingredient list.
         // The column is only written when the database has it, so an install
@@ -421,6 +437,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // as item-scope mappings so every movement (purchase, sale,
             // adjustment, NRV, manufacturing) posts to them without a
             // separate mapping step. 0 = inherit the category/global default.
+            db()->prepare('UPDATE inventory_items SET stock_type_id = ? WHERE id = ? AND company_id = ?')->execute([$stockTypeId, $savedItemId, $companyId]);
             foreach ((array) ($_POST['item_map'] ?? []) as $mapPurpose => $mapLedgerId) {
                 inventory_set_item_ledger($companyId, $savedItemId, (string) $mapPurpose, (int) $mapLedgerId, $userId);
             }

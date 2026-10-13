@@ -3,12 +3,14 @@ $bodyClass = 'admin-layout accounting-module-page items-creation-page';
 include __DIR__ . '/admin_header.php';
 $unitRows = inv_units_list($companyId, false);
 $showUnits = ($_GET['section'] ?? '') === 'units';
+$showTypes = ($_GET['section'] ?? '') === 'types';
+$stockTypes = inv_stock_types($companyId);
 ?>
 <section class="mbw-card items-creation-card">
     <div class="actions" style="margin-bottom:20px">
-        <label>View<select id="items-view"><option value="item" <?= !$showUnits ? 'selected' : '' ?>>Create item</option><option value="units" <?= $showUnits ? 'selected' : '' ?>>Units of measurement</option></select></label>
+        <label>View<select id="items-view"><option value="item" <?= !$showUnits && !$showTypes ? 'selected' : '' ?>>Create item</option><option value="units" <?= $showUnits ? 'selected' : '' ?>>Units of measurement</option><option value="types" <?= $showTypes ? 'selected' : '' ?>>Stock types</option></select></label>
     </div>
-    <div id="items-panel-item" <?= $showUnits ? 'hidden' : '' ?>>
+    <div id="items-panel-item" <?= $showUnits || $showTypes ? 'hidden' : '' ?>>
         <h2><?= $editItem ? 'Edit item' : 'Create item' ?></h2>
         <?php include __DIR__ . '/item_creation_form.php'; ?>
     </div>
@@ -31,12 +33,25 @@ $showUnits = ($_GET['section'] ?? '') === 'units';
         <?php if (!$unitRows): ?><tr><td colspan="4">No units created yet.</td></tr><?php endif; ?>
         </tbody></table>
     </div>
+    <div id="items-panel-types" <?= !$showTypes ? 'hidden' : '' ?>>
+        <h2>Create stock type</h2>
+        <form method="post" class="actions">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_stock_type">
+            <label>Stock type name<input name="stock_type_name" maxlength="100" required></label>
+            <button class="button" type="submit">Create stock type</button>
+        </form>
+        <table><thead><tr><th>Stock type</th></tr></thead><tbody>
+            <?php foreach ($stockTypes as $typeName): ?><tr><td><?= e($typeName) ?></td></tr><?php endforeach; ?>
+            <?php if (!$stockTypes): ?><tr><td>No stock types created yet.</td></tr><?php endif; ?>
+        </tbody></table>
+    </div>
 </section>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const view = document.getElementById('items-view');
     view.addEventListener('change', function () {
-        ['item', 'units'].forEach(key => document.getElementById('items-panel-' + key).hidden = key !== view.value);
+        ['item', 'units', 'types'].forEach(key => document.getElementById('items-panel-' + key).hidden = key !== view.value);
     });
     const base = document.getElementById('unit-base'), factor = document.getElementById('unit-factor');
     function syncUnit() { factor.readOnly = base.value === '0'; if (factor.readOnly) factor.value = '1'; }

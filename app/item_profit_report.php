@@ -35,7 +35,7 @@ function item_profit_totals(array $rows): array
     return $total;
 }
 
-function item_profit_report(int $companyId, string $from, string $to): array
+function item_profit_report(int $companyId, string $from, string $to, array $filters = []): array
 {
     $stmt = db()->prepare("SELECT e.item_id, v.id AS voucher_id,
         SUM(CASE WHEN e.entry_type = 'credit' THEN e.amount ELSE -e.amount END) AS revenue,
@@ -98,5 +98,10 @@ function item_profit_report(int $companyId, string $from, string $to): array
         $row['margin'] = !$row['missing'] && $row['revenue'] > 0 ? round($row['profit'] / $row['revenue'] * 100, 2) : null;
     }
     unset($row);
+    $rows = array_filter($rows, static function(array $row) use ($filters, $items): bool {
+        if (!empty($filters['item_id']) && $row['id'] !== (int)$filters['item_id']) return false;
+        if (!empty($filters['stock_type_id']) && (int)($items[$row['id']]['stock_type_id'] ?? 0) !== (int)$filters['stock_type_id']) return false;
+        return true;
+    });
     return ['rows'=>array_values($rows), 'totals'=>item_profit_totals($rows)];
 }

@@ -7,13 +7,7 @@
                    pattern="[A-Za-z0-9][A-Za-z0-9.\-]*"
                    value="<?= e($editItem['sku'] ?? inv_next_item_code($companyId)) ?>" required></label>
             <label>Name<input type="text" name="name" maxlength="<?= inv_item_name_max() ?>" value="<?= e($editItem['name'] ?? '') ?>" required></label>
-            <?php
-            $formItemTypes = $itemTypes;
-            if ($editItem && !in_array((string) $editItem['item_type'], $formItemTypes, true)) {
-                $formItemTypes[] = (string) $editItem['item_type'];
-            }
-            ?>
-            <label>Type<select name="item_type"><?php foreach ($formItemTypes as $type): ?><option value="<?= e($type) ?>" <?= ($editItem['item_type'] ?? 'stock') === $type ? 'selected' : '' ?>><?= e(str_replace('_', ' ', ucfirst($type))) ?></option><?php endforeach; ?></select></label>
+            <label>Stock type<select name="stock_type_id" required><option value="">Select stock type</option><?php foreach (inv_stock_types($companyId) as $typeId => $typeName): ?><option value="<?= (int)$typeId ?>" <?= (int)($editItem['stock_type_id'] ?? 0) === (int)$typeId ? 'selected' : '' ?>><?= e($typeName) ?></option><?php endforeach; ?></select></label>
             <?php if (column_exists('inventory_items', 'is_ingredient') && function_exists('hospitality_enabled_for_company') && hospitality_enabled_for_company($companyId)): ?>
                 <?php // What it does is on the tickbox itself. Three lines of prose
                       // across the middle of a field grid broke the run of inputs in
@@ -197,6 +191,5 @@
                 })();
                 </script>
             </div></fieldset><?php endif; ?>
-            <label class="workspace-span-2">Notes<textarea name="notes"><?= e($editItem['notes'] ?? '') ?></textarea></label>
             <div class="actions" style="margin-top:16px"><button class="button" type="submit"><?= icon('services') ?>Save item</button><?php if ($editItem): ?> <a class="button secondary" href="<?= e(url('admin/items.php')) ?>">Cancel edit</a><?php endif; ?></div>
         </form>

@@ -24,6 +24,8 @@ assert_profit(inv_periodic_posting_plan('purchase')['debit'] === 'purchases', 'P
 echo "Item profit: FIFO, average, returns, missing costs and periodic posting tests passed.\n";
 if (in_array('--database', $argv, true)) {
     if (!in_array(DB_HOST, ['localhost','127.0.0.1'], true)) throw new RuntimeException('Local test database only');
+    require_once __DIR__ . '/../app/inventory_stock_types.php';
+    inv_stock_types_schema();
     $fy = db()->query('SELECT * FROM fiscal_years ORDER BY id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
     $cid = (int)$fy['company_id'];
     $ledgerStmt = db()->prepare('SELECT id FROM ledgers WHERE company_id = ? LIMIT 1');
@@ -33,6 +35,12 @@ if (in_array('--database', $argv, true)) {
         $suffix = bin2hex(random_bytes(4));
         db()->prepare("INSERT INTO inventory_items (company_id, sku, name, item_type, unit, status, opening_qty, opening_amount, valuation_method) VALUES (?, ?, 'Profit test item', 'stock', 'pcs', 'active', 10, 100, 'fifo')")->execute([$cid, 'IP-'.$suffix]);
         $iid = (int)db()->lastInsertId();
+        $typeId = inv_stock_type_create($cid, 'Test type ' . $suffix);
+        inv_stock_type_validate($cid, $typeId);
+        $rejected = false;
+        try { inv_stock_type_validate($cid + 999999, $typeId); } catch (InvalidArgumentException $expected) { $rejected = true; }
+        assert_profit($rejected, 'Foreign company stock type rejected');
+        db()->prepare('UPDATE inventory_items SET stock_type_id = ? WHERE id = ?')->execute([$typeId, $iid]);
         db()->prepare("INSERT INTO vouchers (company_id, fiscal_year_id, voucher_no, voucher_type, voucher_date, narration, total_amount, status) VALUES (?, ?, ?, 'sales', ?, 'Profit test', 150, 'posted')")->execute([$cid,$fy['id'],'IP-'.$suffix,$fy['start_date']]);
         $vid = (int)db()->lastInsertId();
         db()->prepare("INSERT INTO voucher_entries (voucher_id, ledger_id, entry_type, amount, item_id, quantity) VALUES (?, ?, 'credit', 150, ?, 5)")->execute([$vid,$lid,$iid]);
@@ -41,6 +49,10 @@ if (in_array('--database', $argv, true)) {
         $report = item_profit_report($cid, $fy['start_date'], $fy['end_date']);
         $match = array_values(array_filter($report['rows'], static fn($row) => $row['id'] === $iid));
         assert_profit(count($match) === 1 && $match[0]['profit'] === 100.0, 'Database item margin');
+        $filtered = item_profit_report($cid, $fy['start_date'], $fy['end_date'], ['item_id'=>$iid, 'stock_type_id'=>$typeId]);
+        assert_profit(count($filtered['rows']) === 1 && $filtered['totals']['profit'] === 100.0, 'Item and custom stock type filters');
+        $filtered = item_profit_report($cid, $fy['start_date'], $fy['end_date'], ['item_id'=>$iid, 'stock_type_id'=>$typeId + 999999]);
+        assert_profit($filtered['rows'] === [] && $filtered['totals']['revenue'] === 0.0, 'Nonmatching filter clears rows and totals');
         assert_profit((int)db()->query('SELECT COUNT(*) FROM vouchers')->fetchColumn() === $before, 'Report must not post vouchers');
         db()->prepare("UPDATE vouchers SET status = 'draft' WHERE id = ?")->execute([$vid]);
         $report = item_profit_report($cid, $fy['start_date'], $fy['end_date']);

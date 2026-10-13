@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/item_profit_report.php';
+require_once __DIR__ . '/../../app/inventory_stock_types.php';
 require_staff_admin_or_client_books();
 require_company_context();
 require_permission('inventory', 'view');
@@ -14,9 +15,18 @@ if (inventory_valid_date($from) !== $from || inventory_valid_date($to) !== $to |
     || $from < $year['start_date'] || $to > $year['end_date']) {
     flash('error', 'Choose a valid date range within the active fiscal year.'); redirect('admin/item-profit.php');
 }
-$report = item_profit_report($companyId, $from, $to);
+$itemFilter = max(0, (int)($_GET['item_id'] ?? 0));
+$typeFilter = max(0, (int)($_GET['stock_type_id'] ?? 0));
+$stockTypes = inv_stock_types($companyId);
+$itemStmt = db()->prepare('SELECT id, sku, name FROM inventory_items WHERE company_id = ? ORDER BY name');
+$itemStmt->execute([$companyId]);
+$filterItems = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
+if (($itemFilter && !in_array($itemFilter, array_map('intval', array_column($filterItems, 'id')), true)) || ($typeFilter && !isset($stockTypes[$typeFilter]))) {
+    flash('error', 'Select an item and stock type belonging to this company.'); redirect('admin/item-profit.php');
+}
+$report = item_profit_report($companyId, $from, $to, ['item_id'=>$itemFilter, 'stock_type_id'=>$typeFilter]);
 $periodic = inv_accounting_method($companyId) === 'periodic';
-$trading = $periodic ? inv_periodic_trading_figures($companyId, $from, $to) : null;
+$trading = $periodic && !$itemFilter && !$typeFilter ? inv_periodic_trading_figures($companyId, $from, $to) : null;
 $pageTitle = 'Item Profitability'; $pageHero = false;
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
@@ -27,6 +37,8 @@ $money = static fn($value) => $value === null ? 'Not available' : number_format(
 <form method="get" class="actions">
     <label>From date<input type="date" name="from" value="<?= e($from) ?>" required></label>
     <label>To date<input type="date" name="to" value="<?= e($to) ?>" required></label>
+    <label>Item<select name="item_id" class="js-searchable"><option value="0">All items</option><?php foreach ($filterItems as $item): ?><option value="<?= (int)$item['id'] ?>" <?= $itemFilter === (int)$item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' — ' . $item['name']) ?></option><?php endforeach; ?></select></label>
+    <label>Stock type<select name="stock_type_id"><option value="0">All stock types</option><?php foreach ($stockTypes as $id => $name): ?><option value="<?= (int)$id ?>" <?= $typeFilter === (int)$id ? 'selected' : '' ?>><?= e($name) ?></option><?php endforeach; ?></select></label>
     <button class="button" type="submit">Apply</button><a class="button secondary" href="<?= e(url('admin/item-profit.php')) ?>">Clear</a>
 </form>
 <?php if (!$periodic): ?><div class="notice error">These existing books still use perpetual accounting. Historical conversion must be reviewed before switching to periodic; this read-only report does not change the books.</div><?php endif; ?>

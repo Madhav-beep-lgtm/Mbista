@@ -4049,6 +4049,8 @@ function accounting_module_repair_database(): array
                 KEY `idx_inventory_units_base` (`base_unit_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         }
+        require_once __DIR__ . '/inventory_stock_types.php';
+        inv_stock_types_schema();
         if (!accounting_repair_table_exists('inventory_categories')) {
             db()->exec("CREATE TABLE `inventory_categories` (
                 `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
