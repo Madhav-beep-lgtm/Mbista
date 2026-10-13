@@ -26,8 +26,7 @@ $headerCompany = $headerClientProfile && !empty($headerClientProfile['company_id
 <div class="admin-shell">
     <aside class="admin-sidebar" id="adminSidebar">
         <a class="brand brand-admin" href="<?= e(url('dashboard.php')) ?>">
-            <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
-            <span class="brand-admin-sub">Client Portal</span>
+            <?= brand_logo('dark', 'mbw-logo mbw-logo-sidebar') ?>
         </a>
         <?php if ($headerClientProfile): ?>
             <div class="admin-sidebar-context">

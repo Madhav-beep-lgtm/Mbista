@@ -23,8 +23,7 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
 <div class="admin-shell">
     <aside class="admin-sidebar" id="adminSidebar">
         <a class="brand brand-admin" href="<?= e(url('staff/index.php')) ?>">
-            <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
-            <span class="brand-admin-sub">Staff Portal</span>
+            <?= brand_logo('dark', 'mbw-logo mbw-logo-sidebar') ?>
         </a>
         <?php if ($headerStaffCompany): ?>
             <div class="admin-sidebar-context">

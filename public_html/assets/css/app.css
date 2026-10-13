@@ -843,8 +843,8 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 /* Authenticated shell */
 .admin-shell { display: grid; min-height: 100vh; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); background: var(--color-bg); }
 .admin-sidebar { position: sticky; top: 0; z-index: 70; display: flex; height: 100vh; min-width: 0; padding: 14px 10px; overflow: hidden auto; flex-direction: column; border-right: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text); }
-.brand-admin { min-height: 48px; padding: 0 9px 13px; border-bottom: 1px solid var(--color-border); }
-.brand-admin img, .mbw-logo-sidebar { max-width: 166px; max-height: 40px; }
+.brand-admin { display: flex; min-height: 66px; padding: 5px 8px 14px; align-items: center; border-bottom: 1px solid var(--color-border); }
+.brand-admin img, .mbw-logo-sidebar { display: block; width: 174px; max-width: 100%; height: auto; max-height: 42px; object-fit: contain; object-position: left center; }
 .admin-portal-logo { display: block; max-width: 100%; max-height: 38px; margin-bottom: 7px; object-fit: contain; object-position: left center; }
 .brand-admin-sub { display: block; color: var(--color-text-muted); font-size: 10px; }
 .admin-sidebar-context, .admin-portal-card { margin: 12px 4px; padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-muted); }

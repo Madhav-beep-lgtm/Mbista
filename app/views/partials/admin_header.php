@@ -290,12 +290,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
 <div class="admin-shell">
     <aside class="admin-sidebar" id="adminSidebar">
         <a class="brand brand-admin" href="<?= e(url('admin/accounting-dashboard.php')) ?>">
-            <?= brand_logo('light', 'mbw-logo mbw-logo-sidebar') ?>
-            <span class="brand-admin-sub"><?= e(match ((string) ($currentUser['role'] ?? '')) {
-                'customer' => 'Client Accounting Portal',
-                'staff' => 'Staff Accounting Portal',
-                default => 'Admin Portal',
-            }) ?></span>
+            <?= brand_logo('dark', 'mbw-logo mbw-logo-sidebar') ?>
         </a>
         <?php // The platform is above any one company, so naming a "current
               // portal" there is wrong twice over: it is not where you are, and
