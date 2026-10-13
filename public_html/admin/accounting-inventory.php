@@ -3140,9 +3140,6 @@ $invMoveItemOptions = static function () use ($items): string {
             <small style="font-weight:400;color:var(--mbw-muted,#64748b)">(<?= (int) $invTotalItems ?> item<?= $invTotalItems === 1 ? '' : 's' ?>)</small></h2>
         <div class="mbw-card-tools">
             <?php if ($itemFilterOn): ?><a class="mbw-view-all" href="<?= e(url('admin/accounting-inventory.php#item-stock-summary')) ?>">Clear filters</a><?php endif; ?>
-            <?php if (user_can_do('inventory', 'create')): ?>
-                <button type="button" class="button" data-open-item-dialog><?= icon('services') ?>New item</button>
-            <?php endif; ?>
             <?php if (user_can_do('inventory', 'export')): ?>
                 <?php // The file carries whatever the filters left on screen. ?>
                 <a class="mbw-view-all" href="<?= e($invPageUrl(['export' => 'csv'])) ?>" aria-label="Export CSV" title="Export CSV — the filtered list"><?= icon('download') ?></a>

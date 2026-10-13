@@ -8,16 +8,6 @@
                    value="<?= e($editItem['sku'] ?? inv_next_item_code($companyId)) ?>" required></label>
             <label>Name<input type="text" name="name" maxlength="<?= inv_item_name_max() ?>" value="<?= e($editItem['name'] ?? '') ?>" required></label>
             <label>Stock type<select name="stock_type_id" required><option value="">Select stock type</option><?php foreach (inv_stock_types($companyId) as $typeId => $typeName): ?><option value="<?= (int)$typeId ?>" <?= (int)($editItem['stock_type_id'] ?? 0) === (int)$typeId ? 'selected' : '' ?>><?= e($typeName) ?></option><?php endforeach; ?></select></label>
-            <?php if (column_exists('inventory_items', 'is_ingredient') && function_exists('hospitality_enabled_for_company') && hospitality_enabled_for_company($companyId)): ?>
-                <?php // What it does is on the tickbox itself. Three lines of prose
-                      // across the middle of a field grid broke the run of inputs in
-                      // half and pushed everything after it onto a new row. ?>
-                <label class="checkbox-line">
-                    <input type="checkbox" name="is_ingredient" value="1" <?= (int) ($editItem['is_ingredient'] ?? 0) === 1 ? 'checked' : '' ?>
-                           title="Lists this item as a recipe ingredient. The recipe unit, wastage and yield are set on the ingredient screen.">
-                    Use as a recipe ingredient
-                </label>
-            <?php endif; ?>
             <label>Valuation method
                 <select name="valuation_method">
                     <?php $vm = (string) ($editItem['valuation_method'] ?? 'weighted_average'); ?>
@@ -189,5 +179,12 @@
                 })();
                 </script>
             </div></fieldset><?php endif; ?>
+            <?php if (column_exists('inventory_items', 'is_ingredient') && function_exists('hospitality_enabled_for_company') && hospitality_enabled_for_company($companyId)): ?>
+                <label class="checkbox-line">
+                    <input type="checkbox" name="is_ingredient" value="1" <?= (int) ($editItem['is_ingredient'] ?? 0) === 1 ? 'checked' : '' ?>
+                           title="Lists this item as a recipe ingredient. The recipe unit, wastage and yield are set on the ingredient screen.">
+                    Use as a recipe ingredient
+                </label>
+            <?php endif; ?>
             <div class="actions" style="margin-top:16px"><button class="button" type="submit"><?= icon('services') ?>Save item</button><?php if ($editItem): ?> <a class="button secondary" href="<?= e(url('admin/items.php')) ?>">Cancel edit</a><?php endif; ?></div>
         </form>

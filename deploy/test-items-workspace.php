@@ -18,6 +18,10 @@ foreach ([['unit_name'=>''], ['unit_name'=>'piece'], ['unit_name'=>str_repeat('x
     assert_items($rejected, 'Invalid unit accepted');
 }
 $form = file_get_contents(__DIR__ . '/../app/views/partials/item_creation_form.php');
+assert_items(strpos($form, 'name="is_ingredient"') > strrpos($form, '</fieldset>'), 'Recipe ingredient must be the final item option');
+assert_items(strpos($form, 'name="is_ingredient"') < strpos($form, '>Save item'), 'Recipe ingredient must remain before Save');
+$inventoryPage = file_get_contents(__DIR__ . '/../public_html/admin/accounting-inventory.php');
+assert_items(!str_contains($inventoryPage, '>New item</button>'), 'Redundant New item button returned');
 foreach (['name="tax_rate"', 'name="default_warehouse_id"', 'name="notes"'] as $removed) {
     assert_items(!str_contains($form, $removed), 'Removed item field returned: ' . $removed);
 }
