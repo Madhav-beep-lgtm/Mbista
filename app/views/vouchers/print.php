@@ -8,7 +8,7 @@
     <header><h1><?= e((string) $company['name']) ?></h1><p><?= nl2br(e(trim((string) ($company['address'] ?? '')) ?: 'Address not recorded')) ?></p><h2><?= e($voucherLabel) ?></h2></header>
     <section class="voucher-meta">
         <div><strong>Voucher no.:</strong> <?= e((string) $voucher['voucher_no']) ?></div>
-        <div><strong>Voucher date (AD):</strong> <?= e((string) ($voucher['voucher_date'] ?? '')) ?></div>
+        <div><strong>Voucher date (<?= e(strtoupper(date_mode())) ?>):</strong> <?= e(app_date((string) ($voucher['voucher_date'] ?? ''), 'Y-m-d')) ?></div>
         <div><strong>Financial year:</strong> <?= e($financialYear) ?></div>
         <div><strong>Status:</strong> <?= e(ucfirst((string) $voucher['status'])) ?><?= !empty($voucher['approval_state']) ? ' / ' . e(ucwords(str_replace('_', ' ', (string) $voucher['approval_state']))) : '' ?></div>
     </section>

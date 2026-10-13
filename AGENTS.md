@@ -10,6 +10,7 @@ These are the user's standing preferences for changes across this app:
 - View selectors switch content in place rather than redirecting to another page.
 - Use one creation-only Create account flow for groups, subgroups, ledgers and subledgers. Masters remain system-defined. Subledgers belong to ledgers; groups/subgroups belong to masters/groups. Keep account listings and filters in Chart of Accounts, not on the creation form. Type is the section for Fixed Asset, Maintain bill by bill and Cost centre settings; Nature is the accounting classification.
 - Keep platform administration separate from individual company books; do not implicitly switch company context.
+- App tables use full outer, horizontal and vertical grid borders. Display transaction dates through app_date() so they follow the selected AD/BS mode; keep stored dates and input/filter values in canonical AD format.
 - Apply these conventions to subsequent app changes. Do not claim that an app-wide migration has been completed without checking and updating those surfaces.
 - Date fields show one AD or BS control without a secondary converted-date hint; changing modes must preserve control size and alignment. Voucher type, number and date use a compact horizontal row.
 - BS date controls include a Nepali calendar picker. Voucher filter boxes have visible labels. Cost centre is required per entry line for journal, contra, payment and receipt, including cash/bank lines; do not remove it with header-level fields.

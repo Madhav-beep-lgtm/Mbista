@@ -1,9 +1,12 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../app/voucher_types.php';
+require_once __DIR__ . '/../app/nepali_date.php';
 function e(string $text): string { return htmlspecialchars($text, ENT_QUOTES, 'UTF-8'); }
 function asset_url(string $path): string { return '/' . $path; }
 function site_currency_symbol(): string { return 'Rs.'; }
+function date_mode(): string { return $GLOBALS['printMode']; }
+function app_date(?string $date, string $format = 'd M Y'): string { return date_mode() === 'bs' ? bs_format((string) $date) . ' BS' : date($format, strtotime((string) $date)); }
 $company = ['name' => 'Test <Company>', 'address' => "Street 1\nKathmandu"];
 $financialYear = '2026–2027';
 $names = ['submitted_by' => 'Maker', 'approved_by' => 'Checker'];
@@ -11,6 +14,7 @@ $entries = [
     ['entry_type' => 'debit', 'amount' => 1234.5, 'ledger_name' => 'Bank', 'memo' => '<script>test</script>'],
     ['entry_type' => 'credit', 'amount' => 1234.5, 'ledger_name' => 'Cash', 'memo' => 'Transfer'],
 ];
+foreach (['ad', 'bs'] as $printMode) {
 foreach (voucher_entry_type_catalog() as $type => $spec) {
     $voucher = ['voucher_no' => 'TEST/001', 'voucher_date' => '2026-10-13', 'status' => 'draft', 'approval_state' => 'pending_approval', 'narration' => 'Test narration'];
     $voucherLabel = $spec['label'];
@@ -18,11 +22,12 @@ foreach (voucher_entry_type_catalog() as $type => $spec) {
     ob_start();
     include __DIR__ . '/../app/views/vouchers/print.php';
     $html = ob_get_clean();
-    foreach (['Test &lt;Company&gt;', 'Kathmandu', '2026–2027', '2026-10-13', '1,234.50', 'Maker / Prepared by', 'Checker / Approved by', 'Print voucher', e($voucherLabel)] as $expected) {
+    foreach (['Test &lt;Company&gt;', 'Kathmandu', '2026–2027', app_date('2026-10-13', 'Y-m-d'), 'Voucher date (' . strtoupper($printMode) . ')', '1,234.50', 'Maker / Prepared by', 'Checker / Approved by', 'Print voucher', e($voucherLabel)] as $expected) {
         if (!str_contains($html, $expected)) { throw new RuntimeException($type . ': missing ' . $expected); }
     }
     if (str_contains($html, '<script>test</script>') || $totalDebit !== 1234.5 || $totalCredit !== 1234.5) {
         throw new RuntimeException('Escaping or totals failed');
     }
+}
 }
 echo "All voucher print types: header, dates, totals, signatures and escaping passed.\n";

@@ -14,7 +14,7 @@
   tr { display: table-row !important; }
   th, td { display: table-cell !important; position: static !important; white-space: normal !important; }
   [data-secondary-column] { display: table-cell !important; }
-  th, td { border-color: #bbb !important; color: #000 !important; }
+  body table, body table th, body table td { border: 1px solid #000 !important; color: #000 !important; }
   a { color: #000 !important; text-decoration: none !important; }
   .page-break { break-before: page; }
   .document-signatures, .signature-places { margin-top: 18mm; break-inside: avoid; }

@@ -94,13 +94,15 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-
 .mbw-tablewrap::-webkit-scrollbar-track { background: var(--color-surface-muted); }
 .mbw-tablewrap::-webkit-scrollbar-thumb { border: 2px solid var(--color-surface-muted); border-radius: 9px; background: var(--color-border); }
 table { width: max-content; min-width: 100%; border-collapse: collapse; color: var(--color-text); font-size: var(--font-size-control); }
-th, td { padding: 10px 12px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: middle; }
+th, td { padding: 10px 12px; border: 1px solid var(--color-border); text-align: left; vertical-align: middle; }
 thead th { background: var(--color-primary-soft); color: var(--color-text); font-size: var(--font-size-sm); font-weight: 700; white-space: normal; }
 tbody td, tfoot td { white-space: nowrap; }
 .mbw-tablewrap thead th { position: sticky; z-index: 2; top: 0; background: var(--color-primary-soft); }
 tbody tr:hover { background: color-mix(in srgb, var(--color-primary-soft) 46%, var(--color-surface)); }
 tbody tr.is-selected, tbody tr[aria-selected="true"] { background: var(--color-primary-soft); }
-tbody tr:last-child td, tfoot tr:last-child td { border-bottom: 0; }
+/* App-wide grid convention overrides module-local borderless table styles. */
+body table { border-collapse: collapse !important; border: 1px solid var(--color-border, #b8c7d6) !important; }
+body table th, body table td { border: 1px solid var(--color-border, #b8c7d6) !important; }
 tfoot td, .total-row td, .rc-total-row td { background: var(--color-primary-soft); font-weight: 750; }
 .free-text-cell { width: min(34ch, 28vw); max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
 .frm-entries { min-width: 760px; }

@@ -213,7 +213,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php if ($transactions === []): ?><tr><td colspan="7" style="color:var(--mbw-muted)">No bank or cash movements posted in this fiscal year.</td></tr><?php endif; ?>
             <?php foreach ($transactions as $txn): ?>
                 <tr>
-                    <td><?= e(date('d M Y', strtotime((string) $txn['voucher_date']))) ?></td>
+                    <td><?= e(app_date((string) $txn['voucher_date'])) ?></td>
                     <td><a href="<?= e(url('admin/voucher-form.php?edit=' . (int) $txn['voucher_id'])) ?>" style="color:var(--mbw-primary);text-decoration:none"><?= e($txn['voucher_no']) ?></a></td>
                     <td><?= e($txn['ledger_name']) ?></td>
                     <td><?= e($txn['narration'] ?: ucwords(str_replace('_', ' ', (string) $txn['voucher_type']))) ?></td>

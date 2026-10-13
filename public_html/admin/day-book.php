@@ -145,7 +145,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php foreach ($entries as $entry): ?>
                 <?php $firstOfVoucher = (int) $entry['voucher_id'] !== $previousVoucherId; $previousVoucherId = (int) $entry['voucher_id']; ?>
                 <tr<?= $firstOfVoucher ? ' style="border-top:2px solid var(--mbw-border,#dcebf5)"' : '' ?>>
-                    <td><?= $firstOfVoucher ? e(date('d M Y', strtotime((string) $entry['entry_date']))) : '' ?></td>
+                    <td><?= $firstOfVoucher ? e(app_date((string) $entry['entry_date'])) : '' ?></td>
                     <td><?= $firstOfVoucher ? '<a class="reference-link" data-voucher-preview href="' . e(url('admin/voucher-view.php?id=' . (int) $entry['voucher_id'])) . '">' . e($entry['voucher_no']) . '</a>' : '' ?></td>
                     <td><?= $firstOfVoucher ? e($entry['voucher_type']) : '' ?></td>
                     <td><?= $firstOfVoucher ? e($entry['party_name'] ?? '—') : '' ?></td>

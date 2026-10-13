@@ -214,7 +214,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $totalCr += $isDebit ? 0.0 : $amount;
                     ?>
                     <tr>
-                        <td><?= e(date('d M Y', strtotime((string) $row['entry_date']))) ?></td>
+                        <td><?= e(app_date((string) $row['entry_date'])) ?></td>
                         <td><a class="reference-link" data-voucher-preview href="<?= e(url('admin/voucher-view.php?id=' . (int) $row['voucher_id'])) ?>"><?= e($row['voucher_no']) ?></a></td>
                         <td><?= e($row['voucher_type']) ?></td>
                         <td><?= e($row['party_name'] ?? '—') ?></td>

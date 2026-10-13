@@ -483,7 +483,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php $canDeleteVouchers = user_can('delete') && user_can_do('accounting', 'edit') && !staff_accountant_forces_approval(); ?>
             <?php foreach ($vouchers as $voucher): ?>
                 <tr>
-                    <td><?= e($voucher['voucher_date'] ?? date('Y-m-d', strtotime((string) $voucher['posted_at']))) ?></td>
+                    <td><?= e(app_date((string) (($voucher['voucher_date'] ?? '') ?: substr((string) ($voucher['posted_at'] ?? ''), 0, 10)), 'Y-m-d')) ?></td>
                     <td><a href="<?= e(url('admin/voucher-view.php?id=' . (int) $voucher['id'])) ?>" data-voucher-preview><?= e($voucher['voucher_no']) ?></a></td>
                     <td><?php $vRowType = voucher_type_spec((string) $voucher['voucher_type']); ?><span class="mbw-pill tone-<?= e((string) $vRowType['tone']) ?>"><?= e((string) $vRowType['short']) ?></span></td>
                     <td><?= e($voucher['party_name'] ?? '') ?></td>
