@@ -5,6 +5,9 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && (int) ($_GET['edit'] ?? 0) <= 0) {
+    redirect('admin/create-account.php?level=group');
+}
 
 $repairErrors = accounting_module_repair_database();
 

@@ -5,10 +5,13 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 
 require_staff_admin_or_client_books();
 require_company_context();
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && (int) ($_GET['edit_id'] ?? 0) <= 0) {
+    redirect('admin/create-account.php');
+}
 
 $repairErrors = accounting_module_repair_database();
 
-$pageTitle = 'Chart Ledgers';
+$pageTitle = 'Edit account';
 $pageHero = false;
 $pageSubtitle = 'Manage ledger accounts, edit rows, and remove unused ledgers.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
@@ -37,6 +40,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('admin/chart-ledgers.php');
         }
         if ($ledgerId > 0) {
+            $hierarchyStmt = db()->prepare('SELECT l.parent_ledger_id, p.group_id AS parent_group, p.type AS parent_type FROM ledgers l LEFT JOIN ledgers p ON p.id = l.parent_ledger_id AND p.company_id = l.company_id WHERE l.id = :id AND l.company_id = :cid');
+            $hierarchyStmt->execute(['id' => $ledgerId, 'cid' => $companyId]);
+            $hierarchy = $hierarchyStmt->fetch();
+            if (!$hierarchy) {
+                flash('error', 'Account not found.');
+                redirect('admin/chart-of-accounts.php');
+            }
+            $children = db()->prepare('SELECT COUNT(*) FROM ledgers WHERE company_id = :cid AND parent_ledger_id = :id AND (group_id <> :gid OR type <> :nature)');
+            $children->execute(['cid' => $companyId, 'id' => $ledgerId, 'gid' => $groupId, 'nature' => $ledgerType]);
+            if ((!empty($hierarchy['parent_ledger_id']) && ((int) $hierarchy['parent_group'] !== $groupId || $hierarchy['parent_type'] !== $ledgerType)) || (int) $children->fetchColumn() > 0) {
+                flash('error', 'Parent ledgers and their subledgers must keep the same group and nature.');
+                redirect('admin/chart-ledgers.php?edit_id=' . $ledgerId);
+            }
             $partyLinkStmt = db()->prepare("SELECT
                     CASE
                         WHEN ledger_id = :id1 THEN 'customer_receivable'
@@ -141,49 +157,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Ledger table filtering
-$filterCode = trim((string) ($_GET['filter_code'] ?? ''));
-$filterName = trim((string) ($_GET['filter_name'] ?? ''));
-$filterGroup = trim((string) ($_GET['filter_group'] ?? ''));
-$filterType = trim((string) ($_GET['filter_type'] ?? ''));
-$filterStatus = trim((string) ($_GET['filter_status'] ?? ''));
-
-$sql = 'SELECT l.*, g.name AS group_name, g.master_key, g.party_role,
-        ap.id AS party_id, ap.name AS party_name
-    FROM ledgers l
-    LEFT JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id
-    LEFT JOIN accounting_parties ap ON ap.company_id = l.company_id
-       AND (ap.ledger_id = l.id OR ap.payable_ledger_id = l.id
-            OR ap.advance_ledger_id = l.id OR ap.supplier_advance_ledger_id = l.id)
-    WHERE l.company_id = :company_id';
-
-$params = ['company_id' => $companyId];
-
-if ($filterCode !== '') {
-    $sql .= ' AND l.code LIKE :code';
-    $params['code'] = '%' . $filterCode . '%';
-}
-if ($filterName !== '') {
-    $sql .= ' AND l.name LIKE :name';
-    $params['name'] = '%' . $filterName . '%';
-}
-if ($filterGroup !== '') {
-    $sql .= ' AND g.name LIKE :group';
-    $params['group'] = '%' . $filterGroup . '%';
-}
-if ($filterType !== '') {
-    $sql .= ' AND l.type = :type';
-    $params['type'] = $filterType;
-}
-if ($filterStatus !== '') {
-    $sql .= ' AND l.status = :status';
-    $params['status'] = $filterStatus;
-}
-
-$sql .= ' ORDER BY l.code ASC';
-$ledgerStmt = db()->prepare($sql);
-$ledgerStmt->execute($params);
-$ledgers = $ledgerStmt->fetchAll();
 $editId = (int) ($_GET['edit_id'] ?? 0);
 $editLedger = null;
 if ($editId > 0) {
@@ -199,10 +172,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <?php endif; ?>
 <section class="mbw-card">
     <div class="mbw-card-head">
-        <h2><?= $editLedger ? 'Edit Ledger' : 'Create Ledger' ?></h2>
+        <h2><?= $editLedger ? 'Edit account' : 'Create account' ?></h2>
         <div class="mbw-card-tools">
             <a class="mbw-view-all" href="<?= e(url('admin/chart-of-accounts.php')) ?>">Overview</a>
-            <a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Groups</a>
         </div>
     </div>
     
@@ -259,82 +231,4 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </form>
 </section>
 
-<section class="mbw-card">
-    <div class="mbw-card-head">
-        <h2>Ledger table</h2>
-    </div>
-
-    <!-- Filter Section -->
-    <form method="get" style="padding: 16px; border-bottom: 1px solid var(--mbw-border, #d9e2ec); display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end">
-        <div>
-            <label style="display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px">Code</label>
-            <input type="text" name="filter_code" placeholder="Search code..." value="<?= e($filterCode) ?>" style="width: 100%; padding: 6px; border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px; font-size: 13px">
-        </div>
-        <div>
-            <label style="display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px">Name</label>
-            <input type="text" name="filter_name" placeholder="Search name..." value="<?= e($filterName) ?>" style="width: 100%; padding: 6px; border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px; font-size: 13px">
-        </div>
-        <div>
-            <label style="display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px">Group</label>
-            <input type="text" name="filter_group" placeholder="Search group..." value="<?= e($filterGroup) ?>" style="width: 100%; padding: 6px; border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px; font-size: 13px">
-        </div>
-        <div>
-            <label style="display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px">Type</label>
-            <select name="filter_type" style="width: 100%; padding: 6px; border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px; font-size: 13px">
-                <option value="">— All —</option>
-                <option value="asset" <?= $filterType === 'asset' ? 'selected' : '' ?>>Asset</option>
-                <option value="liability" <?= $filterType === 'liability' ? 'selected' : '' ?>>Liability</option>
-                <option value="equity" <?= $filterType === 'equity' ? 'selected' : '' ?>>Equity</option>
-                <option value="income" <?= $filterType === 'income' ? 'selected' : '' ?>>Income</option>
-                <option value="expense" <?= $filterType === 'expense' ? 'selected' : '' ?>>Expense</option>
-            </select>
-        </div>
-        <div>
-            <label style="display: block; font-size: 12px; font-weight: 500; margin-bottom: 4px">Status</label>
-            <select name="filter_status" style="width: 100%; padding: 6px; border: 1px solid var(--mbw-border, #d9e2ec); border-radius: 4px; font-size: 13px">
-                <option value="">— All —</option>
-                <option value="active" <?= $filterStatus === 'active' ? 'selected' : '' ?>>Active</option>
-                <option value="inactive" <?= $filterStatus === 'inactive' ? 'selected' : '' ?>>Inactive</option>
-            </select>
-        </div>
-        <div style="display: flex; gap: 8px">
-            <button type="submit" class="button" style="padding: 6px 12px; font-size: 13px">Filter</button>
-            <a href="<?= e(url('admin/chart-ledgers.php')) ?>" class="button secondary" style="padding: 6px 12px; font-size: 13px; text-decoration: none">Clear</a>
-        </div>
-    </form>
-
-    <div style="overflow-x:auto">
-    <table>
-        <thead><tr><th>Code</th><th>Name</th><th>Group</th><th>Party Master</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
-        <tbody>
-            <?php if ($ledgers === []): ?><tr><td colspan="7">No ledgers yet.</td></tr><?php endif; ?>
-            <?php foreach ($ledgers as $ledger): ?>
-                <tr>
-                    <td><?= e($ledger['code']) ?></td>
-                    <td><?= e($ledger['name']) ?></td>
-                    <td><?= e($ledger['group_name'] ?? '-') ?></td>
-                    <td>
-                        <?php if ((int) ($ledger['party_id'] ?? 0) > 0): ?>
-                            <a class="reference-link" href="<?= e(url('admin/accounting-parties.php?party_id=' . (int) $ledger['party_id'] . '&ptab=ledger')) ?>"><?= e($ledger['party_name']) ?></a>
-                        <?php elseif (!empty($ledger['party_role']) && (int) ($ledger['is_system'] ?? 0) === 0): ?>
-                            <span class="mbw-pill tone-amber">Review link</span>
-                        <?php else: ?>—<?php endif; ?>
-                    </td>
-                    <td><?= e($ledger['type']) ?></td>
-                    <td><span class="mbw-pill <?= ($ledger['status'] ?? '') === 'active' ? 'tone-green' : 'tone-red' ?>"><?= e($ledger['status']) ?></span></td>
-                    <td>
-                        <a class="button secondary" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . (int) $ledger['id'])) ?>">Edit</a>
-                        <form method="post" style="display:inline">
-                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                            <input type="hidden" name="action" value="delete_ledger">
-                            <input type="hidden" name="ledger_id" value="<?= e((int) $ledger['id']) ?>">
-                            <button type="submit" class="button secondary" onclick="return confirm('Delete this ledger?')">Delete</button>
-                        </form>
-                    </td>
-                </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-    </div>
-</section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

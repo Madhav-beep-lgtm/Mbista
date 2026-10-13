@@ -287,13 +287,7 @@ $statusPill = static fn (string $status): string => $status === 'active'
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto">
         <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=xlsx')) ?>"><?= icon('analytics') ?>Export COA</a>
-        <details class="action-menu">
-            <summary class="button"><?= icon('layers') ?>Create account <?= icon('chevron') ?></summary>
-            <div class="action-menu-options">
-                <a href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>Create group</a>
-                <a href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>Create ledger</a>
-            </div>
-        </details>
+        <a class="button" href="<?= e(url('admin/create-account.php')) ?>"><?= icon('layers') ?>Create account</a>
     </div>
 </form>
 <form method="post" enctype="multipart/form-data" id="coa-upload-form" hidden>
@@ -463,21 +457,21 @@ $coaRowPill = static function (string $status): string {
                         <tr class="coa-node coa-child coa-group-row" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
                             <td style="padding-left:32px"><button type="button" class="coa-tgl" data-parent="g<?= $gid ?>" style="min-height:22px;width:22px;padding:0;border:0;background:transparent;color:var(--mbw-muted)">▾</button> <?= e($g['code']) ?></td>
                             <td style="padding-left:18px"><?= e($g['name']) ?></td>
-                            <td><span class="mbw-pill tone-purple">Group</span></td>
+                            <td><span class="mbw-pill tone-purple"><?= !empty($g['parent_group_id']) ? 'Subgroup' : 'Group' ?></span></td>
                             <td><?= e(ucfirst((string) (ledger_master_nature((string) $g['master_key']) ?? ''))) ?></td>
                             <td><?= (int) $g['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
-                            <td><a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php')) ?>">Edit</a></td>
+                            <td><a class="mbw-view-all" href="<?= e(url('admin/chart-groups.php?edit=' . $gid)) ?>">Edit</a></td>
                         </tr>
                         <?php foreach ($ledgersByGroup[$gid] ?? [] as $l): ?>
                             <tr class="coa-node coa-child" data-parent-of="m<?= e($digit) ?> g<?= $gid ?>" data-name="<?= e(strtolower($l['name'] . ' ' . $l['code'])) ?>">
                                 <td style="padding-left:64px"><?= e($l['code']) ?></td>
                                 <td style="padding-left:36px"><?= e($l['name']) ?></td>
-                                <td><span class="mbw-pill tone-teal">Ledger</span></td>
+                                <td><span class="mbw-pill tone-teal"><?= !empty($l['parent_ledger_id']) ? 'Subledger' : 'Ledger' ?></span></td>
                                 <td><?= e(ucfirst((string) $l['type'])) ?></td>
                                 <td><?= $statusPill((string) $l['status']) ?></td>
                                 <td><div class="coa-row-actions">
                                     <a class="mbw-view-all" href="<?= e(url('admin/reports-center.php?report=ledger-report&ledger_id=' . (int) $l['id'])) ?>" title="View statement"><?= icon('search') ?></a>
-                                    <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>" title="Edit"><?= icon('settings') ?></a>
+                                    <a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . (int) $l['id'])) ?>" title="Edit"><?= icon('settings') ?></a>
                                     <a class="mbw-view-all" href="<?= e(url('admin/audit-trail.php')) ?>" title="History"><?= icon('admin') ?></a>
                                 </div></td>
                             </tr>
@@ -491,7 +485,7 @@ $coaRowPill = static function (string $status): string {
                         <td><span class="mbw-pill tone-teal">Ledger</span></td>
                         <td><?= e(ucfirst((string) $l['type'])) ?></td>
                         <td><?= $statusPill((string) $l['status']) ?></td>
-                        <td><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php')) ?>">Assign group</a></td>
+                        <td><a class="mbw-view-all" href="<?= e(url('admin/chart-ledgers.php?edit_id=' . (int) $l['id'])) ?>">Assign group</a></td>
                     </tr>
                 <?php endforeach; ?>
                 </tbody>
@@ -574,7 +568,7 @@ document.addEventListener('DOMContentLoaded', function () {
         document.getElementById('coa-audit-panel').hidden = kind !== 'audit';
         var matches = new Set();
         rows.forEach(function (row) {
-            var type = row.cells[2].textContent.trim().toLowerCase() + 's';
+            var type = row.cells[2].textContent.trim().toLowerCase().replace(/^sub/, '') + 's';
             var parents = (row.getAttribute('data-parent-of') || '').split(' ').filter(Boolean);
             var text = row.getAttribute('data-name') || '';
             var match = !q || text.indexOf(q) !== -1 || parents.some(function (key) {

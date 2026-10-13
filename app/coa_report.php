@@ -28,9 +28,9 @@ function coa_report_data(array $company, array $fiscalYear, array $masters, arra
         $id = (int) $group['id'];
         $seenGroups[$id] = true;
         $nature = (string) ($masters[(string) $group['master_key']]['nature'] ?? '');
-        $add([(string) $group['code'], (string) $group['name'], 'Group', ucfirst($nature), (int) $group['is_active'] === 1 ? 'Active' : 'Inactive'], 'bold', 1);
+        $add([(string) $group['code'], (string) $group['name'], !empty($group['parent_group_id']) ? 'Subgroup' : 'Group', ucfirst($nature), (int) $group['is_active'] === 1 ? 'Active' : 'Inactive'], 'bold', 1);
         foreach ($byGroup[$id] ?? [] as $ledger) {
-            $add([(string) $ledger['code'], (string) $ledger['name'], 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status'])], 'body', 2);
+            $add([(string) $ledger['code'], (string) $ledger['name'], !empty($ledger['parent_ledger_id']) ? 'Subledger' : 'Ledger', ucfirst((string) $ledger['type']), ucfirst((string) $ledger['status'])], 'body', !empty($ledger['parent_ledger_id']) ? 3 : 2);
         }
     };
     foreach ($masters as $key => $master) {

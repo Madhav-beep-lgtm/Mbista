@@ -11,6 +11,7 @@ $currentUser = current_user();
 $headerCompany = current_company();
 $headerFiscalYear = current_fiscal_year();
 $headerScript = basename((string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+$headerScript = $headerScript === 'create-account.php' ? 'chart-ledgers.php' : $headerScript;
 $headerTab = (string) ($_GET['tab'] ?? '');
 $headerView = (string) ($_GET['view'] ?? '');
 $headerShowFiscalYear = in_array($headerScript, ['accounting.php', 'ledgers.php', 'day-book.php', 'accounting-parties.php', 'accounting-dashboard.php', 'accounting-inventory.php', 'export-ledger.php', 'banking.php', 'reconciliation.php', 'chart-of-accounts.php', 'chart-groups.php', 'chart-ledgers.php', 'chart-posting-accounts.php', 'fixed-assets.php', 'opening-balances.php'], true);

@@ -1,6 +1,32 @@
 <?php
 declare(strict_types=1);
 
+function accounting_repair_account_creation_schema(): void
+{
+        accounting_repair_add_column('ledger_groups', 'parent_group_id', '`parent_group_id` INT UNSIGNED DEFAULT NULL');
+        accounting_repair_add_column('ledgers', 'parent_ledger_id', '`parent_ledger_id` INT UNSIGNED DEFAULT NULL');
+        accounting_repair_add_index('ledgers', 'idx_ledgers_parent', 'KEY `idx_ledgers_parent` (`parent_ledger_id`)');
+        accounting_repair_add_constraint('ledgers', 'fk_ledgers_parent', 'CONSTRAINT `fk_ledgers_parent` FOREIGN KEY (`parent_ledger_id`) REFERENCES `ledgers` (`id`) ON DELETE RESTRICT');
+        foreach (['ledgers', 'ledger_groups'] as $table) {
+            foreach ([
+                'alias_name' => 'VARCHAR(160) DEFAULT NULL',
+                'account_details' => 'TEXT DEFAULT NULL',
+                'email' => 'VARCHAR(190) DEFAULT NULL',
+                'contact_no' => 'VARCHAR(40) DEFAULT NULL',
+                'address' => 'TEXT DEFAULT NULL',
+                'bank_name' => 'VARCHAR(120) DEFAULT NULL',
+                'bank_account_no' => 'VARCHAR(40) DEFAULT NULL',
+                'bank_branch' => 'VARCHAR(120) DEFAULT NULL',
+                'is_fixed_asset' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'maintain_bill_by_bill' => 'TINYINT(1) NOT NULL DEFAULT 0',
+                'use_cost_centre' => 'TINYINT(1) NOT NULL DEFAULT 0',
+            ] as $column => $definition) {
+                accounting_repair_add_column($table, $column, '`' . $column . '` ' . $definition);
+            }
+        }
+
+}
+
 function accounting_repair_table_exists(string $tableName): bool
 {
     $stmt = db()->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = :db_name AND table_name = :table_name');
@@ -497,6 +523,8 @@ function accounting_module_repair_database(): array
         accounting_repair_add_column('voucher_entries', 'statement_date', '`statement_date` DATE DEFAULT NULL AFTER `reconciled_by`');
         accounting_repair_add_index('voucher_entries', 'idx_voucher_entries_reconciled', 'KEY `idx_voucher_entries_reconciled` (`ledger_id`, `reconciled_at`)');
     });
+
+    $run('Unified account creation metadata', 'accounting_repair_account_creation_schema');
 
     $run('Create accounting parties', static function (): void {
         db()->exec("

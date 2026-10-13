@@ -206,6 +206,9 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .chart-accounts-page .coa-table td:nth-child(2) { white-space: normal; min-width: 220px; overflow-wrap: anywhere; }
 .chart-accounts-page .coa-table .mbw-pill { font-size: 11px; padding: 3px 8px; }
 .chart-accounts-page .coa-row-actions { display: flex; align-items: center; gap: 10px; }
+.chart-accounts-page #account-create-form h3 { margin: 20px 0 12px; font-size: 14px; }
+.chart-accounts-page #account-create-form fieldset { margin: 20px 0 0; padding: 14px; border: 1px solid var(--color-border); border-radius: var(--radius-control); min-width: 0; }
+.chart-accounts-page #account-create-form legend { padding: 0 6px; font-size: 14px; font-weight: 650; }
 .chart-accounts-page #coa-upload-menu .action-menu-options button { display: flex; width: 100%; padding: 12px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--color-text); font: inherit; text-align: left; cursor: pointer; }
 .chart-accounts-page #coa-upload-menu .action-menu-options button:hover,
 .chart-accounts-page #coa-upload-menu .action-menu-options button:focus-visible { background: var(--color-primary-soft); color: var(--color-primary); }
