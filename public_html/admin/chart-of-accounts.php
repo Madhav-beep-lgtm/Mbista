@@ -245,6 +245,16 @@ $statusPill = static fn (string $status): string => $status === 'active'
 </div>
 
 <form method="get" class="workspace-form-grid" style="margin:14px 0">
+    <label>View
+        <select id="coa-section">
+            <option value="<?= e(url('admin/chart-of-accounts.php')) ?>">Hierarchy</option>
+            <option value="<?= e(url('admin/chart-masters.php')) ?>">Masters</option>
+            <option value="<?= e(url('admin/chart-groups.php')) ?>">Groups</option>
+            <option value="<?= e(url('admin/chart-ledgers.php')) ?>">Ledgers</option>
+            <option value="<?= e(url('admin/chart-posting-accounts.php')) ?>">Posting accounts</option>
+            <option value="<?= e(url('admin/audit-trail.php')) ?>">Audit log</option>
+        </select>
+    </label>
     <label>Find ledger
         <input type="search" name="q" value="<?= e($coaSearch) ?>" placeholder="Code or account name">
     </label>
@@ -425,22 +435,12 @@ $coaRowPill = static function (string $status): string {
     <?php endif; ?>
 </details>
 
-<nav class="mbw-tabbar" aria-label="Chart of accounts sections">
-    <a class="mbw-tab is-active" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('tree') ?>Hierarchy View</a>
-    <a class="mbw-tab" href="<?= e(url('admin/chart-masters.php')) ?>"><?= icon('layers') ?>Masters</a>
-    <a class="mbw-tab" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('teams') ?>Groups</a>
-    <a class="mbw-tab" href="<?= e(url('admin/chart-ledgers.php')) ?>"><?= icon('journal') ?>Ledgers</a>
-    <a class="mbw-tab" href="<?= e(url('admin/chart-posting-accounts.php')) ?>"><?= icon('settings') ?>Posting Accounts</a>
-    <a class="mbw-tab" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Log</a>
-</nav>
 
 
     <section class="mbw-card" aria-label="Chart of accounts hierarchy">
         <div class="mbw-card-head">
             <h2>Chart of Accounts Hierarchy</h2>
             <div class="mbw-card-tools">
-                <button type="button" class="button secondary" style="min-height:32px;padding:4px 12px" onclick="document.querySelectorAll('.coa-node').forEach(function(r){r.style.display='';});document.querySelectorAll('.coa-tgl').forEach(function(t){t.textContent='▾';})">Expand All</button>
-                <button type="button" class="button secondary" style="min-height:32px;padding:4px 12px" onclick="document.querySelectorAll('.coa-node.coa-child').forEach(function(r){r.style.display='none';});document.querySelectorAll('.coa-tgl').forEach(function(t){t.textContent='▸';})">Collapse All</button>
                 <input type="search" id="coa-search" placeholder="Search in hierarchy..." style="min-height:34px;padding:5px 10px;font-size:12.5px;border:1px solid var(--mbw-border);border-radius:8px;background:var(--mbw-card);color:var(--mbw-text)">
             </div>
         </div>
@@ -500,6 +500,9 @@ $coaRowPill = static function (string $status): string {
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('coa-section').addEventListener('change', function () {
+        window.location.assign(this.value);
+    });
     // Collapse/expand branches.
     document.querySelectorAll('.coa-tgl').forEach(function (toggle) {
         toggle.addEventListener('click', function () {
