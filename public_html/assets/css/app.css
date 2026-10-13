@@ -601,9 +601,9 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .accounting-dashboard-page .ad-business-form > div { display: inline-flex; padding: 3px; border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-surface-muted); }
 .accounting-dashboard-page .ad-business-form button { min-height: 32px; padding: 0 11px; border: 0; background: transparent; color: var(--color-text-muted); }
 .accounting-dashboard-page .ad-business-form button.is-active { background: var(--color-surface); color: var(--color-primary); box-shadow: 0 1px 3px rgba(36, 55, 70, .12); }
-.accounting-dashboard-page .mbw-kpi-grid { gap: var(--space-4); }
-.accounting-dashboard-page .mbw-kpi { min-height: 136px; padding: 18px; align-items: flex-start; }
-.accounting-dashboard-page .mbw-kpi-value { margin-top: 9px; font-size: 25px; }
+.accounting-dashboard-page .mbw-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-3); }
+.accounting-dashboard-page .mbw-kpi { min-height: 100px; padding: 14px; align-items: flex-start; }
+.accounting-dashboard-page .mbw-kpi-value { margin-top: 5px; font-size: 22px; }
 .accounting-dashboard-page .mbw-more-kpis { margin: 0; }
 .accounting-dashboard-page .mbw-row-charts { align-items: stretch; }
 .accounting-dashboard-page .mbw-row-charts > .mbw-card { min-height: 360px; }

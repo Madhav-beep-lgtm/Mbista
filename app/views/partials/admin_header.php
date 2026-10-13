@@ -506,7 +506,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             </form>
             <?php endif; ?>
             <?php if (empty($platformShell)): ?>
-            <a class="admin-icon-button" href="<?= e(url('admin/reports-center.php')) ?>" aria-label="Open Reports Center" title="Reports Center"><?= icon('analytics') ?></a>
             <?php /* Current company is already displayed persistently in the
                       sidebar portal card, so it is not duplicated here. */ ?>
             <?php
@@ -646,8 +645,10 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                                 <strong><?= e($headerUserName) ?></strong>
                             </div>
                             <a href="<?= e(url(!empty($platformShell) ? 'platform/profile.php' : 'admin/profile.php')) ?>"><?= icon('profile') ?><strong>My profile</strong></a>
-                            <a href="<?= e(url(!empty($platformShell) ? 'platform/users.php' : 'admin/users.php')) ?>"><?= icon('users') ?><strong>Users</strong></a>
-                            <a href="<?= e(url(!empty($platformShell) ? 'platform/settings.php' : 'admin/settings.php')) ?>"><?= icon('settings') ?><strong>Settings</strong></a>
+                            <?php if (empty($platformShell)): ?>
+                                <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><strong>Users</strong></a>
+                                <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><strong>Settings</strong></a>
+                            <?php endif; ?>
                             <a class="is-logout" href="<?= e(url('admin/logout.php')) ?>"><?= icon('logout') ?><strong>Logout</strong></a>
                         </div>
                     </details>

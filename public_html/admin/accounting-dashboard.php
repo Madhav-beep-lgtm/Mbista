@@ -748,18 +748,10 @@ $pageTitle = $isGroupDashboard ? 'Group Dashboard' : 'Accounting Dashboard';
 $pageSubtitle = $isGroupDashboard
     ? 'Group-wide financial health across all companies'
     : 'Monitor your financial health and key accounting activities';
+$pageHero = false;
 $bodyClass = 'admin-layout accounting-module-page accounting-dashboard-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="ad-head">
-    <div class="ad-company-title">
-        <span class="ad-company-icon"><?= icon('companies') ?></span>
-        <div>
-            <h2><?= e((string) preg_replace('/\s*\((?:Client\s+)?Books\)\s*$/i', '', (string) $company['name'])) ?></h2>
-        </div>
-    </div>
-</div>
-
 <?php if ($repairErrors !== []): ?><div class="notice error">Accounting module repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
 <section class="mbw-kpi-grid" aria-label="Financial overview">
@@ -781,6 +773,18 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <span class="mbw-chip tone-<?= e($kpi['tone']) ?>"><?= icon($kpi['icon']) ?></span>
         </a>
     <?php endforeach; ?>
+    <?php if (!$isGroupDashboard): ?>
+        <?php foreach ($secondaryKpis as $kpi): ?>
+            <article class="mbw-kpi">
+                <div>
+                    <span class="mbw-kpi-label"><?= e($kpi['label']) ?></span>
+                    <div class="mbw-kpi-value"><?= e($fmtMoney((float) $kpi['amount'])) ?></div>
+                    <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($kpi['note']) ?></span></span>
+                </div>
+                <span class="mbw-chip tone-<?= e($kpi['tone']) ?>"><?= icon($kpi['icon']) ?></span>
+            </article>
+        <?php endforeach; ?>
+    <?php endif; ?>
 </section>
 
 <?php if ($isGroupDashboard): ?>
@@ -836,22 +840,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </table>
     </div>
 </section>
-<?php else: ?>
-<details class="mbw-card mbw-more-kpis">
-    <summary class="mbw-view-all" style="cursor:pointer"><?= icon('more-v') ?> More financial indicators</summary>
-    <div class="mbw-kpi-grid" style="margin-top:12px">
-        <?php foreach ($secondaryKpis as $kpi): ?>
-            <article class="mbw-kpi">
-                <div>
-                    <span class="mbw-kpi-label"><?= e($kpi['label']) ?></span>
-                    <div class="mbw-kpi-value"><?= e($fmtMoney((float) $kpi['amount'])) ?></div>
-                    <span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($kpi['note']) ?></span></span>
-                </div>
-                <span class="mbw-chip tone-<?= e($kpi['tone']) ?>"><?= icon($kpi['icon']) ?></span>
-            </article>
-        <?php endforeach; ?>
-    </div>
-</details>
 <?php endif; ?>
 
 <div class="mbw-row-charts">

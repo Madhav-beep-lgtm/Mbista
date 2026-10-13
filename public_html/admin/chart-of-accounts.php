@@ -233,7 +233,6 @@ $statusPill = static fn (string $status): string => $status === 'active'
 <?php if ($repairErrors !== []): ?><div class="notice error">Repair warnings: <?= e(implode(' | ', $repairErrors)) ?></div><?php endif; ?>
 
 <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
-    <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('reconcile') ?>Refresh</a>
     <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><?= icon('analytics') ?>Export COA</a>
     <a class="button" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>＋ Create Group</a>
     <a class="button" href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>＋ Create Ledger</a>
@@ -419,14 +418,6 @@ $coaRowPill = static function (string $status): string {
         <?php endif; ?>
     <?php endif; ?>
 </details>
-
-<section class="mbw-kpi-grid" aria-label="Chart of accounts overview">
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Masters</span><div class="mbw-kpi-value"><?= count($natureOrder) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">System-defined</span></span></div><span class="mbw-chip tone-blue"><?= icon('layers') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Groups</span><div class="mbw-kpi-value"><?= count($groups) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Active</span></span></div><span class="mbw-chip tone-green"><?= icon('tree') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Ledgers</span><div class="mbw-kpi-value"><?= $totalLedgers ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Posting accounts</span></span></div><span class="mbw-chip tone-purple"><?= icon('journal') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Posting Mappings</span><div class="mbw-kpi-value"><?= $mappingsCount ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Configured</span></span></div><span class="mbw-chip tone-amber"><?= icon('settings') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Active Ledgers</span><div class="mbw-kpi-value"><?= $activeLedgers ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= $activePct ?>% of total</span></span></div><span class="mbw-chip tone-teal"><?= icon('tasks') ?></span></article>
-</section>
 
 <nav class="mbw-tabbar" aria-label="Chart of accounts sections">
     <a class="mbw-tab is-active" href="<?= e(url('admin/chart-of-accounts.php')) ?>"><?= icon('tree') ?>Hierarchy View</a>

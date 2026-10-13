@@ -98,7 +98,6 @@ $headerStaffCompany = !empty($currentUser['company_id']) ? company_by_id((int) $
                     </select>
                 </form>
 
-                <a class="admin-icon-button" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>" aria-label="Compliance calendar" title="Compliance calendar"><?= icon('calendar') ?></a>
                 <?php include __DIR__ . '/attention_bell.php'; ?>
             </div>
         </header>
