@@ -28,18 +28,23 @@ $report = item_profit_report($companyId, $from, $to, ['item_id'=>$itemFilter, 's
 $periodic = inv_accounting_method($companyId) === 'periodic';
 $trading = $periodic && !$itemFilter && !$typeFilter ? inv_periodic_trading_figures($companyId, $from, $to) : null;
 $pageTitle = 'Item Profitability'; $pageHero = false;
-$bodyClass = 'admin-layout accounting-module-page';
+$bodyClass = 'admin-layout accounting-module-page reports-center-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 $money = static fn($value) => $value === null ? 'Not available' : number_format((float)$value, 2);
 ?>
 <section class="mbw-card" style="padding:20px">
-<h2>Item profitability</h2>
-<form method="get" class="actions">
+<form method="get" class="rc2-filters" aria-label="Item profitability filters">
+    <div class="rc2-filters-body" style="--rc-filter-columns:6">
+    <div class="rc-filter-grid">
     <label>From date<input type="date" name="from" value="<?= e($from) ?>" required></label>
     <label>To date<input type="date" name="to" value="<?= e($to) ?>" required></label>
     <label>Item<select name="item_id" class="js-searchable"><option value="0">All items</option><?php foreach ($filterItems as $item): ?><option value="<?= (int)$item['id'] ?>" <?= $itemFilter === (int)$item['id'] ? 'selected' : '' ?>><?= e($item['sku'] . ' — ' . $item['name']) ?></option><?php endforeach; ?></select></label>
     <label>Stock type<select name="stock_type_id"><option value="0">All stock types</option><?php foreach ($stockTypes as $id => $name): ?><option value="<?= (int)$id ?>" <?= $typeFilter === (int)$id ? 'selected' : '' ?>><?= e($name) ?></option><?php endforeach; ?></select></label>
-    <button class="button" type="submit">Apply</button><a class="button secondary" href="<?= e(url('admin/item-profit.php')) ?>">Clear</a>
+    </div>
+    <div class="rc2-filter-actions">
+    <button class="button secondary" type="submit"><?= icon('filter') ?>Apply</button><a class="button secondary" href="<?= e(url('admin/item-profit.php')) ?>">Clear</a>
+    </div>
+    </div>
 </form>
 <?php if (!$periodic): ?><div class="notice error">These existing books still use perpetual accounting. Historical conversion must be reviewed before switching to periodic; this read-only report does not change the books.</div><?php endif; ?>
 <div style="overflow-x:auto"><table class="mbw-grid-table">
