@@ -370,6 +370,12 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .vch-preview-line em { color: var(--color-primary); font-style: normal; font-weight: 750; }
 
 /* Dialogs and menus */
+.action-menu { position: relative; }
+.action-menu > summary { cursor: pointer; list-style: none; }
+.action-menu > summary::-webkit-details-marker { display: none; }
+.action-menu-options { position: absolute; z-index: 100; right: 0; top: calc(100% + 6px); min-width: 190px; padding: 6px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); box-shadow: var(--shadow-menu); }
+.action-menu-options a { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--color-text); border-radius: var(--radius-control); }
+.action-menu-options a:hover, .action-menu-options a:focus-visible { background: var(--color-primary-soft); color: var(--color-primary); }
 .modal-overlay { position: fixed; inset: 0; z-index: 1000; display: grid; padding: var(--space-4); place-items: center; background: rgba(15, 23, 32, .45); }
 .modal-overlay:not(.is-open) { display: none; }
 .modal-card, dialog { width: min(100%, 680px); max-height: calc(100vh - 32px); overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-menu); }

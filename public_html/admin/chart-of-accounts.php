@@ -223,6 +223,7 @@ if (table_exists('company_ledger_mappings')) {
     $mappingsCount = (int) $mapStmt->fetchColumn();
 }
 $pageTitle = 'Chart of Accounts';
+$pageHero = false;
 $pageSubtitle = 'Manage masters, groups, ledgers, opening balances, and posting structure.';
 $bodyClass = 'admin-layout accounting-module-page chart-accounts-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
@@ -234,8 +235,13 @@ $statusPill = static fn (string $status): string => $status === 'active'
 
 <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
     <a class="button secondary" href="<?= e(url('admin/chart-of-accounts.php?export=csv')) ?>"><?= icon('analytics') ?>Export COA</a>
-    <a class="button" href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>＋ Create Group</a>
-    <a class="button" href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>＋ Create Ledger</a>
+    <details class="action-menu">
+        <summary class="button"><?= icon('layers') ?>Create account <?= icon('chevron') ?></summary>
+        <div class="action-menu-options">
+            <a href="<?= e(url('admin/chart-groups.php')) ?>"><?= icon('layers') ?>Create group</a>
+            <a href="<?= e(url('admin/chart-ledgers.php')) ?>" id="create-ledger"><?= icon('journal') ?>Create ledger</a>
+        </div>
+    </details>
 </div>
 
 <form method="get" class="workspace-form-grid" style="margin:14px 0">
