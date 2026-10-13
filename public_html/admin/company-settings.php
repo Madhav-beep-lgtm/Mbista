@@ -69,6 +69,7 @@ $yearsQuery = db()->prepare('SELECT * FROM fiscal_years WHERE company_id = ? ORD
 $yearsQuery->execute([$settingsCompanyId]);
 $companyYears = $yearsQuery->fetchAll();
 $pageTitle = 'Company Settings';
+$bodyClass = 'admin-layout company-settings-page';
 $pageSubtitle = (string)$companyProfile['name'];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
@@ -82,8 +83,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
   <label>Phone<input name="support_phone" value="<?= e(setting('support_phone','',false,$settingsCompanyId)) ?>"></label>
   <label>Address<input name="office_address" value="<?= e(setting('office_address','',false,$settingsCompanyId)) ?>"></label>
   <label>Logo (PNG, JPEG, WebP; max 2 MB)<input type="file" name="logo" accept="image/png,image/jpeg,image/webp"></label>
-  <?php if (!empty($companyProfile['logo_path'])): ?><img src="<?= e(url($companyProfile['logo_path'])) ?>" alt="Company logo" width="96" height="64" style="object-fit:contain"><?php endif; ?>
-  <div><button class="btn btn-primary" type="submit">Save details</button></div>
+  <div class="company-form-actions">
+  <?php if (!empty($companyProfile['logo_path'])): ?><img class="company-logo-preview" src="<?= e(url($companyProfile['logo_path'])) ?>" alt="Company logo" width="96" height="64"><?php endif; ?>
+  <button class="button" type="submit">Save details</button></div>
  </form>
 </section>
 <section class="mbw-card">
@@ -91,23 +93,23 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
  <form method="post" class="workspace-form-grid">
   <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="modules">
   <?php foreach (company_optional_modules() as $key=>$label): ?>
-   <label><input type="checkbox" name="modules[]" value="<?= e($key) ?>" <?= company_module_enabled($key,$settingsCompanyId) ? 'checked' : '' ?> <?= user_is_super_admin() ? '' : 'disabled' ?>> <?= e($label) ?></label>
+   <label class="company-module-option"><input type="checkbox" name="modules[]" value="<?= e($key) ?>" <?= company_module_enabled($key,$settingsCompanyId) ? 'checked' : '' ?> <?= user_is_super_admin() ? '' : 'disabled' ?>> <?= e($label) ?></label>
   <?php endforeach; ?>
-  <?php if (user_is_super_admin()): ?><div><button class="btn btn-primary" type="submit">Save modules</button></div><?php else: ?><p>Module access is managed by the super admin.</p><?php endif; ?>
+  <div class="company-form-actions"><?php if (user_is_super_admin()): ?><button class="button" type="submit">Save modules</button><?php else: ?><p>Module access is managed by the super admin.</p><?php endif; ?></div>
  </form>
 </section>
 <section class="mbw-card">
  <div class="mbw-card-head"><h2>Fiscal years</h2></div>
- <form method="post" class="workspace-form-grid">
+ <form method="post" class="workspace-form-grid company-year-form">
   <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="fiscal_year">
   <label>Year label<input name="label" required maxlength="50"></label>
   <label>From date<input type="date" name="start_date" required></label>
   <label>To date<input type="date" name="end_date" required></label>
-  <label><input type="checkbox" name="is_default" value="1"> Default fiscal year</label>
-  <div><button class="btn btn-primary" type="submit">Add fiscal year</button></div>
+  <div class="company-form-actions"><label class="checkbox-line"><input type="checkbox" name="is_default" value="1"> Default fiscal year</label>
+  <button class="button" type="submit">Add fiscal year</button></div>
  </form>
  <div class="table-responsive"><table><thead><tr><th>Fiscal year</th><th>From</th><th>To</th><th>Default</th></tr></thead><tbody>
- <?php foreach ($companyYears as $year): ?><tr><td><?= e($year['label']) ?></td><td><?= e(app_date($year['start_date'])) ?></td><td><?= e(app_date($year['end_date'])) ?></td><td><?php if ($year['is_default']): ?>Yes<?php else: ?><form method="post" class="inline-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="default_year"><input type="hidden" name="fiscal_year_id" value="<?= (int)$year['id'] ?>"><button type="submit">Set default</button></form><?php endif; ?></td></tr><?php endforeach; ?>
+ <?php foreach ($companyYears as $year): ?><tr><td><?= e($year['label']) ?></td><td><?= e(app_date($year['start_date'])) ?></td><td><?= e(app_date($year['end_date'])) ?></td><td><?php if ($year['is_default']): ?>Yes<?php else: ?><form method="post" class="inline-form"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="default_year"><input type="hidden" name="fiscal_year_id" value="<?= (int)$year['id'] ?>"><button class="button secondary" type="submit">Set default</button></form><?php endif; ?></td></tr><?php endforeach; ?>
  <?php if (!$companyYears): ?><tr><td colspan="4">No fiscal years created.</td></tr><?php endif; ?>
  </tbody></table></div>
 </section>

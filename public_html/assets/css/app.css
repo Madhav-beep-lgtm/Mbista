@@ -185,6 +185,10 @@ button, a, input, select, textarea, summary { outline: none; }
 }
 .align-center { text-align: center !important; }
 hr { border: 0; border-top: 1px solid var(--color-border); }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
 
 /* SOURCE: components.css */
 /* Shared controls, surfaces, tables, feedback and application patterns. */
@@ -262,6 +266,13 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-
 }
 .frm-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .workspace-span-2, .span-2 { grid-column: span 2; }
+.workspace-form-grid > *, .frm-grid > * { min-width: 0; }
+.company-settings-page .company-module-option { display:flex; align-items:center; gap:10px; min-height:48px; padding:10px 12px; border:1px solid var(--color-border); border-radius:var(--radius-control); background:var(--color-surface); }
+.company-settings-page .company-module-option:has(input:checked) { background:var(--color-primary-soft); border-color:var(--color-primary); }
+.company-settings-page .company-module-option input { flex:0 0 16px; margin:0; }
+.company-settings-page .company-form-actions { grid-column:1 / -1; display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+.company-settings-page .company-year-form { margin-bottom:16px; }
+.company-settings-page .company-logo-preview { width:96px; height:64px; object-fit:contain; padding:4px; border:1px solid var(--color-border); border-radius:var(--radius-control); }
 .inline-action-form { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 
 /* Panels */

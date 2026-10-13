@@ -10,6 +10,8 @@
  */
 (function () {
     'use strict';
+    var openWidgets = new Map();
+    var syncWidgets = new WeakMap();
     var STYLE = '.ss-wrap{position:relative;display:block;min-width:0}' +
         '.ss-input{width:100%;min-height:38px;padding:8px 12px;border:1px solid var(--mbw-line,rgba(0,0,0,.2));border-radius:8px;' +
         'background:var(--mbw-card,#fff);color:var(--mbw-ink,#12261f);font:inherit}' +
@@ -99,7 +101,13 @@
             var o = sel.options[sel.selectedIndex];
             return o ? o.text : '';
         }
-        function syncFromSelect() { input.value = selectedText(); }
+        function syncFromSelect() {
+            input.value = selectedText();
+            input.disabled = sel.disabled;
+            input.setAttribute('aria-required', sel.required ? 'true' : 'false');
+            if (sel.disabled && isOpen()) { close(); }
+        }
+        syncWidgets.set(sel, syncFromSelect);
         syncFromSelect();
         sel.addEventListener('change', syncFromSelect);
 
@@ -177,19 +185,27 @@
             }
         }
         function isOpen() { return list.style.display === 'block'; }
+        var positionFrame = null;
         function reposition(ev) {
             // A scroll INSIDE the list is the user reading it, and re-placing
             // the list under them measures its own content mid-scroll. Only
             // the world moving around the field is worth following.
             if (ev && ev.target && ev.target !== document && list.contains(ev.target)) { return; }
-            if (isOpen()) { placeList(); }
+            if (isOpen() && positionFrame === null) {
+                positionFrame = window.requestAnimationFrame(function () {
+                    positionFrame = null;
+                    if (!sel.isConnected) { close(); return; }
+                    if (isOpen()) { placeList(); }
+                });
+            }
         }
         // The page, or the grid the box sits in, can scroll under an open
         // list. Capture, so a scroll inside the table is heard as well.
-        window.addEventListener('scroll', reposition, true);
-        window.addEventListener('resize', reposition);
-
         function close() {
+            window.removeEventListener('scroll', reposition, true);
+            window.removeEventListener('resize', reposition);
+            if (positionFrame !== null) { window.cancelAnimationFrame(positionFrame); positionFrame = null; }
+            openWidgets.delete(sel);
             list.style.display = 'none';
             input.setAttribute('aria-expanded', 'false');
             activeIndex = -1;
@@ -201,18 +217,20 @@
         }
         function choose(idx) {
             var opt = visible[idx];
-            if (!opt) { return; }
+            if (sel.disabled || !opt || opt.disabled || (opt.parentNode && opt.parentNode.disabled)) { return; }
             sel.value = opt.value;
             sel.dispatchEvent(new Event('change', { bubbles: true }));
             syncFromSelect();
             close();
         }
         function render(filter) {
+            if (sel.disabled) { close(); return; }
             var q = (filter || '').toLowerCase();
             list.innerHTML = '';
             visible = [];
             var lastGroup = null;
             Array.prototype.forEach.call(sel.options, function (opt) {
+                if (opt.disabled || (opt.parentNode && opt.parentNode.disabled)) { return; }
                 if (q !== '' && opt.text.toLowerCase().indexOf(q) === -1) { return; }
                 // The browser draws <optgroup> headings itself, but this list is
                 // built from the options alone, so a grouped select would come
@@ -250,6 +268,9 @@
                 list.appendChild(empty);
             }
             list.style.display = 'block';
+            openWidgets.set(sel, close);
+            window.addEventListener('scroll', reposition, { capture: true, passive: true });
+            window.addEventListener('resize', reposition);
             input.setAttribute('aria-expanded', 'true');
             activeIndex = -1;
             wrap.classList.add('ss-open');
@@ -339,10 +360,18 @@
         // switches itself on. Watching the document fixes all of them at once
         // and leaves nothing for the next grid to remember.
         new MutationObserver(function (records) {
+            openWidgets.forEach(function (closeWidget, select) {
+                if (!select.isConnected) { closeWidget(); }
+            });
             records.forEach(function (record) {
+                if (record.type === 'attributes') {
+                    var sync = syncWidgets.get(record.target);
+                    if (sync) { sync(); }
+                    return;
+                }
                 Array.prototype.forEach.call(record.addedNodes, adopt);
             });
-        }).observe(document.body, { childList: true, subtree: true });
+        }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'required'] });
     }
 
     function boot() {
