@@ -94,23 +94,19 @@ foreach ($entries as $entry) {
 
 $fmtMoney = static fn (float $amount): string => $currency . number_format($amount, 2);
 $pageTitle = 'Day Book';
-$pageSubtitle = 'Every entry, chronologically — filter by date, type, ledger, status, or narration';
+$pageHero = false;
 $bodyClass = 'admin-layout accounting-module-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 
 <section class="mbw-kpi-grid" aria-label="Day book totals">
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Entries shown</span><div class="mbw-kpi-value"><?= e((string) count($entries)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e($fromDate) ?> → <?= e($toDate) ?></span></span></div><span class="mbw-chip tone-blue"><?= icon('calendar') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Debits</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalDebit)) ?></div><span class="mbw-kpi-delta is-up"><?= icon('trend-up') ?><span class="mbw-kpi-vs">In the filtered window</span></span></div><span class="mbw-chip tone-green"><?= icon('trend-up') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Credits</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalCredit)) ?></div><span class="mbw-kpi-delta is-down"><?= icon('trend-down') ?><span class="mbw-kpi-vs">In the filtered window</span></span></div><span class="mbw-chip tone-red"><?= icon('trend-down') ?></span></article>
-    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Dr − Cr</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalDebit - $totalCredit)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">0.00 when the filter spans whole vouchers</span></span></div><span class="mbw-chip tone-purple"><?= icon('reconcile') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Entries shown</span><div class="mbw-kpi-value"><?= e((string) count($entries)) ?></div></div><span class="mbw-chip tone-blue"><?= icon('calendar') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Debits</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalDebit)) ?></div></div><span class="mbw-chip tone-green"><?= icon('trend-up') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Credits</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalCredit)) ?></div></div><span class="mbw-chip tone-red"><?= icon('trend-down') ?></span></article>
+    <article class="mbw-kpi"><div><span class="mbw-kpi-label">Dr − Cr</span><div class="mbw-kpi-value"><?= e($fmtMoney($totalDebit - $totalCredit)) ?></div></div><span class="mbw-chip tone-purple"><?= icon('reconcile') ?></span></article>
 </section>
 
 <section class="mbw-card">
-    <div class="mbw-card-head">
-        <h2>Day Book</h2>
-        <div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(url('admin/accounting.php')) ?>">Voucher Register</a></div>
-    </div>
     <form method="get" action="<?= e(url('admin/day-book.php')) ?>" class="mbw-filter-bar">
         <input type="date" name="from" value="<?= e($fromDate) ?>" class="field-compact" aria-label="From date">
         <input type="date" name="to" value="<?= e($toDate) ?>" class="field-compact" aria-label="To date">
