@@ -165,7 +165,6 @@ foreach ($transactions as $txn) { $activityByLedger[(int) $txn['ledger_id']][] =
 <section class="mbw-card" aria-label="Cash, bank and cash equivalent accounts and activity">
     <div style="overflow-x:auto">
     <table>
-        <caption style="text-align:left;padding:12px">Account balances at fiscal-year end · Latest 25 posted cash/bank entries in this fiscal year</caption>
         <thead><tr><th>Account</th><th>Account no.</th><th>FY-end balance</th><th>Date</th><th>Voucher no.</th><th>Narration / Memo</th><th>In</th><th>Out</th><th>Reconciliation</th><th>Actions</th></tr></thead>
         <tbody>
         <?php if ($accounts === []): ?><tr><td colspan="10">No cash, bank or cash equivalent accounts.</td></tr><?php endif; ?>
