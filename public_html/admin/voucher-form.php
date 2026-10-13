@@ -796,7 +796,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if ($editVoucher): ?><input type="hidden" name="voucher_id" value="<?= (int) $editVoucher['id'] ?>"><?php endif; ?>
 
     <div class="frm-main">
-        <section class="mbw-card frm-section vch-head-card tone-<?= e((string) $spec['tone']) ?>">
+        <section class="mbw-card frm-section vch-head-card">
             <div class="frm-section-head">
                 <div class="vch-document-title">
                     <h2><?= e((string) $spec['label']) ?></h2>
@@ -889,13 +889,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <textarea name="narration" rows="2" placeholder="Additional description for this voucher" required><?= e($editNarration) ?></textarea>
                 </label>
                 <div class="vch-attachment-field">
-                    <label class="frm-dropzone" id="frm-dropzone" for="frm-attachments">
-                        <span class="vch-upload-icon"><?= icon('documents') ?></span>
-                        <span class="vch-upload-copy">
-                            <strong>Attach supporting files</strong>
-                            
-                        </span>
-                        <span class="vch-upload-action">Choose files</span>
+                    <label id="frm-dropzone" for="frm-attachments">Supporting files
                         <input type="file" name="attachments[]" id="frm-attachments" multiple accept=".pdf,.xls,.xlsx,.csv,.jpg,.jpeg,.png">
                     </label>
                     <span id="frm-file-list">No files selected</span>

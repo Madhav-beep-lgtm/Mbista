@@ -173,6 +173,14 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 
 /* Voucher entry */
 .vch-page { display: grid; gap: var(--space-3); }
+.vch-head-card { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); }
+.vch-head-card .vch-document-state { color: var(--color-text-muted); }
+.vch-support-card .vch-support-grid { align-items: start; gap: 16px; }
+.vch-support-card .vch-support-grid > label { align-content: start; gap: 6px; }
+.vch-support-card textarea[name="narration"] { height: 80px; min-height: 80px; padding: 8px 10px; resize: vertical; }
+.vch-support-card .vch-attachment-field { display: grid; gap: 6px; padding: 0; border: 0; border-radius: 0; min-width: 0; }
+.vch-support-card input[type="file"] { height: 38px; min-height: 38px; padding: 5px 8px; font-size: 13px; }
+.vch-support-card #frm-file-list { font-size: 12px; color: var(--color-text-muted); overflow-wrap: anywhere; }
 .vch-grid, .jw-assign-grid { min-width: 0; }
 .vch-typebar { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .vch-type { display: inline-flex; min-height: 38px; padding: 0 12px; align-items: center; gap: 7px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); }
