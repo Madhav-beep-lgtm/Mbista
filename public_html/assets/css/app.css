@@ -820,6 +820,15 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .voucher-register-filters > label { flex:0 1 155px; min-width:0; font-size:12px; }
 .voucher-register-filters > label.voucher-search-label { flex-basis:210px; }
 .voucher-register-filters > .button, .voucher-register-filters > .actions { align-self:flex-end; }
+.voucher-actions-cell { width:1%; white-space:nowrap; text-align:center; }
+.voucher-actions-toggle { min-height:32px !important; height:32px; padding:0 12px; font-size:13px; gap:12px; }
+.voucher-action-menu { position:fixed; inset:auto; margin:0; width:260px; max-width:calc(100vw - 16px); max-height:calc(100vh - 16px); overflow:auto; padding:6px; border:1px solid var(--color-border); border-radius:10px; background:var(--color-surface,#fff); color:var(--color-text); box-shadow:0 8px 30px #0002; white-space:normal; text-align:left; }
+.voucher-action-item { display:block; width:100%; box-sizing:border-box; padding:9px 12px; border:0; border-radius:6px; background:transparent; color:var(--color-text); font:inherit; font-size:13px; font-weight:600; text-align:left; text-decoration:none; cursor:pointer; }
+.voucher-action-item:hover, .voucher-action-item:focus-visible { background:var(--color-primary-soft); }
+.voucher-action-item.is-danger { color:var(--color-danger,#b42318); }
+.voucher-action-form { margin:0; }
+.voucher-action-menu .vr-force { border-top:1px solid var(--color-border); margin-top:4px; padding-top:4px; }
+.voucher-force-form { display:grid; gap:10px; padding:10px; }
 
 /* SOURCE: layout.css */
 /* Shared public and authenticated layout systems. */

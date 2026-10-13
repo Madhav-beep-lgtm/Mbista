@@ -519,22 +519,26 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             <?php endif; ?>
                         </td>
                     <?php endif; ?>
-                    <td>
+                    <td class="voucher-actions-cell">
+                        <?php $canForceDeleteVoucher = ($currentAdmin['role'] ?? '') === 'admin' && voucher_mutation_blocker($voucher) !== null; ?>
+                        <?php if ($canEditVouchers || $canDeleteVouchers || $canForceDeleteVoucher): ?>
+                        <button type="button" class="button secondary voucher-actions-toggle" popovertarget="voucher-actions-<?= (int) $voucher['id'] ?>" aria-label="Actions for <?= e($voucher['voucher_no']) ?>">Actions <span aria-hidden="true">⌄</span></button>
+                        <div id="voucher-actions-<?= (int) $voucher['id'] ?>" class="voucher-action-menu" popover="auto" role="group" aria-label="Actions for <?= e($voucher['voucher_no']) ?>">
                         <?php if ($canEditVouchers): ?>
-                            <a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url('admin/voucher-form.php?edit=' . (int) $voucher['id'])) ?>">Edit</a>
+                            <a class="voucher-action-item" href="<?= e(url('admin/voucher-form.php?edit=' . (int) $voucher['id'])) ?>">Edit voucher</a>
                         <?php endif; ?>
                         <?php if ($canDeleteVouchers): ?>
-                            <form method="post" class="inline-action-form" style="display:inline" onsubmit="return confirm('Permanently delete voucher <?= e($voucher['voucher_no']) ?>? Its ledger entries are removed from the books and this cannot be undone.')">
+                            <form method="post" class="voucher-action-form" data-confirm="Permanently delete voucher <?= e($voucher['voucher_no']) ?>? Its ledger entries are removed from the books and this cannot be undone.">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                 <input type="hidden" name="action" value="delete_voucher">
                                 <input type="hidden" name="voucher_id" value="<?= (int) $voucher['id'] ?>">
-                                <button type="submit" class="button danger" style="min-height:30px;padding:3px 10px">Delete</button>
+                                <button type="submit" class="voucher-action-item is-danger">Delete voucher</button>
                             </form>
                         <?php endif; ?>
-                        <?php if (($currentAdmin["role"] ?? "") === "admin" && voucher_mutation_blocker($voucher) !== null): ?>
-                            <details class="vr-force" style="position:relative;display:inline-block">
-                                <summary class="button secondary" style="min-height:30px;padding:3px 10px;color:var(--mbw-red, #a33);list-style:none;cursor:pointer">Force delete…</summary>
-                                <form method="post" style="position:absolute;right:0;z-index:40;margin-top:6px;display:grid;gap:8px;width:280px;padding:12px;text-align:left;background:var(--mbw-card,#fff);border:1px solid var(--mbw-line,rgba(0,0,0,.16));border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.22)"
+                        <?php if ($canForceDeleteVoucher): ?>
+                            <details class="vr-force">
+                                <summary class="voucher-action-item is-danger">Advanced: force delete…</summary>
+                                <form method="post" class="voucher-force-form"
                                       data-confirm="FORCE delete <?= e($voucher['voucher_no']) ?>? This overrides the module lock: the owning register is rolled back / unlinked, reconciled entries are un-reconciled, and the action is security-logged. It cannot be undone.">
                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                     <input type="hidden" name="action" value="force_delete_voucher">
@@ -548,6 +552,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 </form>
                             </details>
                         <?php endif; ?>
+                        </div>
+                        <?php else: ?><span class="muted">—</span><?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -556,5 +562,22 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </div>
 </section>
 
+<script>
+document.querySelectorAll('.voucher-action-menu').forEach(function (menu) {
+    var trigger = document.querySelector('[popovertarget="' + menu.id + '"]');
+    function position() {
+        if (!menu.matches(':popover-open')) { return; }
+        var rect = trigger.getBoundingClientRect();
+        menu.style.left = Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+        menu.style.top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - menu.offsetHeight - 8)) + 'px';
+    }
+    menu.addEventListener('toggle', position);
+    new ResizeObserver(position).observe(menu);
+    window.addEventListener('resize', position);
+    document.addEventListener('scroll', function (event) {
+        if (!menu.contains(event.target)) { position(); }
+    }, true);
+});
+</script>
 <?php include __DIR__ . '/../../app/views/vouchers/preview_dialog.php'; ?>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
