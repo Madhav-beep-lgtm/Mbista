@@ -1803,7 +1803,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <td class="is-numeric"><?= $line['total_cost'] !== null ? $fmt((float) $line['total_cost']) : 'N/A' ?></td>
                         <td class="is-numeric"><?= $line['gross_profit'] !== null ? $fmt((float) $line['gross_profit']) : 'N/A' ?></td>
                         <td class="is-numeric"><?= $line['gp_pct'] !== null ? $fmt((float) $line['gp_pct']) . '%' : 'N/A' ?></td>
-                        <td><span class="mbw-pill <?= e($statusTones[(string) $line['status']] ?? 'tone-gray') ?>"><?= e(str_replace('_', ' ', (string) $line['status'])) ?></span><?= $line['warning'] ? '<br><small style="color:var(--mbw-muted)">' . e($line['warning']) . '</small>' : '' ?></td>
+                        <td><span class="mbw-pill <?= e($statusTones[(string) $line['status']] ?? 'tone-gray') ?>"><?= e(str_replace('_', ' ', (string) $line['status'])) ?></span><?= $line['warning'] ? '<br>' : '' ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -3238,10 +3238,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php if ($configErrors !== []): ?>
             <div class="notice error" style="margin-top:10px"><strong>Before a sheet can post:</strong> <?= e(implode(' ', $configErrors)) ?></div>
         <?php endif; ?>
-        <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
-            Matching ignores case and extra spaces. An item override wins over its category row.
-            Untick Active to stop a row matching without deleting it.
-        </p>
+        
     </section>
 
     <?php

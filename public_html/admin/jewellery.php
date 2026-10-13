@@ -2698,7 +2698,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
                         <td><?= e($p['purity_code']) ?> <small>(<?= $fmt((float) $p['fineness'], 1) ?>)</small></td>
                         <td>
                             <span class="mbw-pill <?= (string) $p['holder_type'] === 'stock' ? 'tone-green' : 'tone-amber' ?>"><?= e($holderLabels[$p['holder_type']] ?? $p['holder_type']) ?></span>
-                            <?= (int) ($p['holder_id'] ?? 0) > 0 ? ' <small>#' . (int) $p['holder_id'] . '</small>' : '' ?>
+                            <?= (int) ($p['holder_id'] ?? 0) > 0 ? ' ' : '' ?>
                         </td>
                         <td class="is-numeric"><?= $fmt((float) $p['pieces'], 3) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $p['fine'], 4) ?></td>

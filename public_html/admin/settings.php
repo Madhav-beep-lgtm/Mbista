@@ -926,7 +926,7 @@ if (table_exists('company_shareholdings')) {
             <label>Authorized signature<input type="file" name="company_signature" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_signature_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
             <label>Company stamp<input type="file" name="company_stamp" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_stamp_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
             <label>Payment QR code<input type="file" name="company_qr" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['company_qr_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '' ?></label>
-            <label>M.B. World platform logo <small style="color:var(--mbw-muted)">(shown on login, portal &amp; footers)</small><input type="file" name="platform_logo" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['platform_logo_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '<small style="color:var(--mbw-muted)">Using built-in logo</small>' ?></label>
+            <label>M.B. World platform logo <input type="file" name="platform_logo" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['platform_logo_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '<small style="color:var(--mbw-muted)">Using built-in logo</small>' ?></label>
             <label>Platform logo — light/inverse <small style="color:var(--mbw-muted)">(for dark sidebars)</small><input type="file" name="platform_logo_light" accept="image/png,image/jpeg,image/webp,image/gif"><?= ($settings['platform_logo_light_path'] ?? '') !== '' ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '<small style="color:var(--mbw-muted)">Falls back to built-in</small>' ?></label>
             <label>This company's portal logo <small style="color:var(--mbw-muted)">(shown inside <?= e($settingsCompany['name'] ?? 'this company') ?>'s own portal)</small><input type="file" name="company_portal_logo" accept="image/png,image/jpeg,image/webp,image/gif"><?= (($settingsCompany['logo_path'] ?? '') !== '') ? '<small style="color:var(--mbw-green)">Uploaded ✓</small>' : '<small style="color:var(--mbw-muted)">Optional</small>' ?></label>
         </div>
@@ -972,7 +972,6 @@ if (table_exists('company_shareholdings')) {
             <div style="grid-column:1/-1; border-top:1px solid var(--mbw-border); margin-top:6px; padding-top:12px">
                 <strong style="color:var(--mbw-heading)"><?= icon('card') ?> Online payment gateways</strong>
                 
-                <a class="button secondary" href="<?= e(url('admin/payment-gateways.php')) ?>"><?= icon('login') ?> Configure online gateways</a>
             </div>
         </div>
     </details>

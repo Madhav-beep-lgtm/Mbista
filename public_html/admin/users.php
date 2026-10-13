@@ -1446,7 +1446,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endif; ?>
                     </h3>
                     <?php if ($viewKycStatus !== 'verified'): ?>
-                        <p class="muted">KYC requires one identity document (citizenship, national ID or passport) <strong>and</strong> a PAN document, each verified by an administrator. Files are stored outside the public website.</p>
+                        
                     <?php endif; ?>
 
                     <form method="post" enctype="multipart/form-data" class="inline-action-form" style="flex-wrap: wrap;">
@@ -1513,7 +1513,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                             </tbody>
                         </table>
                     <?php else: ?>
-                        <p class="muted" style="margin-bottom: 0;">No KYC documents uploaded yet.</p>
+                        
                     <?php endif; ?>
                 </div>
             <?php endif; ?>

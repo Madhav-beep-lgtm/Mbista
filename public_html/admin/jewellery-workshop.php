@@ -1366,7 +1366,7 @@ jw_filter_bar_styles();
                 <?php if ($orders === []): ?><tr><td colspan="9">No orders yet.</td></tr><?php endif; ?>
                 <?php foreach ($orders as $row): ?>
                     <tr>
-                        <td><?= e($row['order_no']) ?><?= ($row['design_no'] ?? '') !== '' ? '<br><small>' . e((string) $row['design_no']) . '</small>' : '' ?></td>
+                        <td><?= e($row['order_no']) ?><?= ($row['design_no'] ?? '') !== '' ? '<br>' : '' ?></td>
                         <td><?= e(app_date((string) $row['order_date'])) ?></td>
                         <td><?= e((string) ($row['party_name'] ?? $row['customer_name'] ?? 'Walk-in')) ?></td>
                         <?php
@@ -1602,7 +1602,7 @@ jw_filter_bar_styles();
                 <?php foreach ($karigarRows as $row): ?>
                     <tr>
                         <td><?= e($row['code']) ?></td>
-                        <td><?= e($row['name']) ?><?= ($row['phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['phone']) . '</small>' : '' ?></td>
+                        <td><?= e($row['name']) ?><?= ($row['phone'] ?? '') !== '' ? '<br>' : '' ?></td>
                         <td><span class="mbw-pill <?= (string) $row['engagement_type'] === 'contractor' ? 'tone-blue' : 'tone-teal' ?>"><?= e(ucfirst((string) $row['engagement_type'])) ?></span></td>
                         <td><?= $fmt((float) $row['default_making_rate'], 2) ?> <small><?= e(str_replace('_', ' ', (string) $row['default_making_basis'])) ?></small></td>
                         <td class="is-numeric"><?= $row['held_fine'] > 0 ? '<span class="mbw-pill tone-amber">' . $fmt((float) $row['held_fine'], 4) . '</span>' : '—' ?></td>
@@ -1899,7 +1899,7 @@ jw_filter_bar_styles();
                         <td><?= e($row['order_no']) ?></td>
                         <td><?= $rowCustomer !== ''
                                 ? e($rowCustomer)
-                                : '<span style="color:var(--mbw-muted)">' . ($rowOrigin === 'replenishment' ? 'Shelf stock' : 'Nobody yet') . '</span>' ?><?= ($row['customer_phone'] ?? '') !== '' ? '<br><small>' . e((string) $row['customer_phone']) . '</small>' : '' ?></td>
+                                : '<span style="color:var(--mbw-muted)">' . ($rowOrigin === 'replenishment' ? 'Shelf stock' : 'Nobody yet') . '</span>' ?><?= ($row['customer_phone'] ?? '') !== '' ? '<br>' : '' ?></td>
                         <td><span class="mbw-pill <?= e($originTone[$rowOrigin] ?? 'tone-gray') ?>"><?= e((string) ($deliveryOrigins[$rowOrigin] ?? $rowOrigin)) ?></span></td>
                         <td><?= ($row['receive_date'] ?? null) ? e(app_date((string) $row['receive_date'])) : '—' ?></td>
                         <td class="is-numeric"><?= $fmt((float) ($row['received_gross_weight'] ?? 0), 4) ?> <small><?= e((string) $row['unit_code']) ?></small>
@@ -2026,7 +2026,7 @@ jw_filter_bar_styles();
                         <td><?= $index + 1 ?></td>
                         <td><strong><?= e((string) $row['assignment_no']) ?></strong></td>
                         <td><?= e((string) ($row['karigar_name'] ?? '')) ?></td>
-                        <td><?= e((string) ($row['expected_ornament'] ?: $row['item_name'] ?? '')) ?><?= ($row['size_design'] ?? '') !== '' ? '<br><small>' . e((string) $row['size_design']) . '</small>' : '' ?></td>
+                        <td><?= e((string) ($row['expected_ornament'] ?: $row['item_name'] ?? '')) ?><?= ($row['size_design'] ?? '') !== '' ? '<br>' : '' ?></td>
                         <td><?= e(app_date((string) $row['receive_date'])) ?></td>
                         <td class="is-numeric"><?= $fmt((float) $row['received_gross_weight'], 4) ?></td>
                         <td class="is-numeric"><?= $fmt((float) ($row['net_gold_weight'] ?? 0), 4) ?></td>

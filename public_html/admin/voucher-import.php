@@ -400,7 +400,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <tbody>
                 <?php foreach ($preview['vouchers'] as $voucher): ?>
                 <tr>
-                    <td><?= e($voucher['key']) ?><?= !empty($voucher['party_label']) ? '<br><small>' . e($voucher['party_label']) . '</small>' : '' ?></td>
+                    <td><?= e($voucher['key']) ?><?= !empty($voucher['party_label']) ? '<br>' : '' ?></td>
                     <td><?= e($voucher['type_label']) ?></td>
                     <td><?= e($voucher['date_display']) ?></td>
                     <td><?= e((string) ($voucher['title'] ?? '')) ?></td>

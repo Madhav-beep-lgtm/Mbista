@@ -948,7 +948,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         </div>
     </div>
     <?php if (abs($glDiff) < 0.01 && $glGap['movements'] === 0 && $glGap['openings'] === 0): ?>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">The stock subledger and the inventory GL ledgers agree.</p>
+        
     <?php else: ?>
         <p style="margin:0 0 10px;color:var(--mbw-muted);font-size:12.5px">
             Posts what the stock subledger holds and the books do not, at historical cost:

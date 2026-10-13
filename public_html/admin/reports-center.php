@@ -637,7 +637,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?= icon('documents') ?>
             <span>
                 <strong>Report Preview</strong>
-                <small>Generated from the applied filters above.</small>
+                
             </span>
         </span>
         <div class="rc2-preview-tools">

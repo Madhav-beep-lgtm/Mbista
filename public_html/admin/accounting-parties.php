@@ -1646,7 +1646,7 @@ $showingTo = min($totalRows, $page * $perPage);
     <span class="party-master-link-banner-icon"><?= icon('users') ?></span>
     <span class="party-master-link-banner-copy">
         <strong>All transactions use one Party ID</strong>
-        <small>Sales, purchases, receipts, settlements and jewellery activity stay connected to the same ledger history.</small>
+        
     </span>
 </section>
 
@@ -2341,7 +2341,7 @@ $tabHeadings = [
                 <section>
                     <h4>Party Documents</h4>
                     <?php if ($partyTransactions === []): ?>
-                        <p class="muted">No invoices for this party yet.</p>
+                        
                     <?php else: ?>
                         <ul class="party-document-list">
                             <?php foreach (array_slice($partyTransactions, 0, 12) as $row): ?>

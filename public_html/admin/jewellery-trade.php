@@ -1835,7 +1835,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                         ?>
                         <tr>
                             <td><?php if ($index === 0): ?><strong><?= e($party['party_name']) ?></strong><?php endif; ?></td>
-                            <td><?= e($bill['bill_no']) ?><?= $hasJob && $metal['receipt_no'] !== '' ? '<br><small>' . e((string) $metal['receipt_no']) . '</small>' : '' ?></td>
+                            <td><?= e($bill['bill_no']) ?><?= $hasJob && $metal['receipt_no'] !== '' ? '<br>' : '' ?></td>
                             <td><?= e(ucfirst((string) $bill['bill_type'])) ?></td>
                             <td><?= e(app_date((string) $bill['bill_date'])) ?></td>
                             <?php // WHAT WENT OUT AND WHAT CAME BACK. The bill is raised on

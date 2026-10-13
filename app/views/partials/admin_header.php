@@ -42,7 +42,6 @@ $headerAccountingChildren = array_merge($headerAccountingChildren, [
     ['Day Book', 'admin/day-book.php', 'calendar', $headerScript === 'day-book.php'],
     ['Voucher Import (Excel)', 'admin/voucher-import.php', 'upload', $headerScript === 'voucher-import.php'],
     ['Unified Transaction and Party Master', 'admin/accounting-parties.php', 'users', $headerScript === 'accounting-parties.php'],
-    ['Payment Gateways', 'admin/payment-gateways.php', 'card', $headerScript === 'payment-gateways.php'],
     ['Banking', 'admin/banking.php', 'bank', $headerScript === 'banking.php'],
     ['Reconciliation', 'admin/reconciliation.php', 'reconcile', $headerScript === 'reconciliation.php'],
     ['Budgets', 'admin/budgets.php', 'pie', $headerScript === 'budgets.php'],

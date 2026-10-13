@@ -279,7 +279,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <?php else: ?>
             <label>Wastage to allow (fine)
                 <input type="number" name="allow" step="0.0001" min="0" value="<?= e($typedAllow) ?>" placeholder="0.0000">
-                <small class="frm-optional">Blank means none is forgiven</small>
+                
             </label>
         <?php endif; ?>
         <label>Receive date <em>*</em>

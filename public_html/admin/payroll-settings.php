@@ -436,8 +436,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <?php endforeach; ?>
             </select>
         </label>
-        <label>Debit ledger <span class="frm-optional">earnings / reimbursement / custom</span><?= $ledgerSelect('debit_ledger_id', (int) ($editComponent['debit_ledger_id'] ?? 0)) ?></label>
-        <label>Credit ledger <span class="frm-optional">deductions / recovery / custom</span><?= $ledgerSelect('credit_ledger_id', (int) ($editComponent['credit_ledger_id'] ?? 0)) ?></label>
+        <label>Debit ledger <?= $ledgerSelect('debit_ledger_id', (int) ($editComponent['debit_ledger_id'] ?? 0)) ?></label>
+        <label>Credit ledger <?= $ledgerSelect('credit_ledger_id', (int) ($editComponent['credit_ledger_id'] ?? 0)) ?></label>
         <label>Employer contribution expense <span class="frm-optional">employer contributions</span><?= $ledgerSelect('employer_expense_ledger_id', (int) ($editComponent['employer_expense_ledger_id'] ?? 0), ['expense']) ?></label>
         <label>Contribution payable <span class="frm-optional">employer contributions</span><?= $ledgerSelect('contribution_payable_ledger_id', (int) ($editComponent['contribution_payable_ledger_id'] ?? 0), ['liability']) ?></label>
         <label>Tax projection
@@ -496,7 +496,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php foreach ($components as $component): ?>
                 <tr>
                     <td><strong><?= e($component['code']) ?></strong></td>
-                    <td><?= e($component['name']) ?><?= $component['name_np'] ? ' <small>(' . e($component['name_np']) . ')</small>' : '' ?></td>
+                    <td><?= e($component['name']) ?><?= $component['name_np'] ? ' ' : '' ?></td>
                     <td><?= e(ucwords(str_replace('_', ' ', (string) $component['category']))) ?></td>
                     <td><small><?= e(str_replace('_', ' ', (string) ($component['posting_behaviour'] ?? 'category_default'))) ?></small></td>
                     <td class="is-numeric"><?php

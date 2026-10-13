@@ -114,7 +114,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </tbody>
     </table>
     </div>
-    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">Out rate/amount is the replayed inventory cost (never selling price). Location-only transfers relocate quantity without touching cost layers or the GL.</p>
+    
 </section>
 <style>
 .ssr-table { border-collapse: separate; border-spacing: 0; font-size: 12.5px; }

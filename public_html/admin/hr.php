@@ -602,7 +602,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 
         <details class="feature-disclosure">
             <summary>
-                <span><strong><?= icon('attendance') ?>Request correction</strong><small>Ask admin to fix a past attendance record.</small></span>
+                <span><strong><?= icon('attendance') ?>Request correction</strong></span>
                 <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
             </summary>
             <form method="post" class="workspace-form-grid">
@@ -643,7 +643,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
             <div class="mbw-card-head"><h2>Company Attendance</h2></div>
             <details class="feature-disclosure">
                 <summary>
-                    <span><strong><?= icon('attendance') ?>Manual entry</strong><small>Record attendance for a staff member.</small></span>
+                    <span><strong><?= icon('attendance') ?>Manual entry</strong></span>
                     <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
                 </summary>
                 <form method="post" class="workspace-form-grid">
@@ -841,7 +841,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
 
         <details class="feature-disclosure">
             <summary>
-                <span><strong><?= icon('leave') ?>Apply for leave</strong><small>Submit a leave request for approval.</small></span>
+                <span><strong><?= icon('leave') ?>Apply for leave</strong></span>
                 <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
             </summary>
             <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
@@ -959,7 +959,7 @@ include __DIR__ . '/../../app/views/partials/' . ($role === 'admin' ? 'admin_hea
     <?php else: ?>
         <details class="feature-disclosure">
             <summary>
-                <span><strong><?= icon('timesheets') ?>Add entry</strong><small>Record time worked (saved as draft).</small></span>
+                <span><strong><?= icon('timesheets') ?>Add entry</strong></span>
                 <span class="feature-disclosure-action"><?= icon('login') ?>Open form</span>
             </summary>
             <form method="post" class="workspace-form-grid">

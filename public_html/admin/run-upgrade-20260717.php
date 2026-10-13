@@ -174,6 +174,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </tbody>
     </table>
     </div>
-    <p class="muted" style="margin:12px 0 0">You can leave this page installed — every step checks before changing anything, so re-running it is harmless.</p>
+    
 </section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>

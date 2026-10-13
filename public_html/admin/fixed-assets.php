@@ -2429,7 +2429,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 
             <nav class="fa-side-nav" aria-label="Fixed asset valuation navigation">
                 <a class="is-active" href="<?= e(url('admin/fixed-assets.php?view=revaluation')) ?>">
-                    <?= icon('wallet') ?><span><strong>Revaluation batches</strong><small>IAS 16 and IAS 38</small></span>
+                    <?= icon('wallet') ?><span><strong>Revaluation batches</strong></span>
                 </a>
                 <a href="<?= e(url('admin/fixed-assets.php')) ?>">
                     <?= icon('companies') ?><span><strong>Fixed asset register</strong><small>Assets and carrying values</small></span>
@@ -3059,7 +3059,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </label>
             <label>Purchase date<input type="date" name="purchase_date" value="<?= e((string) ($detailAsset['purchase_date'] ?? '')) ?>"></label>
             <label>Available for use date<input type="date" name="available_for_use_date" value="<?= e((string) ($detailAsset['available_for_use_date'] ?? '')) ?>">
-                <span class="frm-optional">Moving this moves where depreciation starts</span>
+                
             </label>
             <label>Supplier bill / reference<input type="text" name="purchase_ref" maxlength="120" value="<?= e((string) ($detailAsset['purchase_ref'] ?? '')) ?>"></label>
             <label>Supplier name<input type="text" name="supplier" maxlength="190" value="<?= e((string) ($detailAsset['supplier'] ?? '')) ?>"></label>

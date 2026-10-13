@@ -258,7 +258,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
     <section class="mbw-card">
         <div class="mbw-card-head"><h2>Activity Log</h2></div>
-        <p style="color:var(--mbw-muted);margin-top:0">Chronological record of actions across modules.</p>
+        
         <form method="get" class="reference-filter-group audit-filter">
             <select name="module">
                 <option value="">All modules</option>

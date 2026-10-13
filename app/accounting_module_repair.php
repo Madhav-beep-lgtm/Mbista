@@ -4050,5 +4050,25 @@ function accounting_module_repair_database(): array
             WHERE i.category_id IS NULL");
     });
 
+    $run('A setting can belong to one company (migration 136)', static function (): void {
+        // `settings` was keyed on setting_key alone -- one row for the whole
+        // installation, shared by every company. A client's PAN, VAT number,
+        // bank account and invoice prefix were therefore everybody's, and
+        // setting one set it for every other set of books on the server.
+        //
+        // company_id 0 is the installation default, not a company. It is 0 and
+        // not NULL because MySQL permits any number of NULLs in a unique key,
+        // which would allow two competing defaults for one key.
+        if (!accounting_repair_table_exists('settings')
+            || accounting_repair_column_exists('settings', 'company_id')) {
+            return;
+        }
+
+        db()->exec('ALTER TABLE `settings` ADD COLUMN `company_id` INT UNSIGNED NOT NULL DEFAULT 0 FIRST');
+        // The primary key has to be rebuilt, not added beside the old one: the
+        // old key still forbids two companies holding the same setting_key.
+        db()->exec('ALTER TABLE `settings` DROP PRIMARY KEY, ADD PRIMARY KEY (`setting_key`, `company_id`)');
+    });
+
     return $errors;
 }

@@ -1018,7 +1018,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </div>
     </div>
     <?php if ($matrixCodes === []): ?>
-        <p style="color:var(--mbw-muted);font-size:12.5px;margin:0">No component lines yet — assign components to employees (Employees &rarr; pay structure), then Recalculate. Use the per-row "Components" button above to add one-time items.</p>
+        
     <?php else: ?>
         <div style="overflow-x:auto">
         <table class="pr-table">

@@ -160,7 +160,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <span class="mbw-pill tone-amber"><?= count($unreconciled) ?> open</span>
         </div>
         <?php if ($unreconciled === []): ?>
-            <p style="color:var(--mbw-muted);font-size:13.5px">Everything is reconciled for this account in the current fiscal year.</p>
+            
         <?php else: ?>
             <form method="post" action="<?= e(url('admin/reconciliation.php')) ?>">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

@@ -2487,7 +2487,7 @@ if ($sampleCount > 0 && (string) (current_user()['role'] ?? '') === 'admin' && u
                 <div class="notice">Unmapped for periodic: <?= e(implode(', ', $methodMapped)) ?>.</div>
             <?php endif; ?>
             <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
-                <small style="color:var(--mbw-muted)">Applies to future postings only.</small>
+                
                 <button type="submit" class="button" data-confirm="Change the inventory accounting system for this company?">Save</button>
             </div>
         </form>

@@ -1210,23 +1210,51 @@ function client_service_provider_names_by_client(array $clientIds): array
  * noticed, but anything acting on what it just wrote silently acted on the old
  * value.
  */
-function setting(string $key, mixed $default = '', bool $refresh = false): mixed
+/**
+ * A setting, for the company currently open, falling back to the installation.
+ *
+ * `settings` used to be keyed on setting_key alone: one row for the whole
+ * installation, shared by every company on it. So a client's PAN, VAT number,
+ * bank account and invoice prefix were not that client's — they were
+ * everybody's, and setting one set it for every other set of books.
+ *
+ * Company 0 is the installation default rather than a company, so a key nobody
+ * has overridden answers exactly as it always did. That is why no call site
+ * had to change: the signature is the same and the resolution is the same
+ * whenever there is nothing company-specific to find.
+ *
+ * $companyId is worth passing wherever the caller HAS one. A scheduled report,
+ * a CLI conversion or one client's books opened from another's screen all run
+ * for a company that is not the one in the session, and reading the session
+ * there would answer with the wrong client's VAT number.
+ */
+function setting(string $key, mixed $default = '', bool $refresh = false, ?int $companyId = null): mixed
 {
-    static $settings = null;
+    static $byCompany = [];
 
     if ($refresh) {
-        $settings = null;
+        $byCompany = [];
     }
-    if ($settings === null) {
-        $settings = [];
-        $rows = db()->query('SELECT setting_key, setting_value FROM settings')->fetchAll();
+    if ($companyId === null && function_exists('current_company_id')) {
+        $companyId = (int) current_company_id();
+    }
+    $companyId = max(0, (int) $companyId);
 
-        foreach ($rows as $row) {
-            $settings[$row['setting_key']] = $row['setting_value'];
+    if (!array_key_exists($companyId, $byCompany)) {
+        // Both scopes in one query, the company's own last so it overwrites
+        // the installation value as the rows are read.
+        $stmt = db()->prepare('SELECT setting_key, setting_value FROM settings
+            WHERE company_id IN (0, :cid) ORDER BY company_id ASC');
+        $stmt->execute(['cid' => $companyId]);
+
+        $resolved = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $resolved[$row['setting_key']] = $row['setting_value'];
         }
+        $byCompany[$companyId] = $resolved;
     }
 
-    return $key === '' ? '' : ($settings[$key] ?? $default);
+    return $key === '' ? '' : ($byCompany[$companyId][$key] ?? $default);
 }
 
 function all_settings(): array
@@ -1241,12 +1269,20 @@ function all_settings(): array
     return $settings;
 }
 
-function update_settings(array $settings): void
+/**
+ * Save settings for one company, or for the installation when $companyId is 0.
+ *
+ * Existing callers pass nothing and go on writing the installation default,
+ * which is what they have always meant.
+ */
+function update_settings(array $settings, int $companyId = 0): void
 {
-    $stmt = db()->prepare('INSERT INTO settings (setting_key, setting_value) VALUES (:setting_key, :setting_value) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)');
+    $companyId = max(0, $companyId);
+    $stmt = db()->prepare('INSERT INTO settings (company_id, setting_key, setting_value) VALUES (:company_id, :setting_key, :setting_value) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)');
 
     foreach ($settings as $key => $value) {
         $stmt->execute([
+            'company_id' => $companyId,
             'setting_key' => (string) $key,
             'setting_value' => (string) $value,
         ]);

@@ -275,12 +275,7 @@ $coaRowPill = static function (string $status): string {
 <details class="feature-disclosure" id="coa-import"<?= $coaStaged !== null ? ' open' : '' ?>>
     <summary><span><strong><?= icon('documents') ?>Chart of accounts from a spreadsheet</strong></span><span class="feature-disclosure-action"><?= icon('login') ?>Open</span></summary>
 
-    <p class="frm-optional" style="margin:0 0 12px">
-        <strong>Uploading creates nothing.</strong> Every row is checked and shown back to you first; only
-        Commit writes to the chart. Groups and ledgers can travel in one sheet — a ledger may name a group
-        written further down. Leave <em>Code</em> blank to have codes generated. Rows that cannot be created
-        can be corrected or removed in the preview — no need to fix the sheet and upload it again.
-    </p>
+    
 
     <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

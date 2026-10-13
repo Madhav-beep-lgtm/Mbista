@@ -660,7 +660,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 ?>
                 <tr>
                     <td><strong><?= e((string) $agreement['agreement_no']) ?></strong>
-                        <?= $agreement['linked_contract_no'] !== null ? '<br><small style="color:var(--mbw-muted)">Contract ' . e((string) $agreement['linked_contract_no']) . '</small>' : '' ?>
+                        <?= $agreement['linked_contract_no'] !== null ? '<br>' : '' ?>
                         <?= $isBuilder ? '' : '<br><small style="color:var(--mbw-muted)">classic</small>' ?></td>
                     <td><?= e((string) ($agreement['organization_name'] ?? $agreement['first_party_name_en'])) ?></td>
                     <td><?= e((string) $agreement['purpose_en']) ?></td>
