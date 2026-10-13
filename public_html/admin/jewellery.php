@@ -1908,8 +1908,7 @@ $fmt = static fn (?float $n, int $p = 2): string => $n === null ? 'N/A' : number
         Opening stock is <strong>brought forward</strong> from
         <strong><?= e((string) ($openingPrevFy['label'] ?? 'the previous year')) ?></strong>&rsquo;s closing on
         <strong><?= e(app_date((string) ($openingPrevFy['end_date'] ?? ''))) ?></strong>. It posts nothing;
-        the ledger balances carry through
-        <a href="<?= e(url('admin/opening-balances.php')) ?>">Opening Balances</a>.
+        the ledger balances carry forward automatically.
     </div>
     <?php endif; ?>
 
