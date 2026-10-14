@@ -656,6 +656,9 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
                                 <strong><?= e($headerUserName) ?></strong>
                             </div>
                             <a href="<?= e(url(!empty($platformShell) ? 'platform/profile.php' : 'admin/profile.php')) ?>"><?= icon('profile') ?><strong>My profile</strong></a>
+                            <?php if (user_is_super_admin()): ?>
+                                <a href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?><strong>Platform</strong></a>
+                            <?php endif; ?>
                             <?php if (empty($platformShell)): ?>
                                 <a href="<?= e(url('admin/users.php')) ?>"><?= icon('users') ?><strong>Users</strong></a>
                                 <a href="<?= e(url('admin/settings.php')) ?>"><?= icon('settings') ?><strong>Settings</strong></a>
