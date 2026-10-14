@@ -381,7 +381,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <thead><tr><th>Voucher Type</th><th>Bank/Cash Group Requirement</th></tr></thead>
             <tbody>
                 <?php foreach (VOUCHER_IMPORT_TYPES as $typeKey => $typeLabel): ?>
-                    <?php if ($typeKey === 'purchase') continue; ?>
+                    <?php if (!company_voucher_import_allowed(company_business_type($companyId), $typeKey)) continue; ?>
                     <tr><td><?= e($typeLabel) ?></td><td><?= e(voucher_import_cash_bank_rule($typeKey)['label']) ?></td></tr>
                 <?php endforeach; ?>
             </tbody>

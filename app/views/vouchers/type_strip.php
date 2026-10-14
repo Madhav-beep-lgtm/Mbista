@@ -10,11 +10,16 @@ declare(strict_types=1);
  *
  * Expects: $voucherTypes (catalog), $type (current key).
  */
+$pickerBusiness = company_business_type((int) current_company_id());
+$pickerWorkflow = company_business_workflow($pickerBusiness);
 ?>
 <label class="vch-type-picker"><span>Voucher type <em>*</em></span>
     <select id="vch-type-picker" aria-label="Voucher type">
         <?php foreach (voucher_entry_type_catalog() as $pickerKey => $pickerSpec): ?>
-            <option value="<?= e(url(voucher_type_url($pickerKey))) ?>" <?= $pickerKey === (string) $spec['key'] ? 'selected' : '' ?>><?= e((string) $pickerSpec['short']) ?></option>
+            <?php if (!company_voucher_type_allowed($pickerBusiness,$pickerKey)) continue; ?>
+            <?php
+            $pickerLabel=match($pickerKey) {'sales'=>$pickerWorkflow['sales_label'],'purchase'=>$pickerWorkflow['purchase_label'],default=>(string)$pickerSpec['short']}; ?>
+            <option value="<?= e(url(voucher_type_url($pickerKey))) ?>" <?= $pickerKey === (string) $spec['key'] ? 'selected' : '' ?>><?= e($pickerLabel) ?></option>
         <?php endforeach; ?>
     </select>
 </label>

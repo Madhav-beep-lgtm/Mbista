@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
+if (in_array((string)($_GET['type'] ?? ''),['production','stock_transfer'],true)) {
+    require_staff_admin_or_client_books();
+    require_company_context();
+    if (!company_voucher_type_allowed(company_business_type((int)current_company_id()),(string)$_GET['type'])) deny_access('This voucher type is not available for this business profile.');
+}
 if (($_GET['type'] ?? '') === 'stock_transfer') {
     define('STOCK_TRANSFER_VOUCHER', true);
     $_GET['view'] = 'inventory';
@@ -34,14 +39,16 @@ if (!$company || !$fiscalYear) {
 $companyId = (int) $company['id'];
 $fiscalYearId = (int) $fiscalYear['id'];
 $businessType = company_business_type($companyId);
+$businessWorkflow = company_business_workflow($businessType);
 if ($businessType === 'conflict') deny_access('Select one business type in Platform Company Management before entering vouchers.');
 $requestedType = (string)($_GET['type'] ?? $_POST['type'] ?? $_POST['voucher_type'] ?? 'journal');
+$expenseEntry=$businessType==='jewellery' && in_array($requestedType,['purchase','debit_note'],true) && ($_GET['entry'] ?? '')==='expense';
 if (empty($_GET['edit']) && empty($_POST['voucher_id'])) {
-    if (($businessType==='jewellery' && in_array($requestedType,['credit_note','debit_note'],true)) || ($businessType==='hospitality' && $requestedType==='credit_note')) {
+    if (!$expenseEntry && (($businessType==='jewellery' && in_array($requestedType,['credit_note','debit_note'],true)) || ($businessType==='hospitality' && $requestedType==='credit_note'))) {
         require __DIR__.'/../../app/views/vouchers/business_note.php';
         return;
     }
-    if ($businessType === 'jewellery' && in_array($requestedType,['sales','purchase'],true)) {
+    if (!$expenseEntry && $businessType === 'jewellery' && in_array($requestedType,['sales','purchase'],true)) {
         define('BUSINESS_VOUCHER_ENTRY',true);
         $_GET['view']=$requestedType === 'sales' ? 'sales' : 'purchases';
         require __DIR__.'/jewellery-trade.php';
@@ -54,6 +61,13 @@ if (empty($_GET['edit']) && empty($_POST['voucher_id'])) {
     }
 }
 $currentUser = current_user();
+// Any jewellery trade reaching the common form is an expense adjustment.
+// Metal/stone goods must go through the specialist stock and trace engine.
+if ($businessType==='jewellery') {
+    $businessWorkflow['inventory']=false;
+    $businessWorkflow['trade_modes']=['services'];
+    $businessWorkflow['default_trade_mode']='services';
+}
 $userId = (int) ($currentUser['id'] ?? 0);
 $currency = site_currency_symbol();
 $hasVoucherApprovals = column_exists('vouchers', 'approval_state');
@@ -145,6 +159,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/voucher-form.php');
     }
     $spec = voucher_type_spec($voucherType);
+    if ($existingVoucher===null && ($spec['layout'] ?? '')==='trade') {
+        if ($businessType==='jewellery' && (!$expenseEntry || !in_array($voucherType,['purchase','debit_note'],true))) {
+            deny_access('Use the jewellery voucher workflow for this transaction.');
+        }
+        if ($businessType==='hospitality' && in_array($voucherType,['sales','credit_note'],true)) {
+            deny_access('Use the menu sales or source-linked hospitality return workflow.');
+        }
+    }
 
     if (($_POST['grid_action'] ?? '') === 'import_purchase_lines' && $voucherType === 'purchase') {
         $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
@@ -189,6 +211,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
 
     $problems = [];
+    if (($spec['layout'] ?? '')==='trade' && !in_array((string)($_POST['trade_mode'] ?? ''),$businessWorkflow['trade_modes'],true)) {
+        $problems[] = 'Select a transaction category allowed for this business profile.';
+    }
     if ($voucherType === 'purchase' && ($_POST['trade_mode'] ?? 'goods') !== 'services') {
         $warehouseCheck = db()->prepare('SELECT id FROM warehouses WHERE id = ? AND company_id = ? AND is_active = 1');
         $warehouseCheck->execute([$warehouseId, $companyId]);
@@ -979,10 +1004,11 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $hasExistingValues = !empty($prefill['values']);
                     $hasInventoryValues = count(array_filter($prefill['values'] ?? [], static fn (array $row): bool => (int) ($row['item_id'] ?? 0) > 0)) > 0;
                     $tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? (($hasExistingValues && !$hasInventoryValues) || (!$hasExistingValues && in_array($businessType,['service','internal_service'],true)) ? 'services' : 'goods')) : 'goods';
+                    if (!$businessWorkflow['inventory']) $tradeMode='services';
                 ?>
                 <label><span>Category</span>
                     <select name="trade_mode" id="vch-trade-mode">
-                        <option value="goods" <?= $tradeMode === 'goods' ? 'selected' : '' ?>>Goods</option>
+                        <?php if ($businessWorkflow['inventory']): ?><option value="goods" <?= $tradeMode === 'goods' ? 'selected' : '' ?>><?= $businessType==='hospitality' ? 'Ingredients & supplies' : 'Goods' ?></option><?php endif; ?>
                         <option value="services" <?= $tradeMode === 'services' ? 'selected' : '' ?>>Services</option>
                     </select>
                 </label>

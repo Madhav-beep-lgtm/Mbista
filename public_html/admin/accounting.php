@@ -152,151 +152,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'create_voucher') {
-        if (!user_can('create')) {
-            flash('error', 'You do not have permission to create vouchers.');
-            redirect('admin/accounting.php');
-        }
-
         require_permission('accounting', 'create');
-
-        $voucherType = (string) ($_POST['voucher_type'] ?? 'journal');
-        $voucherNo = trim((string) ($_POST['voucher_no'] ?? ''));
-        $voucherDate = (string) ($_POST['voucher_date'] ?? date('Y-m-d'));
-        $partyId = (int) ($_POST['party_id'] ?? 0);
-        $referenceNo = trim((string) ($_POST['reference_no'] ?? ''));
-        $narration = trim((string) ($_POST['narration'] ?? ''));
-        $ledgerIds = $_POST['ledger_id'] ?? [];
-        $entryTypes = $_POST['entry_type'] ?? [];
-        $amounts = $_POST['amount'] ?? [];
-        $memos = $_POST['memo'] ?? [];
-
-        $allowedVoucherTypes = ['payment', 'receipt', 'journal', 'sales', 'purchase', 'contra', 'debit_note', 'credit_note'];
-        if ($companyId <= 0 || $fiscalYearId <= 0 || !in_array($voucherType, $allowedVoucherTypes, true)) {
-            flash('error', 'Company, fiscal year, and voucher type are required.');
-            redirect('admin/accounting.php');
-        }
-
-        if ($voucherNo === '') {
-            $voucherNo = strtoupper(substr($voucherType, 0, 2)) . '-' . date('Ymd-His');
-        }
-
-        if (is_period_locked($companyId, $fiscalYearId, $voucherDate !== '' ? $voucherDate : date('Y-m-d'))) {
-            flash('error', 'This voucher date is inside a locked accounting period.');
-            redirect('admin/accounting.php');
-        }
-
-        $entries = [];
-        $debitTotal = 0.0;
-        $creditTotal = 0.0;
-        $cashBankViolation = false;
-
-        foreach ($ledgerIds as $index => $ledgerIdRaw) {
-            $ledgerId = (int) $ledgerIdRaw;
-            $entryType = (string) ($entryTypes[$index] ?? '');
-            $amount = round((float) ($amounts[$index] ?? 0), 2);
-
-            if ($ledgerId <= 0 || $amount <= 0 || !in_array($entryType, ['debit', 'credit'], true)) {
-                continue;
-            }
-
-            $ledgerCheck = db()->prepare("SELECT l.id, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank
-                FROM ledgers l
-                LEFT JOIN ledger_groups g ON g.id = l.group_id
-                WHERE l.id = :id AND l.company_id = :company_id AND l.status = 'active' LIMIT 1");
-            $ledgerCheck->execute([
-                'id' => $ledgerId,
-                'company_id' => $companyId,
-            ]);
-            $ledgerRow = $ledgerCheck->fetch();
-            if (!$ledgerRow) {
-                continue;
-            }
-
-            $isCashOrBank = (int) $ledgerRow['is_cash_or_bank'] === 1;
-            $mustBeCashOrBank = $voucherType === 'contra'
-                || ($voucherType === 'payment' && $entryType === 'credit')
-                || ($voucherType === 'receipt' && $entryType === 'debit');
-            if ($mustBeCashOrBank && !$isCashOrBank) {
-                $cashBankViolation = true;
-            }
-
-            $entries[] = [
-                'ledger_id' => $ledgerId,
-                'entry_type' => $entryType,
-                'amount' => $amount,
-                'memo' => trim((string) ($memos[$index] ?? '')),
-            ];
-
-            if ($entryType === 'debit') {
-                $debitTotal += $amount;
-            } else {
-                $creditTotal += $amount;
-            }
-        }
-
-        if ($cashBankViolation) {
-            flash('error', 'Payment, receipt, and contra vouchers can only use ledgers created under a Bank/Cash group.');
-            redirect('admin/accounting.php');
-        }
-
-        if (count($entries) < 2 || round($debitTotal, 2) !== round($creditTotal, 2)) {
-            flash('error', 'Voucher must contain at least two valid entries and total debit must equal total credit.');
-            redirect('admin/accounting.php');
-        }
-
-        try {
-            // Staff accountants working in a client's books can never self-post:
-            // their vouchers always wait for the client or the firm admin.
-            $staffForcedApproval = $hasVoucherApprovals && staff_accountant_forces_approval();
-            $needsApproval = $staffForcedApproval
-                || ($hasVoucherApprovals && (approvals_enabled() || client_portal_forces_approval()) && !user_can('approve'));
-            $voucherId = create_voucher_with_entries([
-                'company_id' => $companyId,
-                'fiscal_year_id' => $fiscalYearId,
-                'voucher_no' => $voucherNo,
-                'voucher_type' => $voucherType,
-                'source_type' => 'manual_accounting',
-                'source_id' => null,
-                'party_id' => $partyId > 0 ? $partyId : null,
-                'reference_no' => $referenceNo !== '' ? $referenceNo : null,
-                'voucher_date' => $voucherDate !== '' ? $voucherDate : date('Y-m-d'),
-                'narration' => $narration,
-                'total_amount' => $debitTotal,
-                'status' => $needsApproval ? 'draft' : 'posted',
-                'approval_state' => $needsApproval ? 'pending_approval' : 'approved',
-                'submitted_by' => $userId,
-                'approved_by' => $needsApproval ? null : $userId,
-                'approved_at' => $needsApproval ? null : date('Y-m-d H:i:s'),
-                'posted_by' => $needsApproval ? null : $userId,
-                'posted_at' => $needsApproval ? null : date('Y-m-d H:i:s'),
-            ], $entries);
-            if ($voucherId > 0 && $staffForcedApproval) {
-                // Notify the client's approval queue (their bell + dashboard)
-                // alongside the admin's pending list.
-                mark_voucher_requires_client_approval($voucherId);
-            }
-            if ($voucherId > 0) {
-                security_event('voucher_posted', 'success', 'Voucher #' . $voucherId . ($staffForcedApproval ? ' submitted for client/admin approval.' : ' posted.'), $companyId, $userId);
-            }
-            flash('success', $needsApproval
-                ? ($staffForcedApproval ? 'Voucher submitted for approval. The client and admin have been notified.' : 'Voucher submitted for approval.')
-                : 'Voucher posted.');
-        } catch (Throwable $exception) {
-            flash('error', 'Could not post voucher. Check voucher number uniqueness.');
-        }
-
-        redirect('admin/accounting.php');
+        flash('error', 'This old form is no longer supported. Open a new voucher and review the entry.');
+        redirect('admin/voucher-form.php');
     }
-
 }
 
-$ledgers = [];
 $vouchers = [];
-$balances = [];
-$parties = [];
-$daybookEntries = [];
+$partyCount = 0;
 $shareholdings = [];
-$availableInvesteeCompanies = [];
 // Filter-state defaults so the render never sees undefined variables when the
 // data guard below cannot run (missing company context or tables).
 $vFrom = '';
@@ -309,18 +173,10 @@ $voucherTypeOptions = [];
 $fyTotals = ['dr' => 0, 'cr' => 0];
 
 if ($company && table_exists('ledgers')) {
-    $ledgerStmt = db()->prepare("SELECT l.*, g.master_key, COALESCE(g.is_cash_or_bank, 0) AS is_cash_or_bank
-        FROM ledgers l
-        LEFT JOIN ledger_groups g ON g.id = l.group_id
-        WHERE l.company_id = :company_id AND l.status = 'active'
-        ORDER BY l.code ASC");
-    $ledgerStmt->execute(['company_id' => (int) $company['id']]);
-    $ledgers = $ledgerStmt->fetchAll();
-
     if (table_exists('accounting_parties')) {
-        $partyStmt = db()->prepare("SELECT id, code, name, party_type FROM accounting_parties WHERE company_id = :company_id AND status = 'active' ORDER BY name ASC");
+        $partyStmt = db()->prepare("SELECT COUNT(*) FROM accounting_parties WHERE company_id = :company_id AND status = 'active'");
         $partyStmt->execute(['company_id' => (int) $company['id']]);
-        $parties = $partyStmt->fetchAll();
+        $partyCount = (int) $partyStmt->fetchColumn();
     }
 
     // Voucher register filters: date range, type, status, and free text over
@@ -400,9 +256,6 @@ if ($company && table_exists('ledgers')) {
 
 if ($company && table_exists('company_shareholdings')) {
     $shareholdings = company_shareholdings_for_parent((int) $company['id']);
-    $companyRows = db()->prepare('SELECT id, name, code FROM companies WHERE id <> :id AND is_active = 1 ORDER BY name ASC');
-    $companyRows->execute(['id' => (int) $company['id']]);
-    $availableInvesteeCompanies = $companyRows->fetchAll();
 }
 
 $voucherTotal = array_sum(array_map(static fn (array $voucher): float => (float) $voucher['total_amount'], $vouchers));
@@ -423,7 +276,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Posted vouchers</span><div class="mbw-kpi-value"><?= e((string) count($vouchers)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs"><?= e(site_currency_symbol()) ?><?= e(number_format($voucherTotal, 2)) ?> total</span></span></div><span class="mbw-chip tone-blue"><?= icon('journal') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Total debits</span><div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerDebitTotal, 2)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Selected fiscal year</span></span></div><span class="mbw-chip tone-green"><?= icon('trend-up') ?></span></article>
     <article class="mbw-kpi"><div><span class="mbw-kpi-label">Total credits</span><div class="mbw-kpi-value"><?= e(site_currency_symbol()) ?><?= e(number_format($ledgerCreditTotal, 2)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Selected fiscal year</span></span></div><span class="mbw-chip tone-red"><?= icon('trend-down') ?></span></article>
-    <a class="mbw-kpi" href="<?= e(url('admin/accounting-parties.php')) ?>"><div><span class="mbw-kpi-label">Active parties</span><div class="mbw-kpi-value"><?= e((string) count($parties)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Available for voucher posting</span></span></div><span class="mbw-chip tone-purple"><?= icon('users') ?></span></a>
+    <a class="mbw-kpi" href="<?= e(url('admin/accounting-parties.php')) ?>"><div><span class="mbw-kpi-label">Active parties</span><div class="mbw-kpi-value"><?= e((string) $partyCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Available for voucher posting</span></span></div><span class="mbw-chip tone-purple"><?= icon('users') ?></span></a>
 </section>
 
 <?php if ($lockedThrough !== null): ?>
@@ -475,6 +328,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         <button type="submit" class="button secondary"><?= icon('filter') ?>Apply</button>
         <?php if ($vSearch !== '' || $vType !== '' || $vStatus !== '' || $vDateOk($vFrom) || $vDateOk($vTo)): ?><a class="button secondary" href="<?= e(url('admin/accounting.php')) ?>">Clear</a><?php endif; ?>
         <div class="actions" style="margin-left:auto">
+            <?php $entryWorkflow=company_business_workflow(company_business_type($companyId)); ?>
+            <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=sales')) ?>"><?= e($entryWorkflow['sales_label']) ?></a>
+            <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=purchase')) ?>"><?= e($entryWorkflow['purchase_label']) ?></a>
+            <?php if (company_business_type($companyId)==='jewellery'): ?>
+            <a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=purchase&entry=expense')) ?>">Expense purchase</a>
+            <?php endif; ?>
             <a class="button" href="<?= e(url('admin/voucher-form.php')) ?>">＋ New Voucher</a>
         </div>
     </form>

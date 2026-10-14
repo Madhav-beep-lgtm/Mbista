@@ -63,7 +63,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
     <?php if (!empty($spec['needs_reason'])): ?>
         <div class="frm-grid frm-grid-2">
             <label class="frm-span-3"><?= e((string) $spec['reason_label']) ?> <em>*</em>
-                <input type="text" name="return_reason" maxlength="255" placeholder="e.g. Goods damaged in transit, returned in full" value="<?= e((string) ($prefill['return_reason'] ?? '')) ?>" required>
+                <input type="text" name="return_reason" maxlength="255" placeholder="Reason for adjustment" value="<?= e((string) ($prefill['return_reason'] ?? '')) ?>" required>
             </label>
         </div>
     <?php endif; ?>
@@ -136,7 +136,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                 <thead>
                     <tr>
                         <th style="width:36px">SN</th>
-                        <th style="width:190px" data-goods-field>Inventory item <em>*</em></th>
+                        <th style="width:190px" data-goods-field><?= ($businessType ?? '')==='hospitality' ? 'Ingredient / supply' : 'Inventory item' ?> <em>*</em></th>
                         <th style="width:200px" data-service-ledger><?= $spec['value_role'] === 'income' ? 'Sales ledger' : 'Purchase / expense ledger' ?> <em>*</em></th>
                         <th data-description-heading data-service-field>Service</th><th style="width:180px">Cost centre <em>*</em></th>
                         <th class="is-numeric" style="width:100px" data-goods-field>Qty</th>

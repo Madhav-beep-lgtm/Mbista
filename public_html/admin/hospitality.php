@@ -3280,7 +3280,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <label>Ingredient cost source
                 <select name="cost_source">
                     <option value="manual" <?= (string) $settings['cost_source'] === 'manual' ? 'selected' : '' ?>>Manual reference cost</option>
-                    <option value="latest_purchase" <?= (string) $settings['cost_source'] === 'latest_purchase' ? 'selected' : '' ?>>Latest purchase (maintained manually)</option>
+                    <option value="latest_purchase" <?= (string) $settings['cost_source'] === 'latest_purchase' ? 'selected' : '' ?>>Latest posted purchase</option>
                 </select>
             </label>
             <label>Costing basis

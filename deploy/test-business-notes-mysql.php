@@ -22,6 +22,14 @@ try {
  };
  $original=$make();
  $note=business_note_create($cid,$original,'credit_note',$fy['start_date'],'Integration test',$actor,false);
+ $admin=(int)$pdo->query("SELECT id FROM users WHERE role='admin' AND status='active' ORDER BY id LIMIT 1")->fetchColumn();
+ if (!$admin) throw new RuntimeException('Local admin fixture required');
+ $_SESSION['user_id']=$admin;
+ $_SESSION['auth_issued_at']=time();
+ foreach ([$original,$note] as $protectedId) {
+  $deleted=force_delete_voucher($protectedId,$cid,'Regression test protected return',$admin);
+  if ($deleted['ok'] || !str_contains($deleted['error'],'return note')) throw new RuntimeException('Force delete bypassed return protection');
+ }
  $q=$pdo->prepare('SELECT qty,gross_amount,vat_amount FROM hospitality_sales_upload_lines WHERE voucher_id=?');$q->execute([$note]);$line=$q->fetch();
  if((float)$line['qty']!==-2.0 || (float)$line['gross_amount']!==-100.0 || (float)$line['vat_amount']!==-13.0)throw new RuntimeException('Negative return lines failed');
  business_note_finalize($note);

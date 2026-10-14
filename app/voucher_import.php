@@ -341,6 +341,8 @@ function voucher_import_parse(array $rows, int $companyId, int $fiscalYearId): a
         unset($voucher);
     }
 
+    // Resolve profile once per file, not once for each imported voucher.
+    $importBusiness = function_exists('company_business_type') ? company_business_type($companyId) : null;
     // Voucher-level validation.
     $duplicateStmt = null;
     if (column_exists('vouchers', 'reference_no')) {
@@ -357,6 +359,9 @@ function voucher_import_parse(array $rows, int $companyId, int $fiscalYearId): a
         $voucher['type'] = voucher_import_normalize_type($voucher['type_raw']);
         if ($voucher['type'] === 'purchase') {
             $voucher['errors'][] = 'Ledger-only purchase uploads are retired. Use the Purchase voucher item upload for hospitality/inventory, or Jewellery purchases for jewellery items.';
+        } elseif ($voucher['type'] !== null && function_exists('company_voucher_import_allowed')
+            && !company_voucher_import_allowed((string) $importBusiness, $voucher['type'])) {
+            $voucher['errors'][] = 'Use the company-specific voucher form for this voucher type so invoice allocation and stock posting are preserved.';
         }
         if ($voucher['type'] === null) {
             $voucher['errors'][] = $voucher['type_raw'] === ''

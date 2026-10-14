@@ -137,8 +137,22 @@ function hospitality_ingredient_unit_cost(array $ingredient, ?float $purchaseCos
  * newer master value â€” sale-date snapshots must not drift when later cost
  * changes are recorded). Master cost is the last resort with no history.
  */
-function hospitality_ingredient_cost_on(array $ingredient, string $date): float
+function hospitality_ingredient_cost_on(array $ingredient, string $date, ?string $costSource = null): float
 {
+    $costSource=$costSource ?? (string)($ingredient['cost_source'] ?? 'manual');
+    $companyId=(int)($ingredient['ingredient_company_id'] ?? $ingredient['company_id'] ?? 0);
+    $itemId=(int)($ingredient['inventory_item_id'] ?? 0);
+    if ($costSource==='latest_purchase' && $companyId>0 && $itemId>0 && table_exists('inventory_transactions') && column_exists('inventory_transactions','source_voucher_id')) {
+        $purchase=db()->prepare("SELECT t.rate FROM inventory_transactions t
+            JOIN inventory_items i ON i.id=t.item_id AND i.company_id=t.company_id
+            JOIN vouchers v ON v.id=COALESCE(NULLIF(t.source_voucher_id,0),NULLIF(t.voucher_id,0)) AND v.company_id=t.company_id
+            WHERE t.company_id=? AND t.item_id=? AND t.transaction_type='purchase'
+              AND t.qty_in>0 AND t.rate>=0 AND t.transaction_date<=? AND v.status='posted'
+            ORDER BY t.transaction_date DESC,t.id DESC LIMIT 1");
+        $purchase->execute([$companyId,$itemId,$date]);
+        $cost=$purchase->fetchColumn();
+        if ($cost!==false) return (float)$cost;
+    }
     // Rows may be plain ingredient rows ('id') or recipe-line joins where the
     // ingredient id is aliased ('ingredient_id') and 'id' is the LINE id.
     $ingredientId = (int) ($ingredient['ingredient_id'] ?? $ingredient['id'] ?? 0);
@@ -151,6 +165,7 @@ function hospitality_ingredient_cost_on(array $ingredient, string $date): float
         if ($cost !== false && $cost !== null) {
             return (float) $cost;
         }
+        if ($costSource==='latest_purchase') return 0.0;
         $earliest = db()->prepare('SELECT purchase_cost FROM hospitality_ingredient_costs
             WHERE ingredient_id = :id ORDER BY effective_date ASC, id ASC LIMIT 1');
         $earliest->execute(['id' => $ingredientId]);
@@ -159,6 +174,7 @@ function hospitality_ingredient_cost_on(array $ingredient, string $date): float
             return (float) $cost;
         }
     }
+    if ($costSource==='latest_purchase' && (empty($ingredient['effective_date']) || $ingredient['effective_date']>$date)) return 0.0;
     return (float) ($ingredient['purchase_cost'] ?? 0);
 }
 
@@ -206,16 +222,16 @@ function hospitality_recipe_cost(int $recipeId, string $onDate = '', ?array $set
     $onDate = $onDate !== '' ? $onDate : (string) $recipe['effective_from'];
     $stmt = db()->prepare('SELECT l.*, i.code AS ingredient_code, i.name AS ingredient_name, i.recipe_unit,
             i.purchase_unit, i.conversion_factor, i.wastage_pct, i.yield_pct, i.purchase_cost, i.active AS ingredient_active,
-            i.id AS ingredient_id
+            i.id AS ingredient_id, i.inventory_item_id, i.company_id AS ingredient_company_id, i.cost_source, i.effective_date
         FROM hospitality_recipe_lines l
         INNER JOIN hospitality_ingredients i ON i.id = l.ingredient_id
-        WHERE l.recipe_id = :rid ORDER BY l.id ASC');
-    $stmt->execute(['rid' => $recipeId]);
+        WHERE l.recipe_id = :rid AND i.company_id = :cid ORDER BY l.id ASC');
+    $stmt->execute(['rid' => $recipeId, 'cid'=>(int)$recipe['company_id']]);
     $errors = [];
     $lines = [];
     $ingredientTotal = 0.0;
     foreach ($stmt->fetchAll() as $line) {
-        $purchaseCost = hospitality_ingredient_cost_on($line, $onDate);
+        $purchaseCost = hospitality_ingredient_cost_on($line, $onDate,(string)($settings['cost_source'] ?? 'manual'));
         $unit = hospitality_ingredient_unit_cost($line, $purchaseCost);
         $qty = (float) $line['quantity'];
         $lineCost = $unit['ok'] ? round($qty * $unit['unit_cost'], 4) : null;
@@ -1026,7 +1042,7 @@ function hospitality_sync_ingredients_from_inventory(int $companyId, ?int $userI
     $itemStmt->execute(['cid' => $companyId]);
     $items = $itemStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $linkedStmt = db()->prepare('SELECT id, inventory_item_id, code, name, category, purchase_unit, purchase_cost, active
+    $linkedStmt = db()->prepare('SELECT id, inventory_item_id, code, name, category, purchase_unit, purchase_cost, cost_source, active
         FROM hospitality_ingredients WHERE company_id = :cid AND inventory_item_id IS NOT NULL');
     $linkedStmt->execute(['cid' => $companyId]);
     $linked = [];
@@ -1086,7 +1102,8 @@ function hospitality_sync_ingredients_from_inventory(int $companyId, ?int $userI
         $sameName = (string) $existing['name'] === mb_substr((string) $item['name'], 0, 160);
         $sameCategory = (string) ($existing['category'] ?? '') === mb_substr((string) ($item['category'] ?? ''), 0, 80);
         $sameUnit = (string) $existing['purchase_unit'] === (mb_substr((string) $item['unit'], 0, 40) ?: 'Unit');
-        $sameCost = abs((float) $existing['purchase_cost'] - (float) $item['purchase_rate']) < 0.00005;
+        $referenceCost=$existing['cost_source']==='manual' ? (float)$existing['purchase_cost'] : (float)$item['purchase_rate'];
+        $sameCost = abs((float) $existing['purchase_cost'] - $referenceCost) < 0.00005;
         $sameActive = (int) $existing['active'] === $active;
         if ($sameCode && $sameName && $sameCategory && $sameUnit && $sameCost && $sameActive) {
             continue;
@@ -1098,7 +1115,7 @@ function hospitality_sync_ingredients_from_inventory(int $companyId, ?int $userI
             'name' => mb_substr((string) $item['name'], 0, 160),
             'cat' => mb_substr((string) ($item['category'] ?? ''), 0, 80) ?: null,
             'punit' => mb_substr((string) $item['unit'], 0, 40) ?: 'Unit',
-            'cost' => round((float) $item['purchase_rate'], 4),
+            'cost' => round($referenceCost, 4),
             'active' => $active,
             'by' => $userId ?: null,
         ]);

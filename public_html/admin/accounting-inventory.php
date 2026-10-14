@@ -54,6 +54,8 @@ $fiscalYearId = (int) ($fiscalYear['id'] ?? 0);
 $userId = (int) ($currentUser['id'] ?? 0);
 $inventoryBusinessType = company_accounting_business_type($companyId);
 $inventoryProfile = accounting_business_profile($inventoryBusinessType);
+require_company_module('inventory',$companyId);
+if (defined('PRODUCTION_VOUCHER') && !$inventoryProfile['show_manufacturing']) deny_access('Production belongs to the trading and manufacturing profile.');
 if (defined('INVENTORY_PAGE') && $inventoryPage['view'] === 'manufacturing' && empty($inventoryProfile['show_manufacturing'])) {
     flash('error', 'Manufacturing is not enabled for this company.');
     redirect('admin/items.php');
@@ -1450,6 +1452,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($backTo);
     }
 
+    if (in_array($action,['save_bom','create_manufacturing_order','complete_manufacturing_order','cancel_manufacturing_order'],true) && !$inventoryProfile['show_manufacturing']) {
+        deny_access('Manufacturing is not available for this business profile.');
+    }
     if ($action === 'save_bom') {
         require_permission('inventory', 'create');
         if (!($inventoryProfile['show_manufacturing'] ?? false)) {

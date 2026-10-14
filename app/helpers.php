@@ -1866,6 +1866,10 @@ function company_accounting_preferences_row(?int $companyId = null): ?array
 
 function company_accounting_business_type(?int $companyId = null): string
 {
+    $companyId=$companyId ?? current_company_id();
+    if ($companyId>0 && function_exists('company_business_type')) {
+        return company_business_workflow(company_business_type($companyId))['legacy_type'];
+    }
     $preferences = company_accounting_preferences_row($companyId);
     $businessType = (string) ($preferences['business_type'] ?? 'service');
 
@@ -1890,19 +1894,16 @@ function accounting_business_profile(?string $businessType = null): array
     $isTrading = $businessType === 'trading';
     $isManufacturing = $businessType === 'manufacturing';
 
-    // Every entity gets the full accounting toolkit — Inventory, Manufacturing
-    // and Fixed Assets are always available, so no one has to pick a "business
-    // type" just to unlock features. The type is now only a reporting hint: it
-    // sets the default invoice source and the friendly label; a company that
-    // does not want to track inventory simply ignores the module.
+    // This legacy adapter is fed by the platform-controlled five-way profile.
+    // Package permissions are still checked separately at each route.
     return [
         'business_type' => $businessType,
         'label' => $isManufacturing ? 'Manufacturing' : ($isTrading ? 'Trading' : 'Service'),
-        'show_inventory' => true,
-        'show_manufacturing' => true,
-        'show_excise' => true,
-        'show_quantity_rate' => true,
-        'allowed_invoice_sources' => ['task', 'inventory', 'manufacturing', 'other'],
+        'show_inventory' => !$isService,
+        'show_manufacturing' => $isManufacturing,
+        'show_excise' => !$isService,
+        'show_quantity_rate' => !$isService,
+        'allowed_invoice_sources' => $isService ? ['task','other'] : ($isManufacturing ? ['inventory','manufacturing','other'] : ['inventory','other']),
         'default_invoice_source' => $isService ? 'task' : ($isTrading ? 'inventory' : 'manufacturing'),
         'report_business_slices' => ['all', 'service', 'trading', 'manufacturing'],
     ];
@@ -4321,6 +4322,9 @@ function force_delete_voucher(int $voucherId, int $companyId, string $reason, ?i
         return ['ok' => false, 'error' => 'Voucher not found for this company.', 'voucher_no' => '', 'summary' => ''];
     }
     $voucherNo = (string) $voucher['voucher_no'];
+    if (function_exists('business_note_blocker') && ($returnBlock = business_note_blocker($voucherId)) !== null) {
+        return ['ok' => false, 'error' => $returnBlock, 'voucher_no' => $voucherNo, 'summary' => ''];
+    }
     $sourceType = (string) ($voucher['source_type'] ?? '');
     $sourceId = (int) ($voucher['source_id'] ?? 0);
 

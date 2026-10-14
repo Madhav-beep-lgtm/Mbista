@@ -33,4 +33,23 @@ $super=false;
 rejects(fn()=>company_business_save(1,'service',[]));
 ck(company_route_module('documents.php')==='documents','Document gate');
 ck(company_route_module('hospitality.php')==='hospitality','Hospitality gate');
+foreach(array_keys(company_business_types()) as $type) {
+    $workflow=company_business_workflow($type);
+    ck($workflow['manufacturing']===($type==='trading_manufacturing'),'Manufacturing separated');
+    ck($workflow['inventory']===in_array($type,['trading_manufacturing','hospitality','jewellery'],true),'Stock profiles separated');
+    ck(company_voucher_type_allowed($type,'production')===($type==='trading_manufacturing'),'Production route policy');
+    ck(company_voucher_type_allowed($type,'stock_transfer')===$workflow['inventory'],'Transfer route policy');
+    ck($workflow['task_billing']===($type==='internal_service'),'Task billing reserved');
+    ck(in_array('goods',$workflow['trade_modes'],true)===$workflow['inventory'],'Service-only entry policy');
+}
+ck(!company_voucher_type_allowed('conflict','sales'),'Conflicting profiles denied');
+foreach (['hospitality', 'jewellery'] as $type) {
+    foreach (['sales', 'purchase', 'debit_note', 'credit_note'] as $voucherType) {
+        ck(!company_voucher_import_allowed($type, $voucherType), 'Specialist import bypass denied');
+    }
+    ck(company_voucher_import_allowed($type, 'journal'), 'General journal import preserved');
+}
+ck(!company_voucher_import_allowed('internal_service', 'sales'), 'Task sales import bypass denied');
+ck(!company_voucher_import_allowed('internal_service', 'receipt'), 'Receipt allocation import bypass denied');
+ck(company_voucher_import_allowed('service', 'journal'), 'Service journal import preserved');
 echo "Five profiles: exclusivity, legacy defaults, tenant isolation, add-ons and super-admin authority passed.\n";

@@ -7,6 +7,41 @@ function company_business_types(): array
         'trading_manufacturing'=>'Trading & manufacturing','hospitality'=>'Hospitality','jewellery'=>'Jewellery'];
 }
 
+/** The platform profile selects the workflow; tenant preferences cannot override it. */
+function company_business_workflow(string $type): array
+{
+    $inventory=in_array($type,['trading_manufacturing','hospitality','jewellery'],true);
+    return [
+        'inventory'=>$inventory,
+        'manufacturing'=>$type==='trading_manufacturing',
+        'task_billing'=>$type==='internal_service',
+        'default_trade_mode'=>$inventory ? 'goods' : 'services',
+        'trade_modes'=>$inventory ? ['goods','services'] : ['services'],
+        'sales_label'=>match($type) {'hospitality'=>'Menu sales','jewellery'=>'Jewellery sales','internal_service'=>'Task sales',default=>$inventory ? 'Goods sales' : 'Service sales'},
+        'purchase_label'=>match($type) {'hospitality'=>'Ingredients & supplies','jewellery'=>'Jewellery purchase',default=>$inventory ? 'Goods purchase' : 'Service purchase'},
+        'legacy_type'=>$type==='trading_manufacturing' ? 'manufacturing' : ($inventory ? 'trading' : 'service'),
+    ];
+}
+
+function company_voucher_type_allowed(string $business,string $voucherType): bool
+{
+    $workflow=company_business_workflow($business);
+    return match($voucherType) {
+        'production'=>$workflow['manufacturing'],
+        'stock_transfer'=>$workflow['inventory'],
+        default=>isset(company_business_types()[$business]),
+    };
+}
+
+/** Ledger imports cannot replace workflows that also allocate invoices or stock. */
+function company_voucher_import_allowed(string $business, string $type): bool
+{
+    if (!isset(company_business_types()[$business]) || $type === 'purchase') return false;
+    if ($business === 'internal_service' && in_array($type, ['sales', 'receipt'], true)) return false;
+    return !in_array($business, ['hospitality', 'jewellery'], true)
+        || !in_array($type, ['sales', 'credit_note', 'debit_note'], true);
+}
+
 function company_business_type(int $companyId): string
 {
     $configured = (string)setting('company_business_type','',false,$companyId);
