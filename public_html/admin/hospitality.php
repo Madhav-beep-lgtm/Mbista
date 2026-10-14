@@ -313,13 +313,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'save_menu_item') {
         require_permission('hospitality', 'edit');
         $menuItemId = (int) ($_POST['menu_item_id'] ?? 0);
-        // The menu is whatever the tills have sold. Adding one by hand creates
-        // an item no sale will ever match, which then sits in the costing
-        // exceptions forever looking like a mapping fault.
-        if ($menuItemId <= 0) {
-            flash('error', 'Menu items are created from the daily sales upload, not by hand — upload a sheet that sells the item and it will appear here.');
-            redirect($back);
-        }
         $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
         $name = trim((string) ($_POST['name'] ?? ''));
         if ($code === '' || $name === '') {
@@ -1194,17 +1187,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
 // Page data per view
 // ---------------------------------------------------------------------------
 $pageTitle = 'Hospitality Accounting';
-$pageSubtitle = 'Recipe costing and estimated gross profit (reference-only), plus daily sales sheet upload that auto-posts to accounting.';
-$pageHero = ['icon' => 'services'];
-$bodyClass = 'admin-layout accounting-module-page';
+$pageSubtitle = '';
+$pageHero = false;
+$bodyClass = 'admin-layout accounting-module-page hospitality-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<?php if ($view === 'sales-upload'): ?>
-    <div class="notice" style="margin-bottom:14px"><strong>Posts to accounting.</strong> Sheets posted here create daily sales vouchers in the Voucher Register.</div>
-<?php else: ?>
-    <div class="notice" style="margin-bottom:14px"><strong>Reference only.</strong> <?= e($disclaimer) ?></div>
-<?php endif; ?>
-
 <nav class="mbw-tabbar" aria-label="Hospitality sections" style="flex-wrap:wrap">
     <?php foreach ([
         'dashboard' => ['Dashboard', 'home'],
@@ -1301,18 +1288,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         }
     }
     ?>
-    <div class="notice" style="margin-bottom:14px">
-        <strong>Ingredients come from the item master.</strong>
-        Tick <em>Use as a recipe ingredient</em> on an inventory item to list it here.
-        This screen holds the recipe unit, its conversion, and wastage and yield.
-        <a href="<?= e(url('admin/accounting-inventory.php?view=items')) ?>">Open the item master →</a>
-        <?php if ($ingredientSync['created'] > 0 || $ingredientSync['retired'] > 0 || $ingredientSync['restored'] > 0): ?>
-            <br><span class="mbw-pill tone-green" style="margin-top:6px;display:inline-block">Just refreshed:
-                <?= (int) $ingredientSync['created'] ?> added,
-                <?= (int) $ingredientSync['restored'] ?> restored,
-                <?= (int) $ingredientSync['retired'] ?> retired</span>
-        <?php endif; ?>
-    </div>
+    <div class="actions"><a class="button secondary" href="<?= e(url('admin/accounting-inventory.php?view=items')) ?>">Item master</a></div>
 
     <section class="mbw-card">
         <div class="mbw-card-head">
@@ -1416,9 +1392,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     $menuItemsStmt->execute(['cid' => $companyId]);
     $menuItems = $menuItemsStmt->fetchAll();
     ?>
-    <?php if ($canEdit && $editMenuItem): ?>
+    <?php if ($canEdit && ($editMenuItem || isset($_GET['new']))): ?>
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Edit Menu Item</h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=menu-items')) ?>">Cancel</a></div>
+        <div class="mbw-card-head"><h2><?= $editMenuItem ? 'Edit menu item' : 'New menu item' ?></h2><a class="mbw-view-all" href="<?= e(url('admin/hospitality.php?view=menu-items')) ?>">Cancel</a></div>
         <form method="post" class="workspace-form-grid">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_menu_item">
@@ -1443,19 +1419,13 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
         </form>
     </section>
     <?php endif; ?>
-    <?php if ($canEdit && !$editMenuItem): ?>
-        <div class="notice" style="margin-bottom:14px">
-            Menu items are created from the daily sales upload, with a standard price taken from the busiest day.
-            <strong>Edit</strong> an item below to correct its price, unit or category.
-            <a href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Upload a sales sheet →</a>
-        </div>
-    <?php endif; ?>
+    <?php if ($canEdit): ?><div class="actions"><a class="button" href="<?= e(url('admin/hospitality.php?view=menu-items&new=1')) ?>">New menu item</a><a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload')) ?>">Sales upload</a></div><?php endif; ?>
     <section class="mbw-card" data-collapsible>
         <div class="mbw-card-head"><h2>Menu Items (<?= count($menuItems) ?>)</h2></div>
         <div style="overflow-x:auto"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Category</th><th class="is-numeric">Std. price</th><th>Unit</th><th>Recipes</th><th>Status</th><th></th></tr></thead>
             <tbody>
-                <?php if ($menuItems === []): ?><tr><td colspan="8">No menu items yet — they arrive with the first daily sales sheet you upload.</td></tr><?php endif; ?>
+                <?php if ($menuItems === []): ?><tr><td colspan="8">No menu items yet.</td></tr><?php endif; ?>
                 <?php foreach ($menuItems as $menuItem): ?>
                     <tr>
                         <td><strong><?= e($menuItem['code']) ?></strong></td>

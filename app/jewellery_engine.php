@@ -68,7 +68,7 @@ function jewellery_client_profile_for_company(int $companyId): ?array
 function jewellery_enabled_for_company(int $companyId): bool
 {
     return function_exists('company_module_enabled')
-        ? company_module_enabled('jewellery', $companyId)
+        ? (company_module_enabled('jewellery', $companyId) && !company_module_enabled('hospitality', $companyId))
         : jewellery_legacy_enabled_for_company($companyId);
 }
 

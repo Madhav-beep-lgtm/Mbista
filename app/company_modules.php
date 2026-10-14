@@ -5,13 +5,23 @@ function company_optional_modules(): array
 {
     return ['budgets'=>'Budgets', 'inventory'=>'Inventory & Manufacturing', 'fixed_assets'=>'Fixed Assets',
         'nfrs'=>'NFRS Compliance', 'messages'=>'Messages', 'payroll'=>'Payroll', 'hr'=>'HR & Attendance',
-        'tickets'=>'Tickets', 'compliance'=>'Compliance', 'jewellery'=>'Jewellery'];
+        'tickets'=>'Tickets', 'compliance'=>'Compliance', 'jewellery'=>'Jewellery', 'hospitality'=>'Hospitality', 'documents'=>'Documents'];
 }
 
 function company_module_enabled(string $module, ?int $companyId = null): bool
 {
     if (!isset(company_optional_modules()[$module])) return true;
     $companyId ??= current_company_id();
+    if (in_array($module,['hospitality','jewellery'],true)) {
+        $profile=(string)setting('company_business_type','',false,$companyId);
+        if ($profile !== '') return $profile === $module;
+    }
+    if ($module === 'hospitality') {
+        $configured=(string)setting('company_module_hospitality','',false,$companyId);
+        if ($configured !== '') return $configured === '1';
+        if (!function_exists('hospitality_legacy_enabled_for_company')) require_once __DIR__.'/hospitality_engine.php';
+        return hospitality_legacy_enabled_for_company($companyId);
+    }
     if ($module === 'jewellery') {
         if ($companyId <= 0) return false;
         $configured = (string)setting('company_module_jewellery', '', false, $companyId);
@@ -40,6 +50,8 @@ function company_report_module(string $report): ?string
 function company_route_module(string $script, array $query = []): ?string
 {
     $script = basename($script);
+    if ($script === 'hospitality.php') return 'hospitality';
+    if ($script === 'documents.php') return 'documents';
     if (str_starts_with($script, 'jewellery')) return 'jewellery';
     if ($script === 'fixed-assets.php') {
         if (!empty($query['action'])) return in_array($query['action'], ['create_lease','post_lease_period','modify_lease'], true) ? 'nfrs' : 'fixed_assets';
@@ -75,6 +87,7 @@ function company_can_manage_settings(): bool
 function company_modules_save(int $companyId, array $enabled): void
 {
     if (!user_is_super_admin() || $companyId <= 0) throw new RuntimeException('Only the super admin can configure company modules.');
+    if (in_array('hospitality',$enabled,true) && in_array('jewellery',$enabled,true)) throw new RuntimeException('Choose Hospitality or Jewellery, not both.');
     $settings = [];
     foreach (company_optional_modules() as $key=>$label) $settings['company_module_' . $key] = in_array($key,$enabled,true) ? '1' : '0';
     update_settings($settings, $companyId);

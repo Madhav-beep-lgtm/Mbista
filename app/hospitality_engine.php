@@ -46,7 +46,7 @@ function hospitality_client_profile_for_company(int $companyId): ?array
  * non-client company (including the firm's own workspaces) and for clients
  * whose flag is off â€” routes, menus and queries all key off this.
  */
-function hospitality_enabled_for_company(int $companyId): bool
+function hospitality_legacy_enabled_for_company(int $companyId): bool
 {
     if (!column_exists('client_profiles', 'hospitality_accounting_enabled')) {
         return false;
@@ -55,6 +55,11 @@ function hospitality_enabled_for_company(int $companyId): bool
     return $profile !== null
         && (int) ($profile['is_active'] ?? 0) === 1
         && (int) ($profile['hospitality_accounting_enabled'] ?? 0) === 1;
+}
+
+function hospitality_enabled_for_company(int $companyId): bool
+{
+    return company_module_enabled('hospitality',$companyId) && !company_module_enabled('jewellery',$companyId);
 }
 
 /**

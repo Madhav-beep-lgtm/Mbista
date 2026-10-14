@@ -472,6 +472,8 @@ function hospitality_post_sales_upload(int $companyId, int $fiscalYearId, array 
     $pdo = db();
     $pdo->beginTransaction();
     try {
+        $pdo->prepare('SELECT id FROM companies WHERE id=? FOR UPDATE')->execute([$companyId]);
+        if (!$allowDuplicateDates && hospitality_sales_posted_dates($companyId,$dates)!==[]) throw new RuntimeException('Sales for these dates were posted by another request. Refresh the preview.');
         $pdo->prepare('INSERT INTO hospitality_sales_uploads
                 (company_id, fiscal_year_id, file_name, date_from, date_to, row_count, voucher_count,
                  gross_amount, discount_amount, vat_amount, taxable_amount, receivable_amount, status, posted_by, posted_at)

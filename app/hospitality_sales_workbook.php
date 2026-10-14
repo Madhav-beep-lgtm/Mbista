@@ -1189,7 +1189,7 @@ function hospitality_workbook_parse_rows(array $itemRows, array $invoiceRows, in
  * All-or-nothing — the batch, both sets of lines, every voucher and the menu
  * items the sheet introduced all commit together or none of them do.
  */
-function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, array $parsed, string $fileName, int $userId, bool $allowDuplicateDates = false): array
+function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, array $parsed, string $fileName, int $userId, bool $allowDuplicateDates = false, bool $manualEntry = false): array
 {
     if (isset($parsed['error'])) {
         return ['ok' => false, 'error' => (string) $parsed['error']];
@@ -1253,6 +1253,15 @@ function hospitality_post_sales_workbook(int $companyId, int $fiscalYearId, arra
     $pdo = db();
     $pdo->beginTransaction();
     try {
+        $pdo->prepare('SELECT id FROM companies WHERE id=? FOR UPDATE')->execute([$companyId]);
+        if (!$allowDuplicateDates && hospitality_sales_posted_dates($companyId,$dates)!==[]) throw new RuntimeException('Sales for these dates were posted by another request. Refresh the preview.');
+        if ($manualEntry) {
+            $duplicate=$pdo->prepare('SELECT id FROM hospitality_sales_invoice_lines WHERE company_id=? AND sale_date=? AND invoice_no=? LIMIT 1');
+            foreach($invoiceRows as $row) {
+                $duplicate->execute([$companyId,$row['date'],$row['invoice_no']]);
+                if ($duplicate->fetchColumn()) throw new RuntimeException('This bill reference has already been recorded for this date.');
+            }
+        }
         $pdo->prepare('INSERT INTO hospitality_sales_uploads
                 (company_id, fiscal_year_id, file_name, date_from, date_to, row_count, invoice_count, voucher_count,
                  gross_amount, discount_amount, vat_amount, taxable_amount, receivable_amount, status, posted_by, posted_at)

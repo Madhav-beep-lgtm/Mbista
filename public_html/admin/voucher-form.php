@@ -33,6 +33,22 @@ if (!$company || !$fiscalYear) {
 
 $companyId = (int) $company['id'];
 $fiscalYearId = (int) $fiscalYear['id'];
+$businessType = company_business_type($companyId);
+if ($businessType === 'conflict') deny_access('Select one business type in Platform Company Management before entering vouchers.');
+$requestedType = (string)($_GET['type'] ?? $_POST['type'] ?? $_POST['voucher_type'] ?? 'journal');
+if (empty($_GET['edit']) && empty($_POST['voucher_id'])) {
+    if ($businessType === 'jewellery' && in_array($requestedType,['sales','purchase'],true)) {
+        define('BUSINESS_VOUCHER_ENTRY',true);
+        $_GET['view']=$requestedType === 'sales' ? 'sales' : 'purchases';
+        require __DIR__.'/jewellery-trade.php';
+        return;
+    }
+    if ($businessType === 'hospitality' && $requestedType === 'sales') {
+        $userId=(int)current_user()['id'];
+        require __DIR__.'/../../app/views/vouchers/hospitality_sales.php';
+        return;
+    }
+}
 $currentUser = current_user();
 $userId = (int) ($currentUser['id'] ?? 0);
 $currency = site_currency_symbol();
@@ -960,7 +976,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $supportsServices = in_array($spec['key'], ['sales', 'credit_note'], true);
                     $hasExistingValues = !empty($prefill['values']);
                     $hasInventoryValues = count(array_filter($prefill['values'] ?? [], static fn (array $row): bool => (int) ($row['item_id'] ?? 0) > 0)) > 0;
-                    $tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? (($hasExistingValues && !$hasInventoryValues) || (!$hasExistingValues && $type === 'sales' && voucher_billing_group($companyId)) ? 'services' : 'goods')) : 'goods';
+                    $tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? (($hasExistingValues && !$hasInventoryValues) || (!$hasExistingValues && in_array($businessType,['service','internal_service'],true)) ? 'services' : 'goods')) : 'goods';
                 ?>
                 <label><span><?= $supportsServices ? 'Sales category' : 'Purchase category' ?></span>
                     <select name="trade_mode" id="vch-trade-mode">

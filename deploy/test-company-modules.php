@@ -6,10 +6,11 @@ function current_company_id(): int { return 11; }
 function setting($key, $default = '', $reload = false, $companyId = null) { global $settings; return $settings[$companyId][$key] ?? $default; }
 function user_is_super_admin(): bool { global $superAdmin; return $superAdmin; }
 function jewellery_legacy_enabled_for_company(int $companyId): bool { return $companyId === 12; }
+function hospitality_legacy_enabled_for_company(int $companyId): bool { return false; }
 function update_settings(array $values, int $companyId = 0): void { global $settings; $settings[$companyId] = array_replace($settings[$companyId] ?? [], $values); }
 require __DIR__ . '/../app/company_modules.php';
 function check(bool $ok, string $message): void { if (!$ok) throw new RuntimeException($message); }
-check(count(company_optional_modules()) === 10, 'Ten optional modules including jewellery');
+check(count(company_optional_modules()) === 12, 'Optional modules include hospitality and documents');
 check(!company_module_enabled('jewellery',11) && company_module_enabled('jewellery',12),'Legacy jewellery access preserved before configuration');
 company_modules_save(11,['jewellery']);
 check(company_module_enabled('jewellery',11),'Super admin enables jewellery for company');

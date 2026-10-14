@@ -451,7 +451,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <?php include __DIR__ . '/books_management_nav.php'; ?>
             <span class="admin-nav-group">Reports</span>
             <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
-            <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
+            <?php if (company_module_enabled('documents')): ?><a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a><?php endif; ?>
             <?php if (company_module_enabled('compliance')): ?><a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a><?php endif; ?>
 
             <span class="admin-nav-group">Operations</span>

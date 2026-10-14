@@ -868,7 +868,7 @@ if ($view === 'bills' && isset($_GET['export'])) {
 
 $pageTitle = 'Jewellery — Purchases, Sales & Bills';
 $pageSubtitle = 'Counter sales with old-gold exchange, supplier purchases, per-item VAT and bill-wise party settlement.';
-$pageHero = ['icon' => 'coins'];
+$pageHero = defined('BUSINESS_VOUCHER_ENTRY') ? false : ['icon' => 'coins'];
 $bodyClass = 'admin-layout accounting-module-page';
 $pageBreadcrumb = [['Home', 'admin/index.php'], ['Jewellery', 'admin/jewellery.php'], ['Trading', 'admin/jewellery-trade.php']];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
@@ -1024,7 +1024,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
         <?php else: ?>
         <?php // The FORM is the two-column grid, so the rail is a real sibling
               // of the working area rather than something floated beside it. ?>
-        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="<?= $editDoc ? e('Continue editing ' . (string) ($editDoc['purchase_no'] ?? 'this purchase')) : 'New Purchase' ?>" data-popup-open="<?= $justSaved ? '0' : ($editDoc ? '1' : '0') ?>">
+        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="<?= $editDoc ? e('Continue editing ' . (string) ($editDoc['purchase_no'] ?? 'this purchase')) : 'New Purchase' ?>" data-popup-open="<?= $justSaved ? '0' : (($editDoc || defined('BUSINESS_VOUCHER_ENTRY')) ? '1' : '0') ?>">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_purchase">
             <input type="hidden" name="back_view" value="purchases">
@@ -1304,7 +1304,7 @@ $renderLineRows = static function (string $prefix, array $existing, int $slots, 
                  form collapsed below the sales register. -->
             <input type="hidden" name="popup" value="sale">
         </form>
-        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="<?= $editDoc ? e('Continue editing ' . (string) ($editDoc['sale_no'] ?? 'this sale')) : 'New Sale' ?>" data-popup-open="<?= (!$justSaved && ($editDoc || ($_GET['popup'] ?? '') === 'sale')) ? '1' : '0' ?>">
+        <form method="post" class="jw-layout" enctype="multipart/form-data" data-form-popup data-popup-label="<?= $editDoc ? e('Continue editing ' . (string) ($editDoc['sale_no'] ?? 'this sale')) : 'New Sale' ?>" data-popup-open="<?= (!$justSaved && ($editDoc || defined('BUSINESS_VOUCHER_ENTRY') || ($_GET['popup'] ?? '') === 'sale')) ? '1' : '0' ?>">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="save_sale">
             <input type="hidden" name="back_view" value="sales">

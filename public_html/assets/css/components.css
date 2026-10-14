@@ -567,6 +567,12 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .accounting-dashboard-page .mbw-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--space-3); }
 .accounting-dashboard-page .mbw-kpi { min-height: 100px; padding: 14px; align-items: flex-start; }
 .accounting-dashboard-page .mbw-kpi-value { margin-top: 5px; font-size: 22px; }
+.hospitality-page .mbw-kpi-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin-block: 12px 18px; }
+.hospitality-page .mbw-kpi { min-height: 88px; padding: 14px 16px; align-items: center; gap: 12px; }
+.hospitality-page .mbw-kpi > div { min-width: 0; }
+.hospitality-page .mbw-kpi-label { font-size: 12px; line-height: 1.4; }
+.hospitality-page .mbw-kpi .mbw-chip { width: 34px; height: 34px; flex: 0 0 34px; }
+.hospitality-page .mbw-kpi .mbw-kpi-value { font-size: 20px !important; margin: 4px 0 0; overflow-wrap: anywhere; }
 .accounting-dashboard-page .mbw-more-kpis { margin: 0; }
 .accounting-dashboard-page .mbw-row-charts { align-items: stretch; }
 .accounting-dashboard-page .mbw-row-charts > .mbw-card { min-height: 360px; }

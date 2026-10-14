@@ -13,14 +13,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     try {
         db()->beginTransaction();
-        company_modules_save($targetCompanyId, (array)($_POST['modules'] ?? []));
+        db()->prepare('SELECT id FROM companies WHERE id=? FOR UPDATE')->execute([$targetCompanyId]);
+        company_business_save($targetCompanyId, (string)($_POST['business_type'] ?? ''), (array)($_POST['modules'] ?? []));
         db()->commit();
         log_activity('company', $targetCompanyId, 'modules_updated', 'Super admin updated company package module access.', (int)current_user()['id']);
         flash('success', 'Company module access updated.');
         redirect($moduleRoute);
     } catch (Throwable $exception) {
         if (db()->inTransaction()) db()->rollBack();
-        flash('error', 'Could not update company module access.');
+        flash('error', $exception instanceof PDOException ? 'Could not update company module access.' : $exception->getMessage());
     }
 }
 $platformShell = true;
@@ -34,7 +35,16 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
  <div class="mbw-card-head"><h2>Package module access</h2><a class="button secondary" href="<?= e(url('platform/index.php')) ?>">Back to companies</a></div>
  <form method="post" action="<?= e(url($moduleRoute)) ?>" class="workspace-form-grid">
   <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+  <label class="workspace-span-2">Business type
+   <select name="business_type" required>
+    <option value="">Select business type</option>
+    <?php foreach(company_business_types() as $key=>$label): ?>
+    <option value="<?= e($key) ?>" <?= company_business_type($targetCompanyId)===$key ? 'selected' : '' ?>><?= e($label) ?></option>
+    <?php endforeach; ?>
+   </select>
+  </label>
   <?php foreach (company_optional_modules() as $key=>$label): ?>
+   <?php if (in_array($key,['hospitality','jewellery'],true)) continue; ?>
    <label class="company-module-option"><input type="checkbox" name="modules[]" value="<?= e($key) ?>" <?= company_module_enabled($key,$targetCompanyId) ? 'checked' : '' ?>> <?= e($label) ?></label>
   <?php endforeach; ?>
   <div class="company-form-actions"><button class="button" type="submit">Save module access</button></div>

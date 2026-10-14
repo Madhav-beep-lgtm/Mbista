@@ -35,63 +35,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($clientDirectoryPath);
     }
     if ($action === 'toggle_hospitality') {
-        // Hospitality Accounting activation is a SUPER ADMIN decision only —
-        // client admins and staff can never flip it (server-side enforced).
-        if (current_access_level() !== 'super_admin') {
-            flash('error', 'Only the Super Admin can activate or deactivate Hospitality Accounting.');
-            redirect($clientDirectoryPath);
-        }
-        $newValue = (string) ($_POST['enabled'] ?? '0') === '1' ? 1 : 0;
-        $oldValue = (int) ($profile['hospitality_accounting_enabled'] ?? 0);
-        if ($oldValue !== $newValue) {
-            db()->prepare('UPDATE client_profiles SET hospitality_accounting_enabled = :v WHERE id = :id')
-                ->execute(['v' => $newValue, 'id' => $clientId]);
-            log_activity('client', $clientId, 'hospitality_toggle',
-                'Hospitality Accounting ' . ($newValue === 1 ? 'ACTIVATED' : 'DEACTIVATED')
-                . ' for ' . $profile['organization_name'] . ' (was ' . ($oldValue === 1 ? 'on' : 'off') . '). Data is preserved either way.',
-                (int) ($currentUser['id'] ?? 0));
-            log_field_changes('client', $clientId,
-                ['hospitality_accounting_enabled' => $oldValue],
-                ['hospitality_accounting_enabled' => $newValue],
-                current_company_id(), (int) ($currentUser['id'] ?? 0));
-            security_event('hospitality_toggle', 'success',
-                'Hospitality Accounting ' . ($newValue === 1 ? 'activated' : 'deactivated') . ' for client #' . $clientId . '.',
-                (int) ($profile['books_company_id'] ?? 0) ?: null, (int) ($currentUser['id'] ?? 0));
-        }
-        flash('success', 'Hospitality Accounting is now ' . ($newValue === 1 ? 'ACTIVE' : 'inactive') . ' for ' . $profile['organization_name']
-            . ($newValue === 0 ? '. All hospitality data is preserved and reappears on reactivation.' : '.'));
-        redirect($clientDirectoryPath);
+        if (!user_is_super_admin()) deny_access('Only the super admin can manage business types.');
+        redirect('platform/company-modules.php?company_id=' . (int)$profile['books_company_id']);
     }
+
     if ($action === 'toggle_jewellery') {
-        // Same rule as Hospitality: activating a vertical is a SUPER ADMIN
-        // decision only — client admins and staff can never flip it.
-        if (current_access_level() !== 'super_admin') {
-            flash('error', 'Only the Super Admin can activate or deactivate Jewellery Accounting.');
-            redirect($clientDirectoryPath);
-        }
-        $newValue = (string) ($_POST['enabled'] ?? '0') === '1' ? 1 : 0;
-        $booksId = (int)($profile['books_company_id'] ?? 0);
-        $oldValue = $booksId > 0 ? (int)company_module_enabled('jewellery', $booksId) : (int)($profile['jewellery_accounting_enabled'] ?? 0);
-        if ($booksId > 0) update_settings(['company_module_jewellery'=>(string)$newValue], $booksId);
-        if ($oldValue !== $newValue) {
-            db()->prepare('UPDATE client_profiles SET jewellery_accounting_enabled = :v WHERE id = :id')
-                ->execute(['v' => $newValue, 'id' => $clientId]);
-            log_activity('client', $clientId, 'jewellery_toggle',
-                'Jewellery Accounting ' . ($newValue === 1 ? 'ACTIVATED' : 'DEACTIVATED')
-                . ' for ' . $profile['organization_name'] . ' (was ' . ($oldValue === 1 ? 'on' : 'off') . '). Data is preserved either way.',
-                (int) ($currentUser['id'] ?? 0));
-            log_field_changes('client', $clientId,
-                ['jewellery_accounting_enabled' => $oldValue],
-                ['jewellery_accounting_enabled' => $newValue],
-                current_company_id(), (int) ($currentUser['id'] ?? 0));
-            security_event('jewellery_toggle', 'success',
-                'Jewellery Accounting ' . ($newValue === 1 ? 'activated' : 'deactivated') . ' for client #' . $clientId . '.',
-                (int) ($profile['books_company_id'] ?? 0) ?: null, (int) ($currentUser['id'] ?? 0));
-        }
-        flash('success', 'Jewellery Accounting is now ' . ($newValue === 1 ? 'ACTIVE' : 'inactive') . ' for ' . $profile['organization_name']
-            . ($newValue === 0 ? '. All jewellery data is preserved and reappears on reactivation.' : '.'));
-        redirect($clientDirectoryPath);
+        if (!user_is_super_admin()) deny_access('Only the super admin can manage business types.');
+        redirect('platform/company-modules.php?company_id=' . (int)$profile['books_company_id']);
     }
+
     if ($action === 'assign_staff' && $role === 'admin') {
         $staffId = (int) ($_POST['staff_user_id'] ?? 0);
         if ($staffId > 0) {
@@ -227,36 +179,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </td>
                     <td><?= $hasBooks ? '<span class="mbw-pill tone-green">Provisioned</span>' : '<span class="mbw-pill tone-gray">Not set up</span>' ?></td>
                     <td>
-                        <?php $hospOn = (int) ($client['hospitality_accounting_enabled'] ?? 0) === 1; ?>
-                        <?php if (current_access_level() === 'super_admin'): ?>
-                            <form method="post" style="display:flex;gap:6px;align-items:center" data-confirm="<?= $hospOn ? 'Deactivate Hospitality Accounting for this client? All recipes and costing data are PRESERVED and its menu/routes are blocked until reactivated.' : 'Activate Hospitality Accounting (recipe costing, reference-only) for this client?' ?>">
-                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                <input type="hidden" name="action" value="toggle_hospitality">
-                                <input type="hidden" name="client_id" value="<?= (int) $client['id'] ?>">
-                                <input type="hidden" name="enabled" value="<?= $hospOn ? '0' : '1' ?>">
-                                <span class="mbw-pill <?= $hospOn ? 'tone-green' : 'tone-gray' ?>"><?= $hospOn ? 'Active' : 'Off' ?></span>
-                                <button type="submit" class="button secondary" style="min-height:32px;padding:4px 10px"><?= $hospOn ? 'Deactivate' : 'Activate' ?></button>
-                            </form>
-                        <?php else: ?>
-                            <span class="mbw-pill <?= $hospOn ? 'tone-green' : 'tone-gray' ?>" title="Only the Super Admin can change this"><?= $hospOn ? 'Active' : 'Off' ?></span>
-                        <?php endif; ?>
+                        <?php $hospOn=$hasBooks && company_module_enabled('hospitality',(int)$client['books_company_id']); ?>
+                        <span class="mbw-pill <?= $hospOn ? 'tone-green' : 'tone-gray' ?>"><?= $hospOn ? 'Active' : 'Off' ?></span>
                     </td>
                     <td>
-                        <?php $jewOn = (int)($client['books_company_id'] ?? 0) > 0 ? company_module_enabled('jewellery', (int)$client['books_company_id']) : (int)($client['jewellery_accounting_enabled'] ?? 0) === 1; ?>
-                        <?php if (current_access_level() === 'super_admin'): ?>
-                            <form method="post" style="display:flex;gap:6px;align-items:center" data-confirm="<?= $jewOn ? 'Deactivate Jewellery Accounting for this client? All items, rates, orders and karigar data are PRESERVED and its menu/routes are blocked until reactivated.' : 'Activate Jewellery Accounting (stock by weight and value, daily rates, karigar orders) for this client?' ?>">
-                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                <input type="hidden" name="action" value="toggle_jewellery">
-                                <input type="hidden" name="client_id" value="<?= (int) $client['id'] ?>">
-                                <input type="hidden" name="enabled" value="<?= $jewOn ? '0' : '1' ?>">
-                                <span class="mbw-pill <?= $jewOn ? 'tone-green' : 'tone-gray' ?>"><?= $jewOn ? 'Active' : 'Off' ?></span>
-                                <button type="submit" class="button secondary" style="min-height:32px;padding:4px 10px"><?= $jewOn ? 'Deactivate' : 'Activate' ?></button>
-                            </form>
-                        <?php else: ?>
-                            <span class="mbw-pill <?= $jewOn ? 'tone-green' : 'tone-gray' ?>" title="Only the Super Admin can change this"><?= $jewOn ? 'Active' : 'Off' ?></span>
-                        <?php endif; ?>
+                        <?php $jewOn=$hasBooks && company_module_enabled('jewellery',(int)$client['books_company_id']); ?>
+                        <span class="mbw-pill <?= $jewOn ? 'tone-green' : 'tone-gray' ?>"><?= $jewOn ? 'Active' : 'Off' ?></span>
+                        <?php if ($hasBooks && user_is_super_admin()): ?><a class="button secondary" href="<?= e(url('platform/company-modules.php?company_id='.(int)$client['books_company_id'])) ?>">Business type</a><?php endif; ?>
                     </td>
-                    <td><?= $access === 'direct' ? '<span class="mbw-pill tone-blue">Direct posting</span>' : '<span class="mbw-pill tone-amber">Client approval required</span>' ?></td>
                     <td>
                         <?php if ($hasBooks): ?>
                             <a class="button soft" style="min-height:32px;padding:4px 12px" href="<?= e(url('admin/client-books.php?client=' . (int) $client['id'])) ?>"><?= icon('journal') ?>Open Books</a>
