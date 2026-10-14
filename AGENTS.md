@@ -1,5 +1,7 @@
 # Shared UI rules
 
+- Item creation/edit ledger mapping shows Purchase and Sales only, including for legacy perpetual companies. Never reintroduce GRNI clearing, COGS or Opening Balance Equity selectors there; preserve their historical stored mappings.
+
 These are the user's standing preferences for changes across this app:
 
 - Keep View, Accounts/search, Filter, Clear, Upload, Export and Create actions in a compact horizontal toolbar. Use narrow fields, aligned control heights and responsive wrapping on small screens.

@@ -11,7 +11,7 @@
             <label>Valuation method
                 <select name="valuation_method">
                     <?php $vm = (string) ($editItem['valuation_method'] ?? 'weighted_average'); ?>
-                    <option value="weighted_average" <?= $vm === 'weighted_average' ? 'selected' : '' ?>>Weighted Average (perpetual)</option>
+                    <option value="weighted_average" <?= $vm === 'weighted_average' ? 'selected' : '' ?>>Weighted Average</option>
                     <option value="fifo" <?= $vm === 'fifo' ? 'selected' : '' ?>>FIFO</option>
                     <option value="specific" <?= $vm === 'specific' ? 'selected' : '' ?>>Specific Identification</option>
                 </select>
@@ -53,10 +53,8 @@
             <label>Reorder level<input type="number" step="0.001" name="reorder_level" value="<?= e($editItem['reorder_level'] ?? '0.000') ?>"></label>
             </div></fieldset><fieldset><legend>Ledger mapping</legend><div class="workspace-form-grid item-ledgers-grid">
             <?php
-            // Per-item ledgers, exactly like the fixed-asset register form:
-            // the four everyday purposes are chosen here and belong to THIS
-            // item only; the full lifecycle list lives in the panel below
-            // when editing. 0 = inherit the category/global default.
+            // Item creation exposes Purchase and Sales only. Historical
+            // lifecycle mappings remain stored, not editable in this form.
             $itemMapCurrent = $editItem ? inventory_item_ledger_map($companyId, (int) $editItem['id']) : [];
             // The ledger list, built once for the page.
             //
@@ -93,7 +91,7 @@
             // one shared account, which is not a mapping anybody chose.
             $itemFormPurposes = inv_accounting_method($companyId) === 'periodic'
                 ? ['purchases', 'sales_revenue']
-                : ['inventory_asset', 'sales_revenue', 'purchase_clearing', 'cogs', 'opening_equity'];
+                : ['inventory_asset', 'sales_revenue'];
             $itemPurposeMeta = inventory_mapping_purposes();
             ?>
             <?php foreach ($itemFormPurposes as $itemFormPurpose): ?>
