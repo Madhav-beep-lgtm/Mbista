@@ -75,12 +75,14 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <?php if ($issued): ?><section class="mbw-card"><h2>License key · Company #<?= (int)$issued['company_id'] ?></h2><p><code><?= e($issued['key']) ?></code></p><p>Copy and securely share with the company owner. This key is shown once.</p></section><?php endif; ?>
 <section class="mbw-card">
- <div class="table-responsive"><table><thead><tr><th>Company</th><th>Code</th><th>Registration / PAN</th><th>License</th><th>Expiry date</th><th>Activation date</th><th>Manage</th></tr></thead><tbody>
+ <div class="table-responsive"><table><thead><tr><th>Company</th><th>Code</th><th>Registration No.</th><th>PAN</th><th>License</th><th>Expiry date</th><th>Activation date</th><th>Manage</th><th>Action</th></tr></thead><tbody>
  <?php foreach ($companies as $company): $license = json_decode((string)($company['license_json'] ?? ''),true) ?: []; ?>
  <tr><td><a href="<?= e(url('platform/company-settings.php?company_id=' . (int)$company['id'])) ?>"><?= e($company['name']) ?></a><?= !$company['is_active'] ? ' (company inactive)' : '' ?>
  <?php foreach ($profilesByCompany[(int)$company['id']] ?? [] as $profile): ?><div><small><?= e($profile['contact_name']) ?> · <?= e($profile['email']) ?></small></div><?php endforeach; ?>
  </td><td><?= e($company['code']) ?></td><td>
- <?php foreach ($profilesByCompany[(int)$company['id']] ?? [] as $profile): ?><div><?= e($profile['registration_no'] ?: '—') ?> / <?= e($profile['pan_no'] ?: '—') ?><?php include __DIR__ . '/../../app/views/partials/company_client_actions.php'; ?></div><?php endforeach; ?>
+ <?php foreach ($profilesByCompany[(int)$company['id']] ?? [] as $profile): ?><div><?= e($profile['registration_no'] ?? '') ?></div><?php endforeach; ?>
+ </td><td>
+ <?php foreach ($profilesByCompany[(int)$company['id']] ?? [] as $profile): ?><div><?= e($profile['pan_no'] ?? '') ?></div><?php endforeach; ?>
  </td><td><?= e(company_license_state($license)) ?></td>
  <td><input aria-label="Expiry date for <?= e($company['name']) ?>" type="date" name="expires" form="license-<?= (int)$company['id'] ?>" value="<?= e($license['expires'] ?? '') ?>"></td>
  <td><?= !empty($license['issued_at']) ? e(app_date(substr($license['issued_at'],0,10))) : '—' ?></td><td>
@@ -91,8 +93,12 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
   <button class="button secondary" name="action" value="renew">Renew</button>
   <button class="button secondary" name="action" value="replace" onclick="return confirm('Invalidate the current key and require activation again?')">Replace key</button>
   <?php endif; ?>
- </form></td></tr><?php endforeach; ?>
- <?php foreach ($unlinked as $profile): ?><tr><td><?= e($profile['organization_name']) ?><div><small><?= e($profile['contact_name']) ?> · <?= e($profile['email']) ?></small></div></td><td><?= e($profile['client_code'] ?? '—') ?></td><td><?= e($profile['registration_no'] ?: '—') ?> / <?= e($profile['pan_no'] ?: '—') ?></td><td>Not provisioned</td><td>—</td><td>—</td><td><?php include __DIR__ . '/../../app/views/partials/company_client_actions.php'; ?></td></tr><?php endforeach; ?>
+ </form></td><td>
+ <?php foreach ($profilesByCompany[(int)$company['id']] ?? [] as $profile): ?>
+ <?php include __DIR__ . '/../../app/views/partials/company_client_actions.php'; ?>
+ <?php endforeach; ?>
+ </td></tr><?php endforeach; ?>
+ <?php foreach ($unlinked as $profile): ?><tr><td><?= e($profile['organization_name']) ?><div><small><?= e($profile['contact_name']) ?> · <?= e($profile['email']) ?></small></div></td><td><?= e($profile['client_code'] ?? '—') ?></td><td><?= e($profile['registration_no'] ?? '') ?></td><td><?= e($profile['pan_no'] ?? '') ?></td><td>Not provisioned</td><td>—</td><td>—</td><td>—</td><td><?php include __DIR__ . '/../../app/views/partials/company_client_actions.php'; ?></td></tr><?php endforeach; ?>
  </tbody></table></div>
  <?php if ($unlinkedTotal > 50): ?><div class="actions"><?php if ($clientPage > 1): ?><a href="?page=<?= $page ?>&client_page=<?= $clientPage-1 ?>">Previous client records</a><?php endif; ?> <span>Client records page <?= $clientPage ?></span> <?php if ($clientPage*50 < $unlinkedTotal): ?><a href="?page=<?= $page ?>&client_page=<?= $clientPage+1 ?>">Next client records</a><?php endif; ?></div><?php endif; ?>
  <div class="actions"><?php if ($page > 1): ?><a class="button secondary" href="?page=<?= $page-1 ?>">Previous</a><?php endif; ?><span>Page <?= $page ?> of <?= max(1,(int)ceil($total/50)) ?></span><?php if ($page*50 < $total): ?><a class="button secondary" href="?page=<?= $page+1 ?>">Next</a><?php endif; ?></div>
