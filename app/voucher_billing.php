@@ -225,6 +225,7 @@ function voucher_billing_approve(int $id,int $companyId,int $actor): void
         if ($count<2 || $balance!==0) throw new RuntimeException('Journal must balance before posting.');
         $pdo->prepare("UPDATE vouchers SET status='posted',approval_state='approved',approved_by=?,approved_at=CURRENT_TIMESTAMP,posted_by=?,posted_at=CURRENT_TIMESTAMP,rejection_reason=NULL WHERE id=? AND company_id=?")->execute([$actor,$actor,$id,$companyId]);
         voucher_billing_finalize($id);
+        if (function_exists('business_voucher_finalize')) business_voucher_finalize($id,$companyId,$actor);
         $pdo->commit();
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) $pdo->rollBack();

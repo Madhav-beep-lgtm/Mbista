@@ -41,7 +41,7 @@ foreach (['sales', 'credit_note'] as $type) {
     if (voucher_compose($type, $services, $ledgers)['errors']) throw new RuntimeException('Service sales rejected');
 }
 foreach (['purchase', 'debit_note'] as $type) {
-    if (!voucher_compose($type, $services, $ledgers)['errors']) throw new RuntimeException('Service purchase accepted');
+    if (voucher_compose($type, $services, $ledgers)['errors']) throw new RuntimeException('Service purchase rejected');
 }
 $goods = $input + ['trade_mode' => 'goods'];
 if (!voucher_compose('sales', $goods, $ledgers)['errors']) throw new RuntimeException('Goods without inventory accepted');

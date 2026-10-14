@@ -53,7 +53,7 @@ if (column_exists('invoice_payment_requests','source_voucher_id')) {
         if ($voucher['voucher_type']==='receipt') $voucherLabel='Detailed receipt';
     }
 }
-if (isset($_GET['document']) && in_array((string) $voucher['voucher_type'], ['sales', 'purchase', 'debit_note', 'credit_note'], true)) {
+if (isset($_GET['document']) && ($voucher['source_type'] ?? '') !== 'business_return' && in_array((string) $voucher['voucher_type'], ['sales', 'purchase', 'debit_note', 'credit_note'], true)) {
     $billing = voucher_billing_link((int) $voucher['id']);
     if ($voucher['voucher_type'] === 'sales' && !empty($billing['document_id'])) {
         redirect('admin/invoice.php?id=' . (int) $billing['document_id']);

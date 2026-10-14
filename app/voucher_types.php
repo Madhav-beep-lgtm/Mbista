@@ -846,9 +846,8 @@ function voucher_compose_trade(array $spec, array $input, array $ledgers, array 
         $description = voucher_input_row($input, 'value_description', $index);
         if (isset($input['trade_mode'])) {
             $tradeMode = (string) $input['trade_mode'];
-            if (!in_array($tradeMode, ['goods', 'services'], true)
-                || ($tradeMode === 'services' && in_array($spec['key'], ['purchase', 'debit_note'], true))) {
-                $result['errors'][] = 'Service purchases belong in a Journal voucher.';
+            if (!in_array($tradeMode, ['goods', 'services'], true)) {
+                $result['errors'][] = 'Select goods or services.';
             } elseif ($tradeMode === 'goods' && ($itemId <= 0 || $quantity <= 0)) {
                 $result['errors'][] = 'Line ' . ($index + 1) . ': select an inventory item and quantity for goods.';
             } elseif ($tradeMode === 'services' && $itemId > 0) {

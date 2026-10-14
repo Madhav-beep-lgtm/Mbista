@@ -110,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $decidedStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id LIMIT 1');
         $decidedStmt->execute(['id' => $voucherId, 'company_id' => $companyId]);
         $decidedVoucher = $decidedStmt->fetch();
-        if ($decidedVoucher) {
+        if ($decidedVoucher && $postAction !== 'approve_voucher') {
             $stockNotes = voucher_stock_sync($companyId, (int) $decidedVoucher['fiscal_year_id'], $decidedVoucher, $userId);
             if ($stockNotes !== []) {
                 flash('info', implode(' ', $stockNotes));

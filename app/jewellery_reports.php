@@ -15,6 +15,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/jewellery_workshop.php';
+require_once __DIR__ . '/business_notes.php';
 
 // ---------------------------------------------------------------------------
 // Sales
@@ -63,9 +64,7 @@ function jw_report_sales_detail(int $companyId, string $from, string $to, array 
     }
     $sql .= ' ORDER BY s.sale_date ASC, s.id ASC, l.id ASC';
 
-    $stmt = db()->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rows = business_note_report_rows($sql,$params,'s','sale_date','sale_date','sale_no');
 
     $totals = ['fine_weight' => 0.0, 'metal_amount' => 0.0, 'making_amount' => 0.0, 'stone_amount' => 0.0,
         'diamond_amount' => 0.0, 'other_diamond_amount' => 0.0, 'stone_side' => 0.0,
@@ -472,9 +471,7 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
             $sql .= ' AND jp.metal_id = :mid';
             $params['mid'] = $metalId;
         }
-        $stmt = db()->prepare($sql);
-        $stmt->execute($params);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach (business_note_report_rows($sql,$params,'pu','purchase_date','purchase_date','purchase_no') as $row) {
             $row['origin'] = 'invoice';
             $row['origin_label'] = (string) $row['source'] === 'customer_old_gold'
                 ? 'Old gold bill' : 'Purchase bill';
@@ -516,9 +513,7 @@ function jw_report_purchase_detail(int $companyId, string $from, string $to, arr
             $sql .= ' AND jp.metal_id = :mid';
             $params['mid'] = $metalId;
         }
-        $stmt = db()->prepare($sql);
-        $stmt->execute($params);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach (business_note_report_rows($sql,$params,'s','sale_date','purchase_date','purchase_no') as $row) {
             $rows[] = jw_purchase_old_gold_row($row, 'sale_exchange', 'Old gold on a sale');
         }
     }
@@ -793,7 +788,7 @@ function jw_report_inventory_detail(int $companyId, string $from, string $to): a
  */
 function jw_report_vat_register(int $companyId, string $from, string $to): array
 {
-    $outStmt = db()->prepare("SELECT s.sale_no AS doc_no, s.sale_date AS doc_date,
+    $outSql = "SELECT s.sale_no AS doc_no, s.sale_date AS doc_date,
             COALESCE(ap.name, s.customer_name, 'Walk-in') AS party_label, ap.pan_no,
             i.sku AS item_code, i.name AS item_name, l.vat_base, l.vat_rate, l.vat_amount,
             l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount
@@ -804,11 +799,10 @@ function jw_report_vat_register(int $companyId, string $from, string $to): array
         LEFT JOIN accounting_parties ap ON ap.id = s.party_id
         WHERE s.company_id = :cid AND s.status = 'posted' AND s.sale_date BETWEEN :from AND :to
           AND l.vat_amount > 0
-        ORDER BY s.sale_date ASC, s.id ASC");
-    $outStmt->execute(['cid' => $companyId, 'from' => $from, 'to' => $to]);
-    $outputRows = $outStmt->fetchAll(PDO::FETCH_ASSOC);
+        ORDER BY s.sale_date ASC, s.id ASC";
+    $outputRows = business_note_report_rows($outSql,['cid'=>$companyId,'from'=>$from,'to'=>$to],'s','sale_date','doc_date','doc_no');
 
-    $inStmt = db()->prepare("SELECT pu.purchase_no AS doc_no, pu.purchase_date AS doc_date,
+    $inSql = "SELECT pu.purchase_no AS doc_no, pu.purchase_date AS doc_date,
             COALESCE(ap.name, 'Walk-in') AS party_label, ap.pan_no,
             i.sku AS item_code, i.name AS item_name, l.vat_base, l.vat_rate, l.vat_amount,
             l.metal_amount, l.making_amount, l.stone_amount, l.diamond_amount, l.other_diamond_amount
@@ -819,9 +813,8 @@ function jw_report_vat_register(int $companyId, string $from, string $to): array
         LEFT JOIN accounting_parties ap ON ap.id = pu.party_id
         WHERE pu.company_id = :cid AND pu.status = 'posted' AND pu.purchase_date BETWEEN :from AND :to
           AND l.vat_amount > 0
-        ORDER BY pu.purchase_date ASC, pu.id ASC");
-    $inStmt->execute(['cid' => $companyId, 'from' => $from, 'to' => $to]);
-    $inputRows = $inStmt->fetchAll(PDO::FETCH_ASSOC);
+        ORDER BY pu.purchase_date ASC, pu.id ASC";
+    $inputRows = business_note_report_rows($inSql,['cid'=>$companyId,'from'=>$from,'to'=>$to],'pu','purchase_date','doc_date','doc_no');
 
     // The base a line was taxed on. Getting this wrong is a filing error, not a
     // display one: 'stone_diamond' is the base a jewellery bill actually uses
@@ -889,16 +882,25 @@ function jw_report_tax_register(int $companyId, string $from, string $to): array
         ['output', 'sale', 'jewellery_sales', 'sale_date'],
         ['input', 'purchase', 'jewellery_purchases', 'purchase_date'],
     ] as [$direction, $docType, $table, $dateColumn]) {
-        $stmt = db()->prepare(sprintf($sql, $table, $dateColumn));
+        $queries=[sprintf($sql, $table, $dateColumn)];
+        if (table_exists('business_voucher_notes')) {
+            $returnSql=str_replace('SUM(t.base_amount)','SUM(-t.base_amount)',$queries[0]);
+            $returnSql=str_replace('SUM(t.amount)','SUM(-t.amount)',$returnSql);
+            $returnSql=str_replace('WHERE t.company_id',"JOIN business_voucher_notes bn ON bn.original_voucher_id=d.voucher_id AND bn.company_id=d.company_id AND bn.applied_at IS NOT NULL JOIN vouchers bn_v ON bn_v.id=bn.voucher_id AND bn_v.status='posted' WHERE t.company_id",$returnSql);
+            $queries[]=str_replace('d.'.$dateColumn.' BETWEEN','bn_v.voucher_date BETWEEN',$returnSql);
+        }
+        foreach($queries as $query) {
+        $stmt = db()->prepare($query);
         $stmt->execute(['cid' => $companyId, 'doc' => $docType, 'dir' => $direction, 'from' => $from, 'to' => $to]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $code = (string) $row['tax_code'];
             $taxes[$code] ??= ['tax_code' => $code, 'tax_name' => (string) $row['tax_name'],
                 'output_base' => 0.0, 'output_amount' => 0.0, 'output_docs' => 0,
                 'input_base' => 0.0, 'input_amount' => 0.0, 'input_docs' => 0, 'net_payable' => 0.0];
-            $taxes[$code][$direction . '_base'] = jw_round_money((float) $row['base_amount']);
-            $taxes[$code][$direction . '_amount'] = jw_round_money((float) $row['amount']);
-            $taxes[$code][$direction . '_docs'] = (int) $row['doc_count'];
+            $taxes[$code][$direction . '_base'] += jw_round_money((float) $row['base_amount']);
+            $taxes[$code][$direction . '_amount'] += jw_round_money((float) $row['amount']);
+            $taxes[$code][$direction . '_docs'] += (int) $row['doc_count'];
+        }
         }
     }
     foreach ($taxes as $code => $row) {

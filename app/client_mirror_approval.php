@@ -50,6 +50,7 @@ function client_mirror_decide(int $id,int $companyId,int $userId,string $decisio
         $pdo->prepare('UPDATE vouchers SET status = ?, approval_state = ?, client_approved_by = ?, client_approved_at = CURRENT_TIMESTAMP, approved_by = ?, approved_at = CURRENT_TIMESTAMP, posted_by = ?, posted_at = ? WHERE id = ? AND company_id = ?')
             ->execute([$decision === 'approve' ? 'posted' : 'cancelled',$decision === 'approve' ? 'approved' : 'rejected',$userId,$userId,$decision === 'approve' ? $userId : null,$decision === 'approve' ? date('Y-m-d H:i:s') : null,$id,$companyId]);
         if ($decision === 'approve' && function_exists('voucher_billing_finalize')) voucher_billing_finalize($id);
+        if ($decision === 'approve' && function_exists('business_voucher_finalize')) business_voucher_finalize($id,$companyId,$userId);
         $pdo->commit();
         if ($decision === 'approve' && function_exists('voucher_billing_notify')) voucher_billing_notify($id);
     } catch (Throwable $exception) {

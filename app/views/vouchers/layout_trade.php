@@ -47,8 +47,8 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
             </select>
         </label>
         <?php if ($warehouseOptions !== [] || $spec['key'] === 'purchase'): ?>
-            <label>Warehouse
-                <select name="warehouse_id" <?= $spec['key'] === 'purchase' ? 'required' : '' ?>>
+            <label data-goods-field>Warehouse
+                <select name="warehouse_id" data-goods-required="<?= $spec['key'] === 'purchase' ? '1' : '0' ?>" <?= $spec['key'] === 'purchase' ? 'required' : '' ?>>
                     <option value="">Select warehouse</option>
                     <?php foreach ($warehouseOptions as $warehouse): ?>
                         <option value="<?= (int) $warehouse['id'] ?>" <?= (int) ($prefill['warehouse_id'] ?? 0) === (int) $warehouse['id'] ? 'selected' : '' ?>><?= e((string) $warehouse['name']) ?></option>
@@ -137,7 +137,7 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                     <tr>
                         <th style="width:36px">SN</th>
                         <th style="width:190px" data-goods-field>Inventory item <em>*</em></th>
-                        <?php if ($spec['value_role'] === 'income'): ?><th style="width:200px" data-service-ledger>Sales ledger <em>*</em></th><?php endif; ?>
+                        <th style="width:200px" data-service-ledger><?= $spec['value_role'] === 'income' ? 'Sales ledger' : 'Purchase / expense ledger' ?> <em>*</em></th>
                         <th data-description-heading data-service-field>Service</th><th style="width:180px">Cost centre <em>*</em></th>
                         <th class="is-numeric" style="width:100px" data-goods-field>Qty</th>
                         <th class="is-numeric" style="width:120px" data-goods-field>Rate</th>
@@ -169,14 +169,12 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
                         <?php endforeach; ?>
                     </select>
                 </td>
-                <?php if ($spec['value_role'] === 'income'): ?>
                 <td data-service-ledger>
                     <select name="value_ledger[]" data-field="ledger_id" class="vch-ledger">
                         <option value="">Select ledger</option>
                         <?= $renderLedgerOptions($optionsValue, 0) ?>
                     </select>
                 </td>
-                <?php else: ?><td hidden><input type="hidden" name="value_ledger[]" data-field="ledger_id" class="vch-ledger"></td><?php endif; ?>
                 <td data-service-field><input type="text" name="value_description[]" data-field="description" maxlength="255" placeholder="Item or service"></td><td><select name="value_cost_centre[]" data-field="cost_centre" required aria-label="Cost centre"><option value="">Select cost centre</option><?php foreach ($costCentres as $centre): ?><option value="<?= e($centre) ?>"><?= e($centre) ?></option><?php endforeach; ?></select></td>
                 <td class="is-numeric" data-goods-field><input type="number" name="value_qty[]" data-field="qty" class="frm-num vch-qty" step="0.001" min="0" placeholder="0"></td>
                 <td class="is-numeric" data-goods-field><input type="number" name="value_rate[]" data-field="rate" class="frm-num vch-rate" step="0.01" min="0" placeholder="0.00"></td>
@@ -287,7 +285,7 @@ document.addEventListener('DOMContentLoaded', function () {
             cell.hidden = !goods;
             cell.querySelectorAll('input, select').forEach(function (field) {
                 field.disabled = !goods;
-                field.required = goods && (field.classList.contains('vch-item') || field.classList.contains('vch-qty'));
+                field.required = goods && (field.classList.contains('vch-item') || field.classList.contains('vch-qty') || field.dataset.goodsRequired === '1');
             });
         });
         form.querySelectorAll('[data-service-field]').forEach(function (cell) { cell.hidden = goods; });

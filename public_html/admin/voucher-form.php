@@ -37,6 +37,10 @@ $businessType = company_business_type($companyId);
 if ($businessType === 'conflict') deny_access('Select one business type in Platform Company Management before entering vouchers.');
 $requestedType = (string)($_GET['type'] ?? $_POST['type'] ?? $_POST['voucher_type'] ?? 'journal');
 if (empty($_GET['edit']) && empty($_POST['voucher_id'])) {
+    if (($businessType==='jewellery' && in_array($requestedType,['credit_note','debit_note'],true)) || ($businessType==='hospitality' && $requestedType==='credit_note')) {
+        require __DIR__.'/../../app/views/vouchers/business_note.php';
+        return;
+    }
     if ($businessType === 'jewellery' && in_array($requestedType,['sales','purchase'],true)) {
         define('BUSINESS_VOUCHER_ENTRY',true);
         $_GET['view']=$requestedType === 'sales' ? 'sales' : 'purchases';
@@ -185,7 +189,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_SESSION['voucher_retry'] = ['type' => $voucherType, 'input' => $_POST];
 
     $problems = [];
-    if ($voucherType === 'purchase') {
+    if ($voucherType === 'purchase' && ($_POST['trade_mode'] ?? 'goods') !== 'services') {
         $warehouseCheck = db()->prepare('SELECT id FROM warehouses WHERE id = ? AND company_id = ? AND is_active = 1');
         $warehouseCheck->execute([$warehouseId, $companyId]);
         if ((!$isDraft || $warehouseId > 0) && !$warehouseCheck->fetchColumn()) {
@@ -240,7 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (($spec['layout'] ?? '') === 'trade'
-        && (($composeInput['trade_mode'] ?? '') === 'goods' || in_array($voucherType, ['purchase', 'debit_note'], true))) {
+        && (($composeInput['trade_mode'] ?? '') === 'goods' || (($composeInput['trade_mode'] ?? '') !== 'services' && in_array($voucherType, ['purchase', 'debit_note'], true)))) {
         $itemLookup = db()->prepare("SELECT * FROM inventory_items WHERE id = ? AND company_id = ? AND status = 'active'");
         foreach ((array) ($composeInput['value_item'] ?? []) as $index => $itemId) {
             $itemLookup->execute([(int) $itemId, $companyId]);
@@ -519,21 +523,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         voucher_billing_save($voucherId,$_POST,$entries);
-        db()->commit();
-        voucher_billing_notify($voucherId);
-
-        // The goods follow the entry. Runs after the lines are stored because
-        // it reads them back — and after the transaction, because a stock
-        // problem must never roll back a voucher that is otherwise sound.
+        // Stock and accounting commit together; failures roll back both.
         $stockNotes = [];
         if ($voucherId > 0) {
             $savedStmt = db()->prepare('SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id LIMIT 1');
             $savedStmt->execute(['id' => $voucherId, 'company_id' => $companyId]);
             $savedVoucher = $savedStmt->fetch();
             if ($savedVoucher) {
-                $stockNotes = voucher_stock_sync($companyId, (int) $savedVoucher['fiscal_year_id'], $savedVoucher, $userId);
+                $stockNotes = voucher_stock_sync($companyId, (int) $savedVoucher['fiscal_year_id'], $savedVoucher, $userId, true);
             }
         }
+
+        db()->commit();
+        voucher_billing_notify($voucherId);
 
         // Attachments (PDF, Excel, JPG, PNG — max 10 MB each).
         if ($voucherId > 0 && table_exists('voucher_attachments') && !empty($_FILES['attachments']['name'][0])) {
@@ -973,15 +975,15 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     </select>
                 </label>
                 <?php if ((string) $spec['layout'] === 'trade'):
-                    $supportsServices = in_array($spec['key'], ['sales', 'credit_note'], true);
+                    $supportsServices = true;
                     $hasExistingValues = !empty($prefill['values']);
                     $hasInventoryValues = count(array_filter($prefill['values'] ?? [], static fn (array $row): bool => (int) ($row['item_id'] ?? 0) > 0)) > 0;
                     $tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? (($hasExistingValues && !$hasInventoryValues) || (!$hasExistingValues && in_array($businessType,['service','internal_service'],true)) ? 'services' : 'goods')) : 'goods';
                 ?>
-                <label><span><?= $supportsServices ? 'Sales category' : 'Purchase category' ?></span>
+                <label><span>Category</span>
                     <select name="trade_mode" id="vch-trade-mode">
-                        <option value="goods" <?= $tradeMode === 'goods' ? 'selected' : '' ?>><?= $supportsServices ? 'Goods sales' : 'Goods purchase' ?></option>
-                        <?php if ($supportsServices): ?><option value="services" <?= $tradeMode === 'services' ? 'selected' : '' ?>>Service sales</option><?php endif; ?>
+                        <option value="goods" <?= $tradeMode === 'goods' ? 'selected' : '' ?>>Goods</option>
+                        <option value="services" <?= $tradeMode === 'services' ? 'selected' : '' ?>>Services</option>
                     </select>
                 </label>
                 <?php endif; ?>

@@ -253,10 +253,10 @@ function voucher_stock_clear(int $companyId, int $voucherId): array
  * approval — ends up holding nothing, which is correct: undelivered goods are
  * still on the shelf.
  *
- * Returns human-readable notes. A note is never a failure: the ledger entries
- * are already made, so a stock problem is reported, not thrown.
+ * Strict callers hold a transaction: any stock failure aborts their journal
+ * too. Legacy diagnostic callers may collect failures as notes.
  */
-function voucher_stock_sync(int $companyId, ?int $fiscalYearId, array $voucher, int $actorId = 0): array
+function voucher_stock_sync(int $companyId, ?int $fiscalYearId, array $voucher, int $actorId = 0, bool $strict = false): array
 {
     $voucherId = (int) ($voucher['id'] ?? 0);
     $movementType = voucher_stock_movement_type((string) ($voucher['voucher_type'] ?? ''));
@@ -282,6 +282,10 @@ function voucher_stock_sync(int $companyId, ?int $fiscalYearId, array $voucher, 
     }
     if ($lines === []) {
         return $notes;
+    }
+    if ($strict) {
+        $problems=voucher_stock_preflight($companyId,(string)$voucher['voucher_type'],$lines);
+        if ($problems!==[]) throw new RuntimeException(implode(' ', $problems));
     }
 
     $direction = voucher_stock_direction($movementType);
@@ -380,6 +384,7 @@ function voucher_stock_sync(int $companyId, ?int $fiscalYearId, array $voucher, 
                         $partyId > 0 ? $partyId : null
                     );
                 } catch (RuntimeException $mapException) {
+                    if ($strict) throw $mapException;
                     if (!str_starts_with($mapException->getMessage(), 'MAP_MISSING:')) {
                         throw $mapException;
                     }
@@ -413,6 +418,7 @@ function voucher_stock_sync(int $companyId, ?int $fiscalYearId, array $voucher, 
                 }
             }
         } catch (Throwable $stockException) {
+            if ($strict) throw $stockException;
             $notes[] = ($item['sku'] ?? ('Item #' . $itemId)) . ' stock movement failed: ' . $stockException->getMessage();
         }
     }
