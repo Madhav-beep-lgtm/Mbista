@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $voucherId = (int) ($_POST['voucher_id'] ?? 0);
         $rejectionReason = trim((string) ($_POST['rejection_reason'] ?? ''));
-        $voucherStmt = db()->prepare("SELECT id, approval_state FROM vouchers WHERE id = :id AND company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1");
+        $voucherStmt = db()->prepare("SELECT * FROM vouchers WHERE id = :id AND company_id = :company_id AND fiscal_year_id = :fiscal_year_id LIMIT 1");
         $voucherStmt->execute(['id' => $voucherId, 'company_id' => $companyId, 'fiscal_year_id' => $fiscalYearId]);
         $voucher = $voucherStmt->fetch();
         if (!$voucher || (string) ($voucher['approval_state'] ?? '') !== 'pending_approval') {
@@ -85,6 +85,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($postAction === 'approve_voucher') {
+            if (($blocker = client_mirror_admin_approval_blocker($voucher)) !== null) {
+                flash('error',$blocker);
+                redirect('admin/accounting.php');
+            }
             db()->prepare("UPDATE vouchers SET approval_state = 'approved', status = 'posted', approved_by = :approved_by, approved_at = NOW(), posted_by = :posted_by, posted_at = NOW(), rejection_reason = NULL WHERE id = :id AND company_id = :company_id")
                 ->execute(['approved_by' => $userId, 'posted_by' => $userId, 'id' => $voucherId, 'company_id' => $companyId]);
             security_event('voucher_approved', 'success', 'Voucher #' . $voucherId . ' approved.', $companyId, $userId);

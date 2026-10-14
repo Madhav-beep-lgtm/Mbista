@@ -4072,6 +4072,9 @@ function voucher_prime_mutation_checks(array $voucherIds): void
  */
 function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []): ?string
 {
+    if (function_exists('is_client_mirror_voucher') && is_client_mirror_voucher($voucher)) {
+        return 'Client mirror entries cannot be edited or reposted here. The client must accept or reject the original entry in their approval queue.';
+    }
     $voucherId = (int) ($voucher['id'] ?? 0);
     if ($voucherId <= 0) {
         return 'Voucher not found.';
@@ -5386,8 +5389,16 @@ function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): 
         $taxLedger = $vatAmount > 0 ? client_mirror_ledger((int) $target['books_company_id'], 'tax_receivable') : null;
 
         $expenseAmount = $taxLedger ? round($taxableAmount + $exciseAmount, 2) : $totalAmount;
+        $taskDescription = trim((string)($invoice['description'] ?? ''));
+        if (!empty($invoice['task_id'])) {
+            $detailStmt = db()->prepare('SELECT t.title,s.stage_name FROM client_tasks t LEFT JOIN task_stages s ON s.id = ? AND s.task_id = t.id AND s.company_id = t.company_id WHERE t.id = ? AND t.company_id = ?');
+            $detailStmt->execute([(int)($invoice['stage_id'] ?? 0),(int)$invoice['task_id'],(int)$invoice['company_id']]);
+            if ($detail = $detailStmt->fetch()) $taskDescription = trim($detail['title'] . (!empty($detail['stage_name']) ? ' / ' . $detail['stage_name'] : ''));
+        }
+        $mirrorNarration = 'Provider invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId) . ' from ' . $target['provider_name'];
+        if ($taskDescription !== '') $mirrorNarration .= ' — ' . $taskDescription;
         $entries = [
-            ['ledger_id' => (int) $expenseLedger['id'], 'entry_type' => 'debit', 'amount' => $expenseAmount, 'memo' => 'Invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId) . ' from ' . $target['provider_name']],
+            ['ledger_id' => (int) $expenseLedger['id'], 'entry_type' => 'debit', 'amount' => $expenseAmount, 'memo' => mb_substr($mirrorNarration,0,255)],
         ];
         if ($taxLedger) {
             $entries[] = ['ledger_id' => (int) $taxLedger['id'], 'entry_type' => 'debit', 'amount' => $vatAmount, 'memo' => 'Input VAT on provider invoice'];
@@ -5398,10 +5409,10 @@ function auto_post_client_mirror_invoice(int $invoiceId, ?int $actorId = null): 
             $target,
             'client_mirror_invoice',
             $invoiceId,
-            'purchase',
+            'journal',
             'PM-' . date('Ymd') . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
             (string) ($invoice['issued_on'] ?? date('Y-m-d')),
-            'Provider invoice ' . ($invoice['invoice_no'] ?? '#' . $invoiceId) . ' — awaiting your approval',
+            $mirrorNarration,
             $totalAmount,
             $entries,
             $actorId

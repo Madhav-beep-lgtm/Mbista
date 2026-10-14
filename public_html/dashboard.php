@@ -99,14 +99,12 @@ if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error', 'That entry is not awaiting your approval.');
             redirect('dashboard.php?view=accounting');
         }
-        if ($decision === 'approve') {
-            db()->prepare("UPDATE vouchers SET status = 'posted', approval_state = 'approved', client_approved_by = :uid, client_approved_at = NOW(), posted_by = submitted_by, posted_at = NOW() WHERE id = :id")
-                ->execute(['uid' => $userId, 'id' => $voucherId]);
-            flash('success', 'Entry approved and posted to your books.');
-        } else {
-            db()->prepare("UPDATE vouchers SET status = 'cancelled', approval_state = 'rejected', client_approved_by = :uid, client_approved_at = NOW() WHERE id = :id")
-                ->execute(['uid' => $userId, 'id' => $voucherId]);
-            flash('success', 'Entry rejected.');
+        try {
+            client_mirror_decide($voucherId,$booksCompanyId,$userId,$decision);
+            flash('success',$decision === 'approve' ? 'Entry approved and posted to your books.' : 'Entry rejected.');
+        } catch (Throwable $exception) {
+            flash('error',$exception instanceof PDOException ? 'Could not save your decision. Please retry.' : $exception->getMessage());
+            redirect('dashboard.php?view=accounting');
         }
         log_activity('client_books', $clientId, 'client_voucher_decision', 'Client ' . $decision . 'd voucher #' . $voucherId . '.', $userId);
         redirect('dashboard.php?view=accounting');

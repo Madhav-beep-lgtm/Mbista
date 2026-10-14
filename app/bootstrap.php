@@ -12,6 +12,7 @@ require_once __DIR__ . '/access_control.php';
 require_once __DIR__ . '/company_modules.php';
 require_once __DIR__ . '/login_company.php';
 require_once __DIR__ . '/company_license.php';
+require_once __DIR__ . '/client_mirror_approval.php';
 require_once __DIR__ . '/inventory_valuation.php';
 // Loaded here rather than from the voucher pages: deleting a voucher has to
 // release the stock it moved, and that happens deep inside helpers.php.

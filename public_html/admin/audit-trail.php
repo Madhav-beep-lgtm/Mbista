@@ -46,6 +46,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'approve_voucher') {
+        if (($blocker = client_mirror_admin_approval_blocker($voucher)) !== null) {
+            flash('error',$blocker);
+            redirect('admin/audit-trail.php');
+        }
         db()->prepare("UPDATE vouchers SET approval_state = 'approved', status = 'posted', approved_by = :uid, approved_at = NOW() WHERE id = :id")
             ->execute(['uid' => $userId, 'id' => $voucherId]);
         security_event('voucher_approved', 'success', 'Voucher #' . $voucherId . ' approved.', $companyId, $userId);
