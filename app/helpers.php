@@ -7405,7 +7405,7 @@ function provision_client_books(int $clientProfileId): int
 
     $code = 'CLB' . str_pad((string) $clientProfileId, 4, '0', STR_PAD_LEFT);
     db()->prepare('INSERT INTO companies (name, code, is_active, is_client_company) VALUES (:name, :code, 1, 1)')
-        ->execute(['name' => (string) $profile['organization_name'] . ' (Client Books)', 'code' => $code]);
+        ->execute(['name' => (string) $profile['organization_name'], 'code' => $code]);
     $booksCompanyId = (int) db()->lastInsertId();
     if (column_exists('companies', 'inventory_accounting')) {
         db()->prepare("UPDATE companies SET inventory_accounting = 'periodic' WHERE id = ?")->execute([$booksCompanyId]);
@@ -9085,14 +9085,10 @@ function next_voucher_no(int $companyId, string $prefix, int $pad = 4): string
  * The company name as it belongs on a document somebody outside the office
  * reads - a statement, a payslip.
  *
- * "(Client Books)" is how this system tells a client's books apart from the
- * firm's own. It is an internal bookkeeping marker, not part of the legal
- * entity, and printing it across the top of every document the client or their
- * staff receive is noise at best and wrong about whose document it is at worst.
- * Only that exact suffix is removed - a legal name can genuinely end in
- * brackets, and stripping any parenthetical would eat part of it.
+ * Remove only legacy bookkeeping suffixes, never other parenthetical parts
+ * of a legal name. New provisioning stores the organization name unchanged.
  */
 function statement_company_name(string $name): string
 {
-    return trim((string) preg_replace('/\s*\(\s*client[\s_-]*books\s*\)\s*$/i', '', trim($name)));
+    return trim((string) preg_replace('/\s*\(\s*(?:client[\s_-]*)?books\s*\)\s*$/i', '', trim($name)));
 }

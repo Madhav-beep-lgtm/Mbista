@@ -1,5 +1,7 @@
 # Shared UI rules
 
+- Use the actual company/organization name in directories, creation and print/export headers. Never append "(Books)" or "(Client Books)"; legacy suffix cleanup must preserve original values for recovery.
+
 - Company Management consolidates existing client records and licensing. Create companies only through Companies > New company; do not restore the legacy New Client form. Keep one editable expiry field in its table column. Display first license generation as Activation date without changing actual redemption/access enforcement. Email new credentials and generated keys through platform mail settings after commit, never through the log transport.
 
 - Item creation/edit ledger mapping shows Purchase and Sales only, including for legacy perpetual companies. Never reintroduce GRNI clearing, COGS or Opening Balance Equity selectors there; preserve their historical stored mappings.

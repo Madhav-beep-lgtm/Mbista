@@ -47,6 +47,9 @@ if ($errors !== []) {
     exit(1);
 }
 
+require_once $appBase . '/app/company_name_cleanup.php';
+echo 'company names: cleaned ' . company_name_cleanup(db()) . " company(ies).\n";
+
 // Adopt on-hand jewellery stock into traced pieces, for shops that predate
 // piece tracing. This is a one-time migration per company and it used to run
 // inside the sales page, where on a two-thousand-item shop it was fourteen
