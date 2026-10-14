@@ -1898,46 +1898,43 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <?php if ($view === 'teams'): ?>
-    <section class="mbw-card" data-collapsible id="teams">
-        <div class="mbw-card-head">
-            <h2>Teams</h2>
-        </div>
-        
-            <div class="form-card">
-                <h3>Create team</h3>
-                <form method="post" class="workspace-form-grid">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="create_team">
+    <div id="teams" class="teams-workspace">
+        <section class="mbw-card teams-create" aria-labelledby="team-create-heading">
+            <div class="mbw-card-head"><h2 id="team-create-heading">Create team</h2></div>
+            <form method="post" class="teams-form">
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="action" value="create_team">
+                <div class="teams-details">
                     <label>Team name<input type="text" name="name" required></label>
-                    <label>Leader (must be staff)
+                    <label>Team leader
                         <select name="leader_user_id" required>
-                            <option value="">Select leader</option>
+                            <option value="">Select staff member</option>
                             <?php foreach ($staffUsers as $staff): ?>
-                                <option value="<?= e((int) $staff['id']) ?>"><?= e($staff['name']) ?> (<?= e($staff['email']) ?>)</option>
+                            <option value="<?= e((int)$staff['id']) ?>"><?= e($staff['name']) ?> (<?= e($staff['email']) ?>)</option>
                             <?php endforeach; ?>
                         </select>
                     </label>
-                    <label>Additional members
-                        <select name="member_ids[]" multiple size="6">
-                            <?php foreach ($staffUsers as $staff): ?>
-                                <option value="<?= e((int) $staff['id']) ?>"><?= e($staff['name']) ?> (<?= e($staff['email']) ?>)</option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                    <label class="workspace-span-2">Description<textarea name="description"></textarea></label>
-                    <div class="workspace-span-2">
-                        <button type="submit"><?= icon('teams') ?>Create team</button>
+                    <label class="teams-description">Description<textarea name="description" rows="3"></textarea></label>
+                </div>
+                <fieldset class="teams-members">
+                    <legend>Additional members</legend>
+                    <div class="teams-member-list">
+                        <?php if ($staffUsers === []): ?><p class="teams-empty">No staff members available.</p><?php endif; ?>
+                        <?php foreach ($staffUsers as $staff): ?>
+                        <label class="teams-member">
+                            <input type="checkbox" name="member_ids[]" value="<?= e((int)$staff['id']) ?>">
+                            <span><strong><?= e($staff['name']) ?></strong><small><?= e($staff['email']) ?></small></span>
+                        </label>
+                        <?php endforeach; ?>
                     </div>
-                </form>
-            </div>
-        
-
-        <section class="mbw-card" data-collapsible>
-            <div class="mbw-card-head">
-                <h2>Team List</h2>
-            </div>
-            <div style="overflow-x:auto">
-            <table>
+                </fieldset>
+                <div class="teams-form-actions"><button type="submit" class="button"><?= icon('teams') ?>Create team</button></div>
+            </form>
+        </section>
+        <section class="mbw-card teams-list" aria-labelledby="team-list-heading">
+            <div class="mbw-card-head"><h2 id="team-list-heading">Team list</h2><span class="mbw-pill"><?= count($teams) ?></span></div>
+            <div class="table-responsive">
+<table>
                 <thead>
                     <tr>
                         <th>Team</th>
@@ -1962,7 +1959,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </table>
             </div>
         </section>
-    </section>
+    </div>
     <?php endif; ?>
 
     <?php if ($view === 'contracts'): ?>
