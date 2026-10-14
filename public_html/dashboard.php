@@ -39,15 +39,6 @@ $pendingPaymentResponseCount = 0;
 
 // Owner login or portal member added by the owner — both land on the same org.
 $clientProfile = client_profile_for_user($userId);
-if ($clientProfile) {
-    $clientProfile['industry_name'] = null;
-    if (!empty($clientProfile['industry_id']) && table_exists('industries')) {
-        $industryStmt = db()->prepare('SELECT name FROM industries WHERE id = :id LIMIT 1');
-        $industryStmt->execute(['id' => (int) $clientProfile['industry_id']]);
-        $clientProfile['industry_name'] = $industryStmt->fetchColumn() ?: null;
-    }
-}
-
 if ($clientProfile && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
@@ -898,7 +889,6 @@ include __DIR__ . '/../app/views/partials/client_header.php';
         <?php endif; ?>
         <section class="mbw-kpi-grid">
             <article class="mbw-kpi"><div><span class="mbw-kpi-label">Organization</span><div class="mbw-kpi-value" style="font-size:1.05rem;"><?= e($clientProfile['organization_name']) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Code <?= e($clientProfile['client_code'] ?? 'N/A') ?></span></span></div><span class="mbw-chip tone-blue"><?= icon('clients') ?></span></article>
-            <article class="mbw-kpi"><div><span class="mbw-kpi-label">Industry</span><div class="mbw-kpi-value" style="font-size:1.05rem;"><?= e($clientProfile['industry_name'] ?? 'N/A') ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Business classification</span></span></div><span class="mbw-chip tone-purple"><?= icon('accounting') ?></span></article>
             <a class="mbw-kpi" href="<?= e(url('dashboard.php?view=tasks')) ?>"><div><span class="mbw-kpi-label">Tracked tasks</span><div class="mbw-kpi-value"><?= e((string) count($tasks)) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">View progress</span></span></div><span class="mbw-chip tone-teal"><?= icon('tasks') ?></span></a>
             <a class="mbw-kpi" href="<?= e(url('dashboard.php?view=compliance')) ?>"><div><span class="mbw-kpi-label">Compliance deadlines</span><div class="mbw-kpi-value"><?= e((string) $upcomingComplianceCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Upcoming or overdue</span></span></div><span class="mbw-chip <?= $upcomingComplianceCount > 0 ? 'tone-amber' : 'tone-green' ?>"><?= icon('compliance') ?></span></a>
             <a class="mbw-kpi" href="<?= e(url('dashboard.php?view=messages')) ?>"><div><span class="mbw-kpi-label">Unread messages</span><div class="mbw-kpi-value"><?= e((string) $unreadMessageCount) ?></div><span class="mbw-kpi-delta"><span class="mbw-kpi-vs">Open inbox</span></span></div><span class="mbw-chip <?= $unreadMessageCount > 0 ? 'tone-amber' : 'tone-blue' ?>"><?= icon('messages') ?></span></a>

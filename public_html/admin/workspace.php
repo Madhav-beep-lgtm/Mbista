@@ -40,7 +40,6 @@ $requiredTables = [
     'teams',
     'team_members',
     'client_profiles',
-    'industries',
     'service_provider_entities',
     'client_service_provider_entities',
     'service_contracts',
@@ -80,7 +79,7 @@ if ($hasTerminationInvoice) {
     $allowedInvoiceType[] = 'termination';
 }
 
-$allowedViews = ['home', 'clients', 'industries', 'service-providers', 'teams', 'contracts', 'tasks', 'invoices', 'staff'];
+$allowedViews = ['home', 'clients', 'service-providers', 'teams', 'contracts', 'tasks', 'invoices', 'staff'];
 $view = (string) ($_GET['view'] ?? 'home');
 if ($view === 'users') {
     redirect('admin/users.php');
@@ -239,7 +238,6 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $name = trim((string) ($_POST['authorized_person_name'] ?? ''));
         $organizationName = trim((string) ($_POST['organization_name'] ?? ''));
         $registrationNo = trim((string) ($_POST['registration_no'] ?? ''));
-        $industryId = (int) ($_POST['industry_id'] ?? 0);
         $address = trim((string) ($_POST['address'] ?? ''));
         $panNo = trim((string) ($_POST['pan_no'] ?? ''));
         $position = trim((string) ($_POST['authorized_person_position'] ?? ''));
@@ -280,7 +278,6 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 UPDATE client_profiles
                 SET organization_name = :organization_name,
                     registration_no = :registration_no,
-                    industry_id = :industry_id,
                     address = :address,
                     pan_no = :pan_no,
                     authorized_person_position = :authorized_person_position,
@@ -296,7 +293,6 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([
                 'organization_name' => $organizationName,
                 'registration_no' => $registrationNo !== '' ? $registrationNo : null,
-                'industry_id' => $industryId > 0 ? $industryId : null,
                 'address' => $address !== '' ? $address : null,
                 'pan_no' => $panNo !== '' ? $panNo : null,
                 'authorized_person_position' => $position !== '' ? $position : null,
@@ -427,42 +423,7 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('admin/workspace.php?view=clients&mode=view&client_id=' . $newProfileId);
     }
 
-    if ($action === 'save_industry') {
-        $industryId = (int) ($_POST['industry_id'] ?? 0);
-        $name = trim((string) ($_POST['name'] ?? ''));
-        $isActive = isset($_POST['is_active']) ? 1 : 0;
-        if ($name === '') {
-            flash('error', 'Industry name is required.');
-            redirect('admin/workspace.php?view=industries');
-        }
-        if ($industryId > 0) {
-            db()->prepare('UPDATE industries SET name = :name, is_active = :is_active WHERE id = :id')
-                ->execute(['name' => $name, 'is_active' => $isActive, 'id' => $industryId]);
-            log_activity('industry', $industryId, 'updated', 'Industry updated.', $adminId);
-        } else {
-            db()->prepare('INSERT INTO industries (name, is_active) VALUES (:name, :is_active)')
-                ->execute(['name' => $name, 'is_active' => $isActive]);
-            $industryId = (int) db()->lastInsertId();
-            log_activity('industry', $industryId, 'created', 'Industry created.', $adminId);
-        }
-        flash('success', 'Industry saved.');
-        redirect('admin/workspace.php?view=industries');
-    }
-
-    if ($action === 'delete_industry') {
-        $industryId = (int) ($_POST['industry_id'] ?? 0);
-        $check = db()->prepare('SELECT COUNT(*) FROM client_profiles WHERE industry_id = :id');
-        $check->execute(['id' => $industryId]);
-        if ((int) $check->fetchColumn() > 0) {
-            db()->prepare('UPDATE industries SET is_active = 0 WHERE id = :id')->execute(['id' => $industryId]);
-            flash('success', 'Industry is used by clients, so it was deactivated.');
-        } else {
-            db()->prepare('DELETE FROM industries WHERE id = :id')->execute(['id' => $industryId]);
-            flash('success', 'Industry deleted.');
-        }
-        log_activity('industry', $industryId, 'deleted_or_deactivated', 'Industry delete requested.', $adminId);
-        redirect('admin/workspace.php?view=industries');
-    }
+    if (in_array($action, ['save_industry', 'delete_industry'], true)) deny_access('Industry management is unavailable.');
 
     if ($action === 'save_service_provider_entity') {
         $entityId = (int) ($_POST['entity_id'] ?? 0);
@@ -1419,7 +1380,6 @@ $editTaskAssigneeIds = [];
 $terminatePrefillTaskId = (int) ($_GET['terminate_task_id'] ?? 0);
 $unlinkedCustomers = [];
 $otherPortalClients = [];
-$industries = [];
 $serviceProviderEntities = [];
 $selectedClientServiceProviderIds = [];
 
@@ -1505,9 +1465,6 @@ if ($missingTables === []) {
         }
     }
 
-    if (in_array($view, ['clients', 'industries'], true)) {
-        $industries = active_industries();
-    }
     if (in_array($view, ['clients', 'service-providers', 'tasks'], true)) {
         $serviceProviderEntities = active_service_provider_entities();
     }
@@ -1517,10 +1474,9 @@ if ($missingTables === []) {
     $selectedClientServiceProviderIds = [];
 
     if (in_array($view, ['home', 'clients', 'contracts', 'tasks'], true)) {
-        $clientStmt = db()->prepare("SELECT cp.*, u.name, u.email, i.name AS industry_name
+        $clientStmt = db()->prepare("SELECT cp.*, u.name, u.email
         FROM client_profiles cp
         INNER JOIN users u ON u.id = cp.user_id
-        LEFT JOIN industries i ON i.id = cp.industry_id
         WHERE cp.company_id = :company_id
         ORDER BY cp.created_at DESC");
     $clientStmt->execute(['company_id' => $companyId]);
@@ -1562,11 +1518,10 @@ if ($missingTables === []) {
     }
 
     if ($view === 'clients' && $selectedClientId > 0) {
-        $selectedStmt = db()->prepare("SELECT cp.*, u.name, u.email, i.name AS industry_name
+        $selectedStmt = db()->prepare("SELECT cp.*, u.name, u.email
             FROM client_profiles cp
             INNER JOIN users u ON u.id = cp.user_id
-            LEFT JOIN industries i ON i.id = cp.industry_id
-            WHERE cp.id = :id AND cp.company_id = :company_id
+                WHERE cp.id = :id AND cp.company_id = :company_id
             LIMIT 1");
         $selectedStmt->execute([
             'id' => $selectedClientId,
@@ -1761,7 +1716,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div class="actions workspace-module-bar" style="margin-bottom: 16px;">
     <a class="button<?= $view === 'home' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('home') ?>Home</a>
     <?php if (!user_is_super_admin()): ?><a class="button<?= $view === 'clients' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><?= icon('clients') ?>Clients</a><?php endif; ?>
-    <a class="button<?= $view === 'industries' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=industries')) ?>"><?= icon('settings') ?>Industries</a>
     <a class="button<?= $view === 'service-providers' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=service-providers')) ?>"><?= icon('companies') ?>Service providers</a>
     <a class="button<?= $view === 'teams' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><?= icon('teams') ?>Teams</a>
     <a class="button<?= $view === 'contracts' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><?= icon('contracts') ?>Contracts</a>
@@ -1835,7 +1789,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <div style="overflow-x:auto">
                 <table>
                     <tbody>
-                        <tr><th>Industry</th><td><?= e($selectedClient['industry_name'] ?? 'N/A') ?></td></tr>
                         <tr><th>Authorized Person Name</th><td><?= e($selectedClient['name']) ?></td></tr>
                         <tr><th>Position</th><td><?= e($selectedClient['authorized_person_position'] ?? 'N/A') ?></td></tr>
                         <tr><th>Login email</th><td><?= e($selectedClient['email']) ?></td></tr>
@@ -1867,14 +1820,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     <label>Client Code<input type="text" value="<?= e($selectedClient['client_code'] ?? '') ?>" readonly></label>
                     <label>Registration Number<input type="text" name="registration_no" value="<?= e($selectedClient['registration_no'] ?? '') ?>"></label>
                     <label>PAN Number<input type="text" name="pan_no" value="<?= e($selectedClient['pan_no'] ?? '') ?>"></label>
-                    <label>Industry
-                        <select name="industry_id">
-                            <option value="0">Select industry</option>
-                            <?php foreach ($industries as $industry): ?>
-                                <option value="<?= e((int) $industry['id']) ?>" <?= (int) ($selectedClient['industry_id'] ?? 0) === (int) $industry['id'] ? 'selected' : '' ?>><?= e($industry['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
                     <label>Status
                         <select name="client_status">
                             <?php foreach ($allowedClientStatus as $statusOption): ?>
@@ -2016,54 +1961,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </table>
             </div>
         </section>
-    </section>
-    <?php endif; ?>
-
-    <?php if ($view === 'industries'): ?>
-    <section class="mbw-card" data-collapsible id="industries">
-        <div class="mbw-card-head">
-            <h2>Industry Management</h2>
-        </div>
-        
-            <form method="post" class="workspace-form-grid">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="save_industry">
-                <label>Industry name<input type="text" name="name" required></label>
-                <label class="checkbox-line"><input type="checkbox" name="is_active" value="1" checked> Active</label>
-                <button type="submit"><?= icon('settings') ?>Save industry</button>
-            </form>
-        
-        <div style="overflow-x:auto">
-        <table>
-            <thead><tr><th>Industry</th><th>Status</th><th>Action</th></tr></thead>
-            <tbody>
-                <?php $allIndustries = table_exists('industries') ? db()->query('SELECT * FROM industries ORDER BY name ASC')->fetchAll() : []; ?>
-                <?php if ($allIndustries === []): ?><tr><td colspan="3">No industries found.</td></tr><?php endif; ?>
-                <?php foreach ($allIndustries as $industry): ?>
-                    <tr>
-                        <td>
-                            <form method="post" class="actions">
-                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                <input type="hidden" name="action" value="save_industry">
-                                <input type="hidden" name="industry_id" value="<?= e((int) $industry['id']) ?>">
-                                <input type="text" name="name" value="<?= e($industry['name']) ?>" required>
-                        </td>
-                        <td><label class="checkbox-line"><input type="checkbox" name="is_active" value="1" <?= (int) $industry['is_active'] === 1 ? 'checked' : '' ?>> Active</label></td>
-                        <td>
-                                <button class="button secondary" type="submit">Save</button>
-                            </form>
-                            <form method="post" onsubmit="return confirm('Delete or deactivate this industry?');">
-                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                <input type="hidden" name="action" value="delete_industry">
-                                <input type="hidden" name="industry_id" value="<?= e((int) $industry['id']) ?>">
-                                <button class="button secondary" type="submit">Delete</button>
-                            </form>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-        </div>
     </section>
     <?php endif; ?>
 
