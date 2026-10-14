@@ -79,7 +79,7 @@ if ($hasTerminationInvoice) {
     $allowedInvoiceType[] = 'termination';
 }
 
-$allowedViews = ['home', 'clients', 'service-providers', 'teams', 'contracts', 'tasks', 'invoices', 'staff'];
+$allowedViews = ['home', 'clients', 'teams', 'contracts', 'tasks', 'invoices', 'staff'];
 $view = (string) ($_GET['view'] ?? 'home');
 if ($view === 'users') {
     redirect('admin/users.php');
@@ -425,73 +425,7 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (in_array($action, ['save_industry', 'delete_industry'], true)) deny_access('Industry management is unavailable.');
 
-    if ($action === 'save_service_provider_entity') {
-        $entityId = (int) ($_POST['entity_id'] ?? 0);
-        $name = trim((string) ($_POST['name'] ?? ''));
-        $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
-        $contactEmail = trim((string) ($_POST['contact_email'] ?? ''));
-        $contactNumber = trim((string) ($_POST['contact_number'] ?? ''));
-        $address = trim((string) ($_POST['address'] ?? ''));
-        $website = trim((string) ($_POST['website'] ?? ''));
-        $signatory = trim((string) ($_POST['authorized_signatory_name'] ?? ''));
-        $isActive = isset($_POST['is_active']) ? 1 : 0;
-        if ($name === '') {
-            flash('error', 'Service provider entity name is required.');
-            redirect('admin/workspace.php?view=service-providers');
-        }
-        if ($contactEmail !== '' && filter_var($contactEmail, FILTER_VALIDATE_EMAIL) === false) {
-            flash('error', 'Entity contact email is invalid.');
-            redirect('admin/workspace.php?view=service-providers');
-        }
-        if ($website !== '' && filter_var($website, FILTER_VALIDATE_URL) === false) {
-            flash('error', 'Entity website must be a valid URL.');
-            redirect('admin/workspace.php?view=service-providers');
-        }
-        $existingLogo = null;
-        if ($entityId > 0) {
-            $existingStmt = db()->prepare('SELECT logo_path FROM service_provider_entities WHERE id = :id LIMIT 1');
-            $existingStmt->execute(['id' => $entityId]);
-            $existingLogo = $existingStmt->fetchColumn() ?: null;
-        }
-        try {
-            $logoPath = !empty($_POST['remove_logo']) ? null : upload_image_file('entity_logo', 'assets/uploads/service-provider-logos', $existingLogo ?: null);
-            if ($entityId > 0) {
-                db()->prepare('UPDATE service_provider_entities SET name = :name, code = :code, logo_path = :logo_path, contact_email = :contact_email, contact_number = :contact_number, address = :address, website = :website, authorized_signatory_name = :authorized_signatory_name, is_active = :is_active WHERE id = :id')
-                    ->execute([
-                        'name' => $name,
-                        'code' => $code !== '' ? $code : null,
-                        'logo_path' => $logoPath,
-                        'contact_email' => $contactEmail !== '' ? $contactEmail : null,
-                        'contact_number' => $contactNumber !== '' ? $contactNumber : null,
-                        'address' => $address !== '' ? $address : null,
-                        'website' => $website !== '' ? $website : null,
-                        'authorized_signatory_name' => $signatory !== '' ? $signatory : null,
-                        'is_active' => $isActive,
-                        'id' => $entityId,
-                    ]);
-                log_activity('service_provider_entity', $entityId, 'updated', 'Service provider entity updated.', $adminId);
-            } else {
-                db()->prepare('INSERT INTO service_provider_entities (name, code, logo_path, contact_email, contact_number, address, website, authorized_signatory_name, is_active) VALUES (:name, :code, :logo_path, :contact_email, :contact_number, :address, :website, :authorized_signatory_name, :is_active)')
-                    ->execute([
-                        'name' => $name,
-                        'code' => $code !== '' ? $code : null,
-                        'logo_path' => $logoPath,
-                        'contact_email' => $contactEmail !== '' ? $contactEmail : null,
-                        'contact_number' => $contactNumber !== '' ? $contactNumber : null,
-                        'address' => $address !== '' ? $address : null,
-                        'website' => $website !== '' ? $website : null,
-                        'authorized_signatory_name' => $signatory !== '' ? $signatory : null,
-                        'is_active' => $isActive,
-                    ]);
-                $entityId = (int) db()->lastInsertId();
-                log_activity('service_provider_entity', $entityId, 'created', 'Service provider entity created.', $adminId);
-            }
-            flash('success', 'Service provider entity saved.');
-        } catch (Throwable $exception) {
-            flash('error', 'Could not save service provider entity. Check logo and unique code.');
-        }
-        redirect('admin/workspace.php?view=service-providers');
-    }
+    if ($action === 'save_service_provider_entity') deny_access('Service provider management is unavailable.');
 
     if ($action === 'create_service_contract') {
         $clientId = (int) ($_POST['client_id'] ?? 0);
@@ -1465,7 +1399,7 @@ if ($missingTables === []) {
         }
     }
 
-    if (in_array($view, ['clients', 'service-providers', 'tasks'], true)) {
+    if (in_array($view, ['clients', 'tasks'], true)) {
         $serviceProviderEntities = active_service_provider_entities();
     }
     $clientMode = (string) ($_GET['mode'] ?? '');
@@ -1716,7 +1650,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 <div class="actions workspace-module-bar" style="margin-bottom: 16px;">
     <a class="button<?= $view === 'home' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('home') ?>Home</a>
     <?php if (!user_is_super_admin()): ?><a class="button<?= $view === 'clients' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><?= icon('clients') ?>Clients</a><?php endif; ?>
-    <a class="button<?= $view === 'service-providers' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=service-providers')) ?>"><?= icon('companies') ?>Service providers</a>
     <a class="button<?= $view === 'teams' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><?= icon('teams') ?>Teams</a>
     <a class="button<?= $view === 'contracts' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=contracts')) ?>"><?= icon('contracts') ?>Contracts</a>
     <a class="button<?= $view === 'tasks' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=tasks')) ?>"><?= icon('tasks') ?>Tasks</a>
@@ -1961,48 +1894,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </table>
             </div>
         </section>
-    </section>
-    <?php endif; ?>
-
-    <?php if ($view === 'service-providers'): ?>
-    <section class="mbw-card" data-collapsible id="service-providers">
-        <div class="mbw-card-head">
-            <h2>Service Provider Entity Management</h2>
-        </div>
-        
-            <form method="post" class="workspace-form-grid" enctype="multipart/form-data">
-                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                <input type="hidden" name="action" value="save_service_provider_entity">
-                <label>Entity name<input type="text" name="name" required></label>
-                <label>Code<input type="text" name="code"></label>
-                <label>Contact email<input type="email" name="contact_email"></label>
-                <label>Contact number<input type="text" name="contact_number"></label>
-                <label>Website<input type="url" name="website"></label>
-                <label>Authorized signatory<input type="text" name="authorized_signatory_name"></label>
-                <label class="workspace-span-2">Address<textarea name="address"></textarea></label>
-                <label>Entity logo<input type="file" name="entity_logo" accept="image/jpeg,image/png,image/webp"></label>
-                <label class="checkbox-line"><input type="checkbox" name="is_active" value="1" checked> Active</label>
-                <button type="submit"><?= icon('companies') ?>Save entity</button>
-            </form>
-        
-
-        <div style="overflow-x:auto">
-        <table>
-            <thead><tr><th>Entity</th><th>Contact</th><th>Status</th><th class="is-numeric">Connected Clients</th></tr></thead>
-            <tbody>
-                <?php $allEntities = table_exists('service_provider_entities') ? db()->query('SELECT spe.*, (SELECT COUNT(*) FROM client_service_provider_entities cspe WHERE cspe.service_provider_entity_id = spe.id) AS client_count FROM service_provider_entities spe ORDER BY spe.name ASC')->fetchAll() : []; ?>
-                <?php if ($allEntities === []): ?><tr><td colspan="4">No service provider entities found.</td></tr><?php endif; ?>
-                <?php foreach ($allEntities as $entity): ?>
-                    <tr>
-                        <td><?= e($entity['name']) ?><br><small><?= e($entity['code'] ?? '') ?></small></td>
-                        <td><?= e($entity['contact_email'] ?? '') ?><br><small><?= e($entity['contact_number'] ?? '') ?></small></td>
-                        <td><?= (int) $entity['is_active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
-                        <td class="is-numeric"><?= e((string) (int) $entity['client_count']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-        </div>
     </section>
     <?php endif; ?>
 
