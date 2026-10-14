@@ -30,7 +30,10 @@ function company_license_issue(int $id,string $expires): string
     if (!user_is_super_admin()) throw new RuntimeException('Super admin required.');
     $expires = company_license_expiry($expires);
     $key = strtoupper(implode('-',str_split(bin2hex(random_bytes(20)),8)));
-    company_license_write($id,['hash'=>hash('sha256',$key),'enabled'=>true,'expires'=>$expires,'activated_at'=>null]);
+    $previous = company_license_read($id);
+    // Unknown historical generation dates stay unknown; never substitute redemption.
+    $issuedAt = $previous['issued_at'] ?? (empty($previous['hash']) ? (new DateTimeImmutable('now',new DateTimeZone('Asia/Kathmandu')))->format('Y-m-d H:i:s') : null);
+    company_license_write($id,['hash'=>hash('sha256',$key),'enabled'=>true,'expires'=>$expires,'issued_at'=>$issuedAt,'activated_at'=>null]);
     return $key;
 }
 function company_license_owner(array $user,int $id): bool

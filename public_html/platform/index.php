@@ -111,8 +111,10 @@ $pageBreadcrumb = $servingCompany
     ? [['Platform', 'platform/index.php'], ['Companies', 'platform/index.php']]
     : [['Platform', 'platform/index.php']];
 $pageHeadActions = '<a class="button secondary" href="' . e(url('platform/companies.php')) . '">New company</a>';
+$pageHero = false;
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<div class="actions"><?= $pageHeadActions ?></div>
 
 <section class="mbw-card">
     <?php if ($servingCompany): ?>

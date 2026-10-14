@@ -57,8 +57,10 @@ $platformShell = true;
 $pageTitle = 'Staff';
 $pageBreadcrumb = [['Platform', 'platform/index.php']];
 $pageHeadActions = '<a class="button secondary" href="' . e(url('platform/users.php')) . '">Manage users</a>';
+$pageHero = false;
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
+<div class="actions"><?= $pageHeadActions ?></div>
 
 <section class="mbw-card">
     <div class="mbw-tablewrap">

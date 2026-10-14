@@ -6,9 +6,13 @@ require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/mailer.php';
 
 require_admin();
-require_company_context();
+// The platform directory owns the client list and company creation.
+if (user_is_super_admin() && ($_GET['view'] ?? '') === 'clients' && $_SERVER['REQUEST_METHOD'] !== 'POST' && !in_array($_GET['mode'] ?? '', ['view','edit'], true)) redirect('platform/company-management.php');
+$platformClientRecord = user_is_super_admin() && ($_GET['view'] ?? '') === 'clients' && (int)($_POST['client_id'] ?? $_GET['client_id'] ?? 0) > 0;
+if (!$platformClientRecord) require_company_context();
 accounting_module_repair_database();
 $pageTitle = 'Admin Work Portal';
+$pageHero = false;
 $pageSubtitle = 'Operations hub for clients, teams, contracts, tasks, and invoicing';
 $bodyClass = 'admin-layout admin-workspace';
 $currentAdmin = current_user();
@@ -16,6 +20,18 @@ $adminId = (int) ($currentAdmin['id'] ?? 0);
 $company = current_company();
 $fiscalYear = current_fiscal_year();
 $companyId = (int) ($company['id'] ?? 0);
+// Explicit platform client selection, without changing the active books session.
+if (user_is_super_admin() && ($_GET['view'] ?? '') === 'clients') {
+    $platformShell = true;
+    $recordId = (int)($_POST['client_id'] ?? $_GET['client_id'] ?? 0);
+    if ($recordId > 0) {
+        $recordScope = db()->prepare('SELECT company_id FROM client_profiles WHERE id = ?');
+        $recordScope->execute([$recordId]);
+        $recordCompany = (int)$recordScope->fetchColumn();
+        if ($recordCompany <= 0) deny_access('Client record unavailable.');
+        $companyId = $recordCompany;
+    }
+}
 $documentLogoPath = (string) setting('company_logo_path', '');
 $documentSignaturePath = (string) setting('company_signature_path', '');
 $documentStampPath = (string) setting('company_stamp_path', '');
@@ -215,125 +231,7 @@ if ($missingTables === [] && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'create_client') {
-        $name = trim((string) ($_POST['authorized_person_name'] ?? ''));
-        $email = trim((string) ($_POST['email'] ?? ''));
-        $password = (string) ($_POST['password'] ?? '');
-        $organizationName = trim((string) ($_POST['organization_name'] ?? ''));
-        $registrationNo = trim((string) ($_POST['registration_no'] ?? ''));
-        $industryId = (int) ($_POST['industry_id'] ?? 0);
-        $address = trim((string) ($_POST['address'] ?? ''));
-        $panNo = trim((string) ($_POST['pan_no'] ?? ''));
-        $position = trim((string) ($_POST['authorized_person_position'] ?? ''));
-        $authorizedSignatoryName = trim((string) ($_POST['authorized_signatory_name'] ?? ''));
-        $contactNumber = trim((string) ($_POST['contact_number'] ?? ''));
-        $website = trim((string) ($_POST['website'] ?? ''));
-        $clientStatus = (string) ($_POST['client_status'] ?? 'active');
-        $serviceProviderIds = (array) ($_POST['service_provider_entity_ids'] ?? []);
-        $notes = trim((string) ($_POST['notes'] ?? ''));
-
-        if ($name === '' || $email === '' || $password === '' || $organizationName === '') {
-            flash('error', 'Authorized person name, email, password, and client/company name are required.');
-            redirect('admin/workspace.php?view=clients');
-        }
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            flash('error', 'Please provide a valid client email address.');
-            redirect('admin/workspace.php?view=clients');
-        }
-        if (strlen($password) < 8) {
-            flash('error', 'Client password must be at least 8 characters.');
-            redirect('admin/workspace.php?view=clients');
-        }
-        if (!preg_match('/[A-Z]/', $password) || !preg_match('/[a-z]/', $password) || !preg_match('/[0-9]/', $password)) {
-            flash('error', 'Temporary password must include uppercase, lowercase, and a number.');
-            redirect('admin/workspace.php?view=clients');
-        }
-        if ($password !== (string) ($_POST['password_confirm'] ?? '')) {
-            flash('error', 'Temporary password and confirmation do not match.');
-            redirect('admin/workspace.php?view=clients');
-        }
-        if ($contactNumber !== '' && !preg_match('/^[0-9+\-\s().]{6,30}$/', $contactNumber)) {
-            flash('error', 'Contact number contains invalid characters.');
-            redirect('admin/workspace.php?view=clients');
-        }
-        if ($website !== '' && filter_var($website, FILTER_VALIDATE_URL) === false) {
-            flash('error', 'Website must be a valid URL.');
-            redirect('admin/workspace.php?view=clients');
-        }
-        if (!in_array($clientStatus, $allowedClientStatus, true)) {
-            $clientStatus = 'active';
-        }
-        if ($industryId > 0 && table_exists('industries')) {
-            $industryCheck = db()->prepare('SELECT id FROM industries WHERE id = :id AND is_active = 1 LIMIT 1');
-            $industryCheck->execute(['id' => $industryId]);
-            if (!$industryCheck->fetch()) {
-                flash('error', 'Selected industry is not active.');
-                redirect('admin/workspace.php?view=clients');
-            }
-        }
-
-        try {
-            $logoPath = upload_image_file('company_logo', 'assets/uploads/client-logos');
-            db()->beginTransaction();
-            $clientCode = generate_client_code($organizationName);
-            $userId = create_user([
-                'name' => $name,
-                'email' => $email,
-                'password' => $password,
-                'role' => 'customer',
-                'status' => $clientStatus === 'active' ? 'active' : 'inactive',
-                'company_id' => $companyId,
-                'phone' => $contactNumber !== '' ? $contactNumber : null,
-                'company' => $organizationName,
-                'must_change_password' => 1,
-            ]);
-
-            $profileStmt = db()->prepare('
-                INSERT INTO client_profiles (
-                    user_id, company_id, organization_name, client_code, registration_no, industry_id,
-                    address, pan_no, authorized_person_position, authorized_signatory_name,
-                    contact_number, website, company_logo_path, client_status, notes, is_active
-                ) VALUES (
-                    :user_id, :company_id, :organization_name, :client_code, :registration_no, :industry_id,
-                    :address, :pan_no, :authorized_person_position, :authorized_signatory_name,
-                    :contact_number, :website, :company_logo_path, :client_status, :notes, :is_active
-                )
-            ');
-            $profileStmt->execute([
-                'user_id' => $userId,
-                'company_id' => $companyId,
-                'organization_name' => $organizationName,
-                'client_code' => $clientCode,
-                'registration_no' => $registrationNo !== '' ? $registrationNo : null,
-                'industry_id' => $industryId > 0 ? $industryId : null,
-                'address' => $address !== '' ? $address : null,
-                'pan_no' => $panNo !== '' ? $panNo : null,
-                'authorized_person_position' => $position !== '' ? $position : null,
-                'authorized_signatory_name' => $authorizedSignatoryName !== '' ? $authorizedSignatoryName : null,
-                'contact_number' => $contactNumber !== '' ? $contactNumber : null,
-                'website' => $website !== '' ? $website : null,
-                'company_logo_path' => $logoPath,
-                'client_status' => $clientStatus,
-                'notes' => $notes !== '' ? $notes : null,
-                'is_active' => $clientStatus === 'active' ? 1 : 0,
-            ]);
-            $clientProfileId = (int) db()->lastInsertId();
-            sync_client_service_providers($clientProfileId, $serviceProviderIds);
-
-            db()->commit();
-            log_activity('client_profile', $clientProfileId, 'created', 'Client created with generated code ' . $clientCode . '.', $adminId);
-            $credentialMail = send_account_credentials_email($email, $name, $password, 'client portal account');
-            $mailNote = !empty($credentialMail['ok']) && ($credentialMail['transport'] ?? '') !== 'log'
-                ? ' Credentials emailed.'
-                : (($credentialMail['transport'] ?? '') === 'log' ? ' SMTP is not configured; credential email saved to storage/mail only.' : ' Credential email failed.');
-            flash('success', 'Client created successfully. Code: ' . $clientCode . ' / Login: ' . $email . $mailNote);
-        } catch (Throwable $exception) {
-            if (db()->inTransaction()) {
-                db()->rollBack();
-            }
-            flash('error', 'Client creation failed. Email may already exist or the logo was invalid.');
-        }
-
-        redirect('admin/workspace.php?view=clients');
+        deny_access('Create companies from Platform Companies.');
     }
 
     if ($action === 'update_client') {
@@ -1862,7 +1760,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
 <div class="actions workspace-module-bar" style="margin-bottom: 16px;">
     <a class="button<?= $view === 'home' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=home')) ?>"><?= icon('home') ?>Home</a>
-    <a class="button<?= $view === 'clients' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><?= icon('clients') ?>Clients</a>
+    <?php if (!user_is_super_admin()): ?><a class="button<?= $view === 'clients' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=clients')) ?>"><?= icon('clients') ?>Clients</a><?php endif; ?>
     <a class="button<?= $view === 'industries' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=industries')) ?>"><?= icon('settings') ?>Industries</a>
     <a class="button<?= $view === 'service-providers' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=service-providers')) ?>"><?= icon('companies') ?>Service providers</a>
     <a class="button<?= $view === 'teams' ? '' : ' secondary' ?>" href="<?= e(url('admin/workspace.php?view=teams')) ?>"><?= icon('teams') ?>Teams</a>
@@ -1911,56 +1809,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <h2>Clients</h2>
         </div>
         
-            <div class="form-card">
-                <h3>New Client</h3>
-                <form method="post" class="workspace-form-grid" enctype="multipart/form-data">
-                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                    <input type="hidden" name="action" value="create_client">
-                    <label>Client or Company Name<input type="text" name="organization_name" required></label>
-                    <label>Automatically Generated Client Code<input type="text" value="Generated after save" readonly></label>
-                    <label>Registration Number<input type="text" name="registration_no"></label>
-                    <label>PAN Number<input type="text" name="pan_no"></label>
-                    <label>Industry
-                        <select name="industry_id">
-                            <option value="0">Select industry</option>
-                            <?php foreach ($industries as $industry): ?>
-                                <option value="<?= e((int) $industry['id']) ?>"><?= e($industry['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                    <label>Status
-                        <select name="client_status">
-                            <option value="active">Active</option>
-                            <option value="suspended">Suspended</option>
-                            <option value="inactive">Inactive</option>
-                        </select>
-                    </label>
-                    <label>Authorized Person Name<input type="text" name="authorized_person_name" required></label>
-                    <label>Position or Designation<input type="text" name="authorized_person_position"></label>
-                    <label>Authorized Signatory Name<input type="text" name="authorized_signatory_name"></label>
-                    <label>Client Login Email<input type="email" name="email" required></label>
-                    <label>Temporary Client Login Password<input type="password" name="password" minlength="8" required data-confirm-source></label>
-                    <label>Confirm Temporary Password<input type="password" name="password_confirm" minlength="8" required data-confirm-target></label>
-                    <label>Contact Number<input type="text" name="contact_number"></label>
-                    <label>Website<input type="url" name="website" placeholder="https://example.com"></label>
-                    <label class="workspace-span-2">Address<textarea name="address"></textarea></label>
-                    <label class="workspace-span-2">Service Provider Entity
-                        <select name="service_provider_entity_ids[]" class="mbw-select">
-                            <option value="">Select service provider</option>
-                            <?php foreach ($serviceProviderEntities as $entity): ?>
-                                <option value="<?= e((int) $entity['id']) ?>"><?= e($entity['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </label>
-                    <label>Company Logo<input type="file" name="company_logo" accept="image/jpeg,image/png,image/webp"></label>
-                    <label class="workspace-span-2">Notes<textarea name="notes"></textarea></label>
-                    <div class="workspace-span-2">
-                        <button type="submit"><?= icon('clients') ?>New Client</button>
-                    </div>
-                </form>
-            </div>
-        
-
         <?php if ($selectedClient && $clientMode === 'view'): ?>
             <section class="mbw-card" data-collapsible>
                 <div class="mbw-card-head">

@@ -3,6 +3,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
 require_once __DIR__ . '/../../app/company_onboarding.php';
+require_once __DIR__ . '/../../app/company_access_email.php';
 require_admin();
 if (!user_is_super_admin()) deny_access('Super admin access required.');
 if (!defined('PLATFORM_COMPANIES_PAGE')) redirect('platform/companies.php');
@@ -49,6 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $licenseKey = company_license_issue($companyId,$licenseExpiry);
         db()->commit();
         $_SESSION['issued_company_license'] = ['company_id'=>$companyId,'key'=>$licenseKey];
+        $emailSent = company_access_email($values,$onboarding['email'],$licenseKey,$onboarding['password']);
+        flash($emailSent ? 'success' : 'error', $emailSent ? 'Credentials and license key sent to the first user email.' : 'Company saved, but access email could not be sent. Check mail settings and securely share the temporary password and displayed key.');
         log_activity('company',$companyId,'created','Company created from platform workflow.',(int)current_user()['id']);
         flash('success','Company and first user created. The user must change their temporary password at first login.');
         redirect('platform/company-management.php');

@@ -19,7 +19,7 @@ declare(strict_types=1);
 function mail_cfg(string $settingKey, string $envKey, string $default = ''): string
 {
     if (function_exists('setting')) {
-        $value = trim((string) setting($settingKey, ''));
+        $value = trim((string) setting($settingKey, '', false, $GLOBALS['mail_settings_company_id'] ?? null));
         if ($value !== '') {
             return $value;
         }
