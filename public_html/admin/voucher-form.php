@@ -44,7 +44,8 @@ if ($businessType === 'conflict') deny_access('Select one business type in Platf
 $requestedType = (string)($_GET['type'] ?? $_POST['type'] ?? $_POST['voucher_type'] ?? 'journal');
 $expenseEntry=$businessType==='jewellery' && in_array($requestedType,['purchase','debit_note'],true) && ($_GET['entry'] ?? '')==='expense';
 if (empty($_GET['edit']) && empty($_POST['voucher_id'])) {
-    if (!$expenseEntry && (($businessType==='jewellery' && in_array($requestedType,['credit_note','debit_note'],true)) || ($businessType==='hospitality' && $requestedType==='credit_note'))) {
+    $sourceReturn=$requestedType==='debit_note' && ($_GET['entry'] ?? '')==='return';
+    if (!$expenseEntry && (($businessType==='jewellery' && in_array($requestedType,['credit_note','debit_note'],true)) || ($businessType==='hospitality' && in_array($requestedType,['credit_note','debit_note'],true) && ($_GET['entry'] ?? '')!=='adjustment') || $sourceReturn)) {
         require __DIR__.'/../../app/views/vouchers/business_note.php';
         return;
     }
@@ -63,7 +64,7 @@ if (empty($_GET['edit']) && empty($_POST['voucher_id'])) {
 $currentUser = current_user();
 // Any jewellery trade reaching the common form is an expense adjustment.
 // Metal/stone goods must go through the specialist stock and trace engine.
-if ($businessType==='jewellery') {
+if ($businessType==='jewellery' || ($businessType==='hospitality' && $requestedType==='debit_note' && ($_GET['entry'] ?? '')==='adjustment')) {
     $businessWorkflow['inventory']=false;
     $businessWorkflow['trade_modes']=['services'];
     $businessWorkflow['default_trade_mode']='services';
@@ -165,6 +166,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($businessType==='hospitality' && in_array($voucherType,['sales','credit_note'],true)) {
             deny_access('Use the menu sales or source-linked hospitality return workflow.');
+        }
+        if ($businessType==='hospitality' && $voucherType==='debit_note'
+            && (($_GET['entry'] ?? '')!=='adjustment' || ($_POST['trade_mode'] ?? '')!=='services')) {
+            deny_access('Select the original purchase for this return.');
         }
     }
 

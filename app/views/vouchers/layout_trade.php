@@ -32,6 +32,9 @@ $settlementModeOptions = voucher_instrument_modes();
 $settlementModeOptions['credit'] = voucher_settlement_modes()['credit'];
 $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
 ?>
+<?php if ($spec['key']==='debit_note' && $existingVoucher===null): ?>
+<div class="actions"><a class="button secondary" href="<?= e(url('admin/voucher-form.php?type=debit_note&entry=return')) ?>">Return original purchase</a></div>
+<?php endif; ?>
 <input type="hidden" name="settlement_mode" value="<?= e($settlementMode) ?>">
 <input type="hidden" name="reference_no" value="<?= e((string) ($prefill['reference_no'] ?? '')) ?>">
 <input type="hidden" name="reference_date" value="<?= e((string) ($prefill['reference_date'] ?? '')) ?>">

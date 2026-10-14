@@ -143,13 +143,17 @@ function hospitality_ingredient_cost_on(array $ingredient, string $date, ?string
     $companyId=(int)($ingredient['ingredient_company_id'] ?? $ingredient['company_id'] ?? 0);
     $itemId=(int)($ingredient['inventory_item_id'] ?? 0);
     if ($costSource==='latest_purchase' && $companyId>0 && $itemId>0 && table_exists('inventory_transactions') && column_exists('inventory_transactions','source_voucher_id')) {
+        $returnFilter=table_exists('business_voucher_notes') ? " AND NOT EXISTS (
+            SELECT 1 FROM business_voucher_notes n JOIN vouchers r ON r.id=n.voucher_id
+            WHERE n.original_voucher_id=v.id AND n.company_id=t.company_id
+              AND n.applied_at IS NOT NULL AND r.status='posted' AND r.voucher_date<=?)" : '';
         $purchase=db()->prepare("SELECT t.rate FROM inventory_transactions t
             JOIN inventory_items i ON i.id=t.item_id AND i.company_id=t.company_id
             JOIN vouchers v ON v.id=COALESCE(NULLIF(t.source_voucher_id,0),NULLIF(t.voucher_id,0)) AND v.company_id=t.company_id
             WHERE t.company_id=? AND t.item_id=? AND t.transaction_type='purchase'
-              AND t.qty_in>0 AND t.rate>=0 AND t.transaction_date<=? AND v.status='posted'
+              AND t.qty_in>0 AND t.rate>=0 AND t.transaction_date<=? AND v.status='posted' $returnFilter
             ORDER BY t.transaction_date DESC,t.id DESC LIMIT 1");
-        $purchase->execute([$companyId,$itemId,$date]);
+        $purchase->execute($returnFilter!=='' ? [$companyId,$itemId,$date,$date] : [$companyId,$itemId,$date]);
         $cost=$purchase->fetchColumn();
         if ($cost!==false) return (float)$cost;
     }

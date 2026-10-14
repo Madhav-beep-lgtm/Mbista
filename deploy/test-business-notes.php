@@ -7,6 +7,12 @@ if(business_note_source_allowed('hospitality','credit_note',$source)) throw new 
 if(business_note_source_allowed('jewellery','debit_note',$source)) throw new RuntimeException('Wrong note accepted');
 $source['status']='draft';
 if(business_note_source_allowed('jewellery','credit_note',$source)) throw new RuntimeException('Draft accepted');
+$purchase=['status'=>'posted','voucher_type'=>'purchase','source_type'=>'voucher_form'];
+foreach(['service','internal_service','trading_manufacturing','hospitality'] as $profile) {
+    if(!business_note_source_allowed($profile,'debit_note',$purchase)) throw new RuntimeException('Source purchase return rejected: '.$profile);
+    if(business_note_source_allowed($profile,'credit_note',$purchase)) throw new RuntimeException('Purchase accepted as sales return');
+}
+if(business_note_source_allowed('jewellery','debit_note',$purchase)) throw new RuntimeException('Generic purchase bypassed jewellery');
 $entries=[['ledger_id'=>1,'entry_type'=>'debit','amount'=>113],['ledger_id'=>2,'entry_type'=>'credit','amount'=>100],['ledger_id'=>3,'entry_type'=>'credit','amount'=>13]];
 $reversed=business_note_reverse_entries($entries);
 if(array_column($reversed,'entry_type')!==['credit','debit','debit'] || array_column($reversed,'amount')!==[113.0,100.0,13.0]) throw new RuntimeException('Tax/settlement reversal failed');

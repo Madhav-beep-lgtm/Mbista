@@ -22,6 +22,9 @@ function business_note_source_allowed(string $business,string $type,array $sourc
 {
     if (($source['status'] ?? '')!=='posted' || !in_array($type,['credit_note','debit_note'],true)) return false;
     if (($source['voucher_type'] ?? '')!==($type==='credit_note' ? 'sales' : 'purchase')) return false;
+    if ($type==='debit_note' && in_array($business,['service','internal_service','trading_manufacturing','hospitality'],true)) {
+        return ($source['source_type'] ?? '')==='voucher_form';
+    }
     return $business==='jewellery'
         ? ($source['source_type'] ?? '')===($type==='credit_note' ? 'jewellery_sale' : 'jewellery_purchase')
         : ($business==='hospitality' && $type==='credit_note' && ($source['source_type'] ?? '')==='hospitality_sales_upload');
@@ -93,7 +96,7 @@ function business_note_create(int $companyId,int $originalId,string $type,string
             'requires_client_approval'=>$pending && function_exists('staff_accountant_forces_approval') && staff_accountant_forces_approval() ? 1 : 0],$entries);
         $q=$pdo->prepare('SELECT id FROM voucher_entries WHERE voucher_id=? ORDER BY id');$q->execute([$id]);
         $entryIds=$q->fetchAll(PDO::FETCH_COLUMN);
-        foreach(['cost_centre','tax_code','line_reference'] as $column) {
+        foreach(['cost_centre','tax_code','line_reference','item_id','quantity','bill_amount','bill_due_date'] as $column) {
             if (!column_exists('voucher_entries',$column)) continue;
             $copy=$pdo->prepare('UPDATE voucher_entries SET '.$column.'=? WHERE id=? AND voucher_id=?');
             foreach($entryIds as $index=>$entryId) $copy->execute([$sourceEntries[$index][$column] ?? null,$entryId,$id]);
@@ -116,8 +119,55 @@ function business_note_finalize(int $id): void
     $q->execute([$note['original_voucher_id'],$note['company_id']]); $source=$q->fetch();
     if (!$source) throw new RuntimeException('The original document is no longer posted.');
     if ($note['business_type']==='jewellery') business_note_jewellery($note,$source);
+    elseif ($source['voucher_type']==='purchase') business_note_purchase($note,$source);
     else business_note_hospitality($note,$source);
     db()->prepare('UPDATE business_voucher_notes SET applied_at=CURRENT_TIMESTAMP WHERE voucher_id=?')->execute([$id]);
+}
+
+/** Purchase returns share the normal stock engine and never post a second payable. */
+function business_note_purchase(array $note,array $source): void
+{
+    $cid=(int)$note['company_id'];
+    $lines=voucher_stock_item_lines((int)$note['voucher_id']);
+    $q=db()->prepare('SELECT item_id,warehouse_id,SUM(qty_in-qty_out) AS quantity
+        FROM inventory_transactions WHERE company_id=? AND source_voucher_id=?
+        GROUP BY item_id,warehouse_id');
+    $q->execute([$cid,$source['id']]); $movements=$q->fetchAll();
+    if ($lines===[] && $movements===[]) return; // Service purchase: journal only.
+    $warehouses=[]; $originalQty=[];
+    foreach($movements as $move) {
+        $warehouses[(int)$move['warehouse_id']]=true;
+        $originalQty[(int)$move['item_id']]=($originalQty[(int)$move['item_id']] ?? 0)+(float)$move['quantity'];
+    }
+    $returnQty=[];
+    foreach($lines as $line) $returnQty[(int)$line['item_id']]=($returnQty[(int)$line['item_id']] ?? 0)+(float)$line['quantity'];
+    if (count($warehouses)!==1 || count($originalQty)!==count($returnQty)) throw new RuntimeException('The original purchase stock does not match its voucher. Reconcile it before returning.');
+    foreach($returnQty as $itemId=>$qty) {
+        if (abs($qty-($originalQty[$itemId] ?? 0))>0.0001) throw new RuntimeException('The original purchase quantity does not match its stock movement.');
+    }
+    $warehouse=(int)array_key_first($warehouses);
+    if ($warehouse<=0) throw new RuntimeException('The original purchase has no receiving warehouse. Reconcile it before returning.');
+    // Lock the items before checking their original warehouse, including concurrent returns.
+    $itemIds=array_keys($returnQty); sort($itemIds);
+    $marks=implode(',',array_fill(0,count($itemIds),'?'));
+    $lock=db()->prepare("SELECT id FROM inventory_items WHERE company_id=? AND id IN ($marks) ORDER BY id FOR UPDATE");
+    $lock->execute(array_merge([$cid],$itemIds));
+    $q=db()->prepare("SELECT item_id,SUM(qty_in-qty_out) AS qty FROM inventory_transactions
+        WHERE company_id=? AND warehouse_id=? AND transaction_date<=? AND item_id IN ($marks) GROUP BY item_id");
+    $q->execute(array_merge([$cid,$warehouse,$note['voucher_date']],$itemIds)); $available=$q->fetchAll(PDO::FETCH_KEY_PAIR);
+    foreach($returnQty as $itemId=>$qty) if ($qty>(float)($available[$itemId] ?? 0)+0.0001) throw new RuntimeException('Insufficient stock in the original receiving warehouse.');
+    $stockValue=db()->prepare("SELECT COALESCE(SUM(qty_remaining*unit_cost),0) FROM inventory_cost_layers WHERE company_id=? AND item_id IN ($marks)");
+    foreach($itemIds as $itemId) inv_rebuild_item($cid,$itemId);
+    $stockValue->execute(array_merge([$cid],$itemIds)); $before=(float)$stockValue->fetchColumn();
+    $fy=fiscal_year_for_date($cid,$note['voucher_date']);
+    $notes=voucher_stock_sync($cid,(int)$fy['id'],[
+        'id'=>$note['voucher_id'],'voucher_type'=>'debit_note','status'=>'posted',
+        'voucher_date'=>$note['voucher_date'],'voucher_no'=>$note['voucher_no'],
+        'warehouse_id'=>$warehouse,'party_id'=>$source['party_id'],
+    ],(int)($note['approved_by'] ?? $note['submitted_by']),true);
+    $stockValue->execute(array_merge([$cid],$itemIds)); $after=(float)$stockValue->fetchColumn();
+    if (abs(round($before-$after,2)-round(array_sum(array_column($lines,'amount')),2))>0.01) throw new RuntimeException('Stock valuation differs from the original purchase. Review the return valuation before posting.');
+    foreach($notes as $warning) if (str_contains($warning,'check the return price')) throw new RuntimeException('Stock valuation differs from the original purchase. Review the return valuation before posting.');
 }
 
 function business_note_jewellery(array $note,array $source): void
