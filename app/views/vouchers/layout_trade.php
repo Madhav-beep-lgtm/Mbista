@@ -200,25 +200,6 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
     </label>
 </div>
 
-<section class="frm-section vch-summary-card">
-    <div class="frm-section-head">
-        <span class="mbw-chip is-square tone-green"><?= icon('coins') ?></span>
-        <h2>What will be posted</h2>
-    </div>
-    <div class="vch-summary">
-        <div><small>Taxable value</small><strong id="vch-sum-taxable">0.00</strong></div>
-        <div><small>Tax</small><strong id="vch-sum-tax">0.00</strong></div>
-        <div class="is-total"><small><?= $partyIsDebit ? 'Receivable' : 'Payable' ?> total</small><strong id="vch-sum-total">0.00</strong></div>
-        <div class="vch-summary-note"><small><?= $partyIsDebit ? 'Debited to' : 'Credited to' ?></small><strong id="vch-sum-party">—</strong></div>
-        <div data-settlement-field="split" hidden><small>Still unallocated</small><strong id="vch-sum-unallocated">0.00</strong></div>
-    </div>
-    <?php if ($itemOptions !== []): ?>
-        <p class="vch-stock-note" id="vch-stock-note" hidden>
-            <?= icon('inventory') ?>
-            <span data-stock-text></span>
-        </p>
-    <?php endif; ?>
-</section>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
@@ -319,16 +300,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var taxable = 0;
         var tax = 0;
-        var stockLines = 0;
-        var stockUnits = 0;
 
         form.querySelectorAll('[data-rows] tr').forEach(function (row) {
             var isGoods = document.getElementById('vch-trade-mode').value === 'goods';
             var qty = isGoods ? Number((row.querySelector('.vch-qty') || {}).value) || 0 : 0;
             var unitRate = isGoods ? Number((row.querySelector('.vch-rate') || {}).value) || 0 : 0;
             var amountField = row.querySelector('.vch-value-amount');
-            var itemSelect = row.querySelector('.vch-item');
-            if (itemSelect && itemSelect.value && qty > 0) { stockLines++; stockUnits += qty; }
             if (!amountField) { return; }
             // Quantity times rate wins whenever both are given: it is the figure
             // the person actually reasoned about.
@@ -352,9 +329,6 @@ document.addEventListener('DOMContentLoaded', function () {
         var total = Math.round((taxable + tax) * 100) / 100;
 
         document.getElementById('vch-value-total').textContent = window.vchMoney(taxable);
-        document.getElementById('vch-sum-taxable').textContent = window.vchMoney(taxable);
-        document.getElementById('vch-sum-tax').textContent = window.vchMoney(tax);
-        document.getElementById('vch-sum-total').textContent = window.vchMoney(total);
 
         var settleWay = settlementMode();
         lastTotal = total;
@@ -380,8 +354,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var settledCell = document.getElementById('vch-settle-total');
         if (settledCell) { settledCell.textContent = window.vchMoney(settled); }
-        var unallocatedCell = document.getElementById('vch-sum-unallocated');
-        if (unallocatedCell) { unallocatedCell.textContent = window.vchMoney(unallocated); }
 
         var settleNote = document.getElementById('vch-settle-note');
         if (settleNote) {
@@ -410,23 +382,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (settleWay === 'split') {
             name = settledLines > 0 ? 'Split across ' + settledLines + ' line(s)' : '—';
         }
-        document.getElementById('vch-sum-party').textContent = name;
 
         var taxFields = form.querySelectorAll('[data-tax-field]');
         taxFields.forEach(function (field) { field.hidden = tax <= 0; });
 
         if (taxLedger) { taxLedger.required = tax > 0; }
-
-        var stockNote = document.getElementById('vch-stock-note');
-        if (stockNote) {
-            stockNote.hidden = stockLines === 0;
-            stockNote.querySelector('[data-stock-text]').textContent = stockLines === 0 ? '' : (
-                'Posting this also moves ' + window.vchMoney(stockUnits).replace(/\.00$/, '')
-                + ' unit(s) across ' + stockLines + ' item line(s) '
-                + (stockDirection === 'in' ? 'into' : 'out of') + ' stock'
-                + (stockDirection === 'out' ? ', and posts what they cost against this sale.' : '.')
-            );
-        }
 
         // A split is only complete when every rupee billed has been said to
         // have arrived somewhere. Anything else would post an unbalanced
