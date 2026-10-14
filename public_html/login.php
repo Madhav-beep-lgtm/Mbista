@@ -117,9 +117,8 @@ include __DIR__ . '/../app/views/partials/header.php';
                 <label>Company code
                     <span class="auth2-input">
                         <?= icon('companies') ?>
-                        <input type="text" name="company_code" maxlength="30" autocomplete="organization" spellcheck="false" aria-describedby="company-code-help">
+                        <input type="text" name="company_code" maxlength="30" autocomplete="organization" spellcheck="false">
                     </span>
-                    <small id="company-code-help">Required for company users. Platform admin and staff can leave this blank.</small>
                 </label>
                 <label>Email address
                     <span class="auth2-input">

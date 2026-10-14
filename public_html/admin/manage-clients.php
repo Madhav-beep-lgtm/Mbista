@@ -70,7 +70,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect($clientDirectoryPath);
         }
         $newValue = (string) ($_POST['enabled'] ?? '0') === '1' ? 1 : 0;
-        $oldValue = (int) ($profile['jewellery_accounting_enabled'] ?? 0);
+        $booksId = (int)($profile['books_company_id'] ?? 0);
+        $oldValue = $booksId > 0 ? (int)company_module_enabled('jewellery', $booksId) : (int)($profile['jewellery_accounting_enabled'] ?? 0);
+        if ($booksId > 0) update_settings(['company_module_jewellery'=>(string)$newValue], $booksId);
         if ($oldValue !== $newValue) {
             db()->prepare('UPDATE client_profiles SET jewellery_accounting_enabled = :v WHERE id = :id')
                 ->execute(['v' => $newValue, 'id' => $clientId]);
@@ -240,7 +242,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                         <?php endif; ?>
                     </td>
                     <td>
-                        <?php $jewOn = (int) ($client['jewellery_accounting_enabled'] ?? 0) === 1; ?>
+                        <?php $jewOn = (int)($client['books_company_id'] ?? 0) > 0 ? company_module_enabled('jewellery', (int)$client['books_company_id']) : (int)($client['jewellery_accounting_enabled'] ?? 0) === 1; ?>
                         <?php if (current_access_level() === 'super_admin'): ?>
                             <form method="post" style="display:flex;gap:6px;align-items:center" data-confirm="<?= $jewOn ? 'Deactivate Jewellery Accounting for this client? All items, rates, orders and karigar data are PRESERVED and its menu/routes are blocked until reactivated.' : 'Activate Jewellery Accounting (stock by weight and value, daily rates, karigar orders) for this client?' ?>">
                                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">

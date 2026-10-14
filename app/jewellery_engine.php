@@ -62,11 +62,18 @@ function jewellery_client_profile_for_company(int $companyId): ?array
 }
 
 /**
- * Is Jewellery Accounting active for this books company? False for every
- * non-client company (including the firm's own workspaces) and for clients
- * whose flag is off — routes, menus and queries all key off this.
+ * Company package entitlement is authoritative. Until it is configured,
+ * retain the existing client activation so upgrades do not change access.
  */
 function jewellery_enabled_for_company(int $companyId): bool
+{
+    return function_exists('company_module_enabled')
+        ? company_module_enabled('jewellery', $companyId)
+        : jewellery_legacy_enabled_for_company($companyId);
+}
+
+// Preserve the previous activation only until Super Admin sets package access.
+function jewellery_legacy_enabled_for_company(int $companyId): bool
 {
     if (!column_exists('client_profiles', 'jewellery_accounting_enabled')) {
         return false;
