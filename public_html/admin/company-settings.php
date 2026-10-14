@@ -71,16 +71,16 @@ $bodyClass = 'admin-layout company-settings-page';
 $pageSubtitle = (string)$companyProfile['name'];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<section class="mbw-card">
- <div class="mbw-card-head"><h2>Company details</h2></div>
+<section class="mbw-card company-details-card">
+ <div class="mbw-card-head"><h2>Company details</h2><?php if ($platformShell): ?><a class="button secondary" href="<?= e(url('platform/index.php')) ?>">Back to companies</a><?php endif; ?></div>
  <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
   <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="profile">
-  <label>Company name<input name="name" maxlength="150" required value="<?= e($companyProfile['name']) ?>"></label>
+  <label class="workspace-span-2">Company name<input name="name" maxlength="150" required autocomplete="organization" value="<?= e($companyProfile['name']) ?>"></label>
   <label>Company code<input name="code" maxlength="30" required value="<?= e($companyProfile['code']) ?>"></label>
   <label>Email<input type="email" name="support_email" value="<?= e(setting('support_email','',false,$settingsCompanyId)) ?>"></label>
-  <label>Phone<input name="support_phone" value="<?= e(setting('support_phone','',false,$settingsCompanyId)) ?>"></label>
-  <label>Address<input name="office_address" value="<?= e(setting('office_address','',false,$settingsCompanyId)) ?>"></label>
+  <label>Phone<input type="tel" name="support_phone" autocomplete="tel" value="<?= e(setting('support_phone','',false,$settingsCompanyId)) ?>"></label>
   <label>Logo (PNG, JPEG, WebP; max 2 MB)<input type="file" name="logo" accept="image/png,image/jpeg,image/webp"></label>
+  <label class="company-full-width">Address<input name="office_address" autocomplete="street-address" value="<?= e(setting('office_address','',false,$settingsCompanyId)) ?>"></label>
   <div class="company-form-actions">
   <?php if (!empty($companyProfile['logo_path'])): ?><img class="company-logo-preview" src="<?= e(url($companyProfile['logo_path'])) ?>" alt="Company logo" width="96" height="64"><?php endif; ?>
   <button class="button" type="submit">Save details</button></div>

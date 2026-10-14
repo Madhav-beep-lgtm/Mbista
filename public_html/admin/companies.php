@@ -2,343 +2,66 @@
 declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_once __DIR__ . '/../../app/accounting_module_repair.php';
-
 require_admin();
-if (!user_is_super_admin()) {
-    redirect('admin/index.php');
-}
-if (!defined('PLATFORM_COMPANIES_PAGE')) {
-    redirect('platform/companies.php');
-}
-
-$platformShell = true;
-$companiesRoute = 'platform/companies.php';
+if (!user_is_super_admin()) deny_access('Super admin access required.');
+if (!defined('PLATFORM_COMPANIES_PAGE')) redirect('platform/companies.php');
 accounting_module_repair_database();
-$pageTitle = 'Companies & Fiscal Years';
-$pageSubtitle = 'Create companies, manage group relationships, and set up fiscal years.';
-$pageBreadcrumb = [['Platform', 'platform/index.php']];
-$currentAdmin = current_user();
-$parentColumnExists = false;
-if (table_exists('companies')) {
-    $columnCheck = db()->query("SHOW COLUMNS FROM companies LIKE 'parent_company_id'");
-    $parentColumnExists = $columnCheck !== false && $columnCheck->fetch() !== false;
-}
-
+$platformShell = true;
+$pageTitle = 'New Company';
+$pageHero = false;
+$bodyClass = 'admin-layout company-settings-page';
+$pageBreadcrumb = [['Platform', 'platform/index.php'], ['Companies', 'platform/index.php']];
+$parentColumnExists = column_exists('companies', 'parent_company_id');
+$values = ['name'=>'','code'=>'','parent_company_id'=>'','support_email'=>'','support_phone'=>'','office_address'=>'','is_active'=>'1'];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
-    $action = (string) ($_POST['action'] ?? '');
-
-    if ($action === 'create_company') {
-        $name = trim((string) ($_POST['name'] ?? ''));
-        $code = strtoupper(trim((string) ($_POST['code'] ?? '')));
-        $parentCompanyIdRaw = trim((string) ($_POST['parent_company_id'] ?? ''));
-        $parentCompanyId = $parentCompanyIdRaw === '' ? null : (int) $parentCompanyIdRaw;
-        $isActive = isset($_POST['is_active']) ? 1 : 0;
-
-        if ($name === '' || $code === '') {
-            flash('error', 'Company name and code are required.');
-            redirect($companiesRoute);
+    foreach (array_keys($values) as $key) $values[$key] = trim((string)($_POST[$key] ?? ''));
+    $values['code'] = strtoupper($values['code']);
+    try {
+        if (($_POST['action'] ?? '') !== 'create_company') throw new RuntimeException('Only company creation is available here.');
+        if ($values['name'] === '' || mb_strlen($values['name']) > 150 || $values['code'] === '' || mb_strlen($values['code']) > 30) throw new RuntimeException('Enter a company name (up to 150 characters) and code (up to 30).');
+        if ($values['support_email'] !== '' && !filter_var($values['support_email'], FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Enter a valid email address.');
+        $duplicate = db()->prepare('SELECT id FROM companies WHERE code = ? LIMIT 1');
+        $duplicate->execute([$values['code']]);
+        if ($duplicate->fetch()) throw new RuntimeException('That company code is already in use.');
+        $parentId = $values['parent_company_id'] === '' ? null : (int)$values['parent_company_id'];
+        if ($parentId !== null) {
+            if (!$parentColumnExists || $parentId <= 0) throw new RuntimeException('Select a valid company group.');
+            $parent = db()->prepare('SELECT id FROM companies WHERE id = ? AND is_active = 1 AND is_client_company = 0');
+            $parent->execute([$parentId]);
+            if (!$parent->fetch()) throw new RuntimeException('Selected company group is unavailable.');
         }
-
-        if ($parentCompanyId !== null && $parentCompanyId <= 0) {
-            flash('error', 'Invalid parent company selected.');
-            redirect($companiesRoute);
-        }
-
-        if ($parentColumnExists && $parentCompanyId !== null) {
-            $parentCheck = db()->prepare('SELECT id FROM companies WHERE id = :id LIMIT 1');
-            $parentCheck->execute(['id' => $parentCompanyId]);
-            if (!$parentCheck->fetch()) {
-                flash('error', 'Selected parent company does not exist.');
-                redirect($companiesRoute);
-            }
-        }
-
-        if ($parentColumnExists) {
-            $stmt = db()->prepare('INSERT INTO companies (name, code, parent_company_id, is_active) VALUES (:name, :code, :parent_company_id, :is_active)');
-            $stmt->execute([
-                'name' => $name,
-                'code' => $code,
-                'parent_company_id' => $parentCompanyId,
-                'is_active' => $isActive,
-            ]);
-        } else {
-            $stmt = db()->prepare('INSERT INTO companies (name, code, is_active) VALUES (:name, :code, :is_active)');
-            $stmt->execute([
-                'name' => $name,
-                'code' => $code,
-                'is_active' => $isActive,
-            ]);
-        }
-
-        $companyId = (int) db()->lastInsertId();
-        db()->prepare("UPDATE companies SET inventory_accounting = 'periodic' WHERE id = ?")->execute([$companyId]);
-        log_activity('company', $companyId, 'created', 'Company created from platform workflow.', (int) ($currentAdmin['id'] ?? 0));
-        flash('success', 'Company created.');
-        redirect($companiesRoute);
-    }
-
-    if ($action === 'create_fiscal_year') {
-        $companyId = (int) ($_POST['company_id'] ?? 0);
-        $label = trim((string) ($_POST['label'] ?? ''));
-        $startDate = trim((string) ($_POST['start_date'] ?? ''));
-        $endDate = trim((string) ($_POST['end_date'] ?? ''));
-        $isActive = isset($_POST['is_active']) ? 1 : 0;
-        $isDefault = isset($_POST['is_default']) ? 1 : 0;
-
-        if ($companyId <= 0 || $label === '' || $startDate === '' || $endDate === '') {
-            flash('error', 'Company, label, start date, and end date are required.');
-            redirect($companiesRoute);
-        }
-
-        // Shared service: overlap/duplicate rejection + race-safe single
-        // default, identical to the Settings page.
-        $result = create_fiscal_year($companyId, $label, $startDate, $endDate, $isDefault === 1, (int) ($currentAdmin['id'] ?? 0));
-        if (!$result['ok']) {
-            flash('error', (string) $result['error']);
-            redirect($companiesRoute);
-        }
-        if ($isActive === 0) {
-            db()->prepare('UPDATE fiscal_years SET is_active = 0 WHERE id = :id')->execute(['id' => $result['id']]);
-        }
-        flash('success', 'Fiscal year created.');
-        redirect($companiesRoute);
-    }
-
-    if ($action === 'save_bank_account') {
-        $bankAccountId = (int) ($_POST['bank_account_id'] ?? 0);
-        $companyId = (int) ($_POST['company_id'] ?? 0);
-        $bankName = trim((string) ($_POST['bank_name'] ?? ''));
-        $accountName = trim((string) ($_POST['account_name'] ?? ''));
-        $accountNumber = trim((string) ($_POST['account_number'] ?? ''));
-        $companyCheck = db()->prepare('SELECT id FROM companies WHERE id = :id LIMIT 1');
-        $companyCheck->execute(['id' => $companyId]);
-        if (!$companyCheck->fetch() || $bankName === '' || $accountName === '' || $accountNumber === '') {
-            flash('error', 'Company, bank name, account name and account number are required.');
-            redirect($companiesRoute . '#banks');
-        }
-        $isDefault = isset($_POST['is_default']) ? 1 : 0;
-        $params = [
-            'company_id' => $companyId, 'bank_name' => $bankName, 'account_name' => $accountName,
-            'account_number' => $accountNumber,
-            'branch' => trim((string) ($_POST['branch'] ?? '')) ?: null,
-            'swift_code' => trim((string) ($_POST['swift_code'] ?? '')) ?: null,
-            'is_default' => $isDefault,
-            'show_on_invoice' => isset($_POST['show_on_invoice']) ? 1 : 0,
-            'sort_order' => (int) ($_POST['sort_order'] ?? 0),
-            'active' => isset($_POST['active']) ? 1 : 0,
-        ];
-        if ($isDefault === 1) {
-            db()->prepare('UPDATE company_bank_accounts SET is_default = 0 WHERE company_id = :cid')->execute(['cid' => $companyId]);
-        }
-        if ($bankAccountId > 0) {
-            $params['id'] = $bankAccountId;
-            db()->prepare('UPDATE company_bank_accounts SET company_id = :company_id, bank_name = :bank_name, account_name = :account_name,
-                    account_number = :account_number, branch = :branch, swift_code = :swift_code,
-                    is_default = :is_default, show_on_invoice = :show_on_invoice, sort_order = :sort_order, active = :active
-                WHERE id = :id')->execute($params);
-            log_activity('company', $companyId, 'bank_account_updated', 'Bank account ' . $bankName . ' (' . $accountNumber . ') updated.', (int) ($currentAdmin['id'] ?? 0));
-        } else {
-            $params['created_by'] = (int) ($currentAdmin['id'] ?? 0);
-            db()->prepare('INSERT INTO company_bank_accounts (company_id, bank_name, account_name, account_number, branch, swift_code, is_default, show_on_invoice, sort_order, active, created_by)
-                VALUES (:company_id, :bank_name, :account_name, :account_number, :branch, :swift_code, :is_default, :show_on_invoice, :sort_order, :active, :created_by)')->execute($params);
-            log_activity('company', $companyId, 'bank_account_added', 'Bank account ' . $bankName . ' (' . $accountNumber . ') added.', (int) ($currentAdmin['id'] ?? 0));
-        }
-        flash('success', 'Bank account saved. Invoices issued by this company now show its listed accounts.');
-        redirect($companiesRoute . '#banks');
-    }
-
-    flash('error', 'Unsupported action.');
-    redirect($companiesRoute);
-}
-
-$companies = $parentColumnExists
-    ? db()->query('SELECT c.*, p.name AS parent_company_name FROM companies c LEFT JOIN companies p ON p.id = c.parent_company_id ORDER BY c.name ASC')->fetchAll()
-    : companies_list(false);
-$groupCompanies = array_values(array_filter(
-    $companies,
-    static fn (array $company): bool => (int) ($company['is_client_company'] ?? 0) !== 1
-));
-$fiscalYears = db()->query('SELECT fy.*, c.name AS company_name FROM fiscal_years fy INNER JOIN companies c ON c.id = fy.company_id ORDER BY c.name ASC, fy.start_date DESC')->fetchAll();
-
-$bankAccounts = table_exists('company_bank_accounts')
-    ? db()->query('SELECT b.*, c.name AS company_name FROM company_bank_accounts b INNER JOIN companies c ON c.id = b.company_id ORDER BY c.name ASC, b.is_default DESC, b.sort_order ASC')->fetchAll()
-    : [];
-$editBankAccount = null;
-$editBankAccountId = (int) ($_GET['bank'] ?? 0);
-foreach ($bankAccounts as $bankRow) {
-    if ((int) $bankRow['id'] === $editBankAccountId) {
-        $editBankAccount = $bankRow;
+        db()->beginTransaction();
+        $sql = 'INSERT INTO companies (name, code, is_active, inventory_accounting' . ($parentColumnExists ? ', parent_company_id' : '') . ') VALUES (?, ?, ?, ?' . ($parentColumnExists ? ', ?' : '') . ')';
+        $params = [$values['name'],$values['code'],isset($_POST['is_active']) ? 1 : 0,'periodic'];
+        if ($parentColumnExists) $params[] = $parentId;
+        db()->prepare($sql)->execute($params);
+        $companyId = (int)db()->lastInsertId();
+        update_settings(['site_name'=>$values['name'],'support_email'=>$values['support_email'],'support_phone'=>$values['support_phone'],'office_address'=>$values['office_address']],$companyId);
+        db()->commit();
+        log_activity('company',$companyId,'created','Company created from platform workflow.',(int)current_user()['id']);
+        flash('success','Company created.');
+        redirect('platform/index.php');
+    } catch (Throwable $exception) {
+        if (db()->inTransaction()) db()->rollBack();
+        flash('error',$exception instanceof PDOException ? 'Could not create the company. Check that its code is unique and try again.' : $exception->getMessage());
     }
 }
-
+$groupCompanies = $parentColumnExists ? db()->query('SELECT id, name FROM companies WHERE is_active = 1 AND is_client_company = 0 ORDER BY name')->fetchAll() : [];
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 ?>
-<div class="admin-grid">
-    <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Create Company</h2></div>
-        <form method="post">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="create_company">
-            <label>Name<input type="text" name="name" required></label>
-            <label>Code<input type="text" name="code" maxlength="20" required></label>
-            <?php if ($parentColumnExists): ?>
-                <label>Company group (optional)
-                    <select name="parent_company_id">
-                        <option value="">Independent company</option>
-                        <?php foreach ($groupCompanies as $company): ?>
-                            <option value="<?= e((int) $company['id']) ?>"><?= e($company['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-            <?php endif; ?>
-            <label><input type="checkbox" name="is_active" checked> Active</label>
-            <button type="submit">Create company</button>
-        </form>
-    </section>
-
-    <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Create Fiscal Year</h2></div>
-        <form method="post">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="create_fiscal_year">
-            <label>Company
-                <select name="company_id" required>
-                    <option value="">Select company</option>
-                    <?php foreach ($companies as $company): ?>
-                        <option value="<?= e((int) $company['id']) ?>"><?= e($company['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Label<input type="text" name="label" placeholder="FY 2026-2027" required></label>
-            <label>Start date<input type="date" name="start_date" required></label>
-            <label>End date<input type="date" name="end_date" required></label>
-            <label><input type="checkbox" name="is_active" checked> Active</label>
-            <label><input type="checkbox" name="is_default"> Default for company</label>
-            <button type="submit">Create Fiscal Year</button>
-        </form>
-    </section>
-</div>
-
-<section class="mbw-card" data-collapsible>
-    <div class="mbw-card-head"><h2>Companies</h2></div>
-    <div style="overflow-x:auto">
-    <table>
-        <thead>
-            <tr><th>ID</th><th>Name</th><th>Code</th><?php if ($parentColumnExists): ?><th>Relationship</th><?php endif; ?><th>Status</th><th>Action</th></tr>
-        </thead>
-        <tbody>
-            <?php if ($companies === []): ?>
-                <tr><td colspan="<?= $parentColumnExists ? '6' : '5' ?>">No companies available.</td></tr>
-            <?php endif; ?>
-            <?php foreach ($companies as $company): ?>
-                <tr>
-                    <td><a href="<?= e(url('platform/company-settings.php?company_id=' . (int)$company['id'])) ?>">#<?= e((int) $company['id']) ?> · Settings</a> <a class="button secondary" href="<?= e(url('platform/company-modules.php?company_id=' . (int)$company['id'])) ?>">Modules</a></td>
-                    <td><?= e($company['name']) ?></td>
-                    <td><?= e($company['code']) ?></td>
-                    <?php if ($parentColumnExists): ?>
-                        <td>
-                            <?php if (!empty($company['parent_company_name'])): ?>
-                                Subsidiary of <?= e($company['parent_company_name']) ?>
-                            <?php else: ?>
-                                Independent company
-                            <?php endif; ?>
-                        </td>
-                    <?php endif; ?>
-                    <td><?php if ((int) $company['is_active'] === 1): ?><span class="mbw-pill tone-green">Active</span><?php else: ?><span class="mbw-pill tone-red">Inactive</span><?php endif; ?></td>
-                    <td>
-                        <?php if ((int) $company['is_active'] === 1): ?>
-                            <form method="post" action="<?= e(url('admin/switch-company.php')) ?>" class="inline-form">
-                                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-                                <input type="hidden" name="company_id" value="<?= e((int) $company['id']) ?>">
-                                <input type="hidden" name="return_to" value="platform/companies.php">
-                                <button type="submit">Open portal</button>
-                            </form>
-                        <?php else: ?>
-                            -
-                        <?php endif; ?>
-                    </td>
-                </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-    </div>
-</section>
-
-<section class="mbw-card" data-collapsible id="banks">
-    <div class="mbw-card-head"><h2>Company Bank Accounts</h2><?php if ($editBankAccount): ?><a class="mbw-view-all" href="<?= e(url($companiesRoute . '#banks')) ?>">Cancel edit</a><?php endif; ?></div>
-    
-    <form method="post" class="workspace-form-grid" style="margin-bottom:14px">
-        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-        <input type="hidden" name="action" value="save_bank_account">
-        <input type="hidden" name="bank_account_id" value="<?= e((int) ($editBankAccount['id'] ?? 0)) ?>">
-        <label>Company
-            <select name="company_id" required>
-                <option value="">Select company</option>
-                <?php foreach ($companies as $company): ?>
-                    <option value="<?= e((int) $company['id']) ?>" <?= (int) ($editBankAccount['company_id'] ?? 0) === (int) $company['id'] ? 'selected' : '' ?>><?= e($company['name']) ?></option>
-                <?php endforeach; ?>
-            </select>
-        </label>
-        <label>Bank name<input type="text" name="bank_name" maxlength="160" required value="<?= e($editBankAccount['bank_name'] ?? '') ?>" placeholder="NIC Asia Bank Ltd."></label>
-        <label>Account name<input type="text" name="account_name" maxlength="190" required value="<?= e($editBankAccount['account_name'] ?? '') ?>" placeholder="M.Bista and Associates"></label>
-        <label>Account number<input type="text" name="account_number" maxlength="80" required value="<?= e($editBankAccount['account_number'] ?? '') ?>"></label>
-        <label>Branch<input type="text" name="branch" maxlength="160" value="<?= e($editBankAccount['branch'] ?? '') ?>"></label>
-        <label>SWIFT code (optional)<input type="text" name="swift_code" maxlength="40" value="<?= e($editBankAccount['swift_code'] ?? '') ?>"></label>
-        <label>Sort order<input type="number" name="sort_order" value="<?= e((int) ($editBankAccount['sort_order'] ?? 0)) ?>"></label>
-        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="is_default" <?= (int) ($editBankAccount['is_default'] ?? 0) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Default account</label>
-            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="show_on_invoice" <?= (int) ($editBankAccount['show_on_invoice'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Show on invoice</label>
-            <label style="display:flex;align-items:center;gap:6px;flex-direction:row"><input type="checkbox" name="active" <?= (int) ($editBankAccount['active'] ?? 1) === 1 ? 'checked' : '' ?> style="width:auto;min-height:auto"> Active</label>
-        </div>
-        <div class="workspace-span-2"><button type="submit"><?= icon('bank') ?><?= $editBankAccount ? 'Update Bank Account' : 'Add Bank Account' ?></button></div>
-    </form>
-    <div style="overflow-x:auto">
-    <table>
-        <thead><tr><th>Company</th><th>Bank</th><th>Account name</th><th>Account no</th><th>Branch</th><th>Default</th><th>On invoice</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-            <?php if ($bankAccounts === []): ?><tr><td colspan="9">No bank accounts yet. Add one per company — invoices will show them automatically.</td></tr><?php endif; ?>
-            <?php foreach ($bankAccounts as $bankRow): ?>
-                <tr>
-                    <td><?= e($bankRow['company_name']) ?></td>
-                    <td><strong><?= e($bankRow['bank_name']) ?></strong></td>
-                    <td><?= e($bankRow['account_name']) ?></td>
-                    <td><?= e($bankRow['account_number']) ?></td>
-                    <td><?= e($bankRow['branch'] ?? '—') ?></td>
-                    <td><?= (int) $bankRow['is_default'] === 1 ? '<span class="mbw-pill tone-blue">Default</span>' : '—' ?></td>
-                    <td><?= (int) $bankRow['show_on_invoice'] === 1 ? '<span class="mbw-pill tone-green">Yes</span>' : '<span class="mbw-pill tone-gray">No</span>' ?></td>
-                    <td><?= (int) $bankRow['active'] === 1 ? '<span class="mbw-pill tone-green">Active</span>' : '<span class="mbw-pill tone-red">Inactive</span>' ?></td>
-                    <td><a class="button secondary" style="min-height:30px;padding:3px 10px" href="<?= e(url($companiesRoute . '?bank=' . (int) $bankRow['id'] . '#banks')) ?>">Edit</a></td>
-                </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-    </div>
-</section>
-
-<section class="mbw-card" data-collapsible>
-    <div class="mbw-card-head"><h2>Fiscal Years</h2></div>
-    <div style="overflow-x:auto">
-    <table>
-        <thead>
-            <tr><th>ID</th><th>Company</th><th>Label</th><th>Period</th><th>Default</th><th>Status</th></tr>
-        </thead>
-        <tbody>
-            <?php if ($fiscalYears === []): ?>
-                <tr><td colspan="6">No fiscal years available.</td></tr>
-            <?php endif; ?>
-            <?php foreach ($fiscalYears as $fy): ?>
-                <tr>
-                    <td>#<?= e((int) $fy['id']) ?></td>
-                    <td><?= e($fy['company_name']) ?></td>
-                    <td><?= e($fy['label']) ?></td>
-                    <td><?= e($fy['start_date']) ?> to <?= e($fy['end_date']) ?></td>
-                    <td><?php if ((int) $fy['is_default'] === 1): ?><span class="mbw-pill tone-blue">Default</span><?php else: ?><span class="mbw-pill tone-gray">No</span><?php endif; ?></td>
-                    <td><?php if ((int) $fy['is_active'] === 1): ?><span class="mbw-pill tone-green">Active</span><?php else: ?><span class="mbw-pill tone-red">Inactive</span><?php endif; ?></td>
-                </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-    </div>
+<section class="mbw-card company-details-card">
+ <div class="mbw-card-head"><h2>New company</h2><a class="button secondary" href="<?= e(url('platform/index.php')) ?>">Back to companies</a></div>
+ <form method="post" class="workspace-form-grid">
+  <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="create_company">
+  <label class="workspace-span-2">Company name<input name="name" maxlength="150" required autocomplete="organization" value="<?= e($values['name']) ?>"></label>
+  <label>Company code<input name="code" maxlength="30" required spellcheck="false" value="<?= e($values['code']) ?>"></label>
+  <label>Email<input type="email" name="support_email" autocomplete="email" value="<?= e($values['support_email']) ?>"></label>
+  <label>Phone<input type="tel" name="support_phone" autocomplete="tel" value="<?= e($values['support_phone']) ?>"></label>
+  <?php if ($parentColumnExists): ?><label>Company group<select name="parent_company_id"><option value="">Independent company</option><?php foreach ($groupCompanies as $parent): ?><option value="<?= (int)$parent['id'] ?>" <?= (string)$parent['id'] === $values['parent_company_id'] ? 'selected' : '' ?>><?= e($parent['name']) ?></option><?php endforeach; ?></select></label><?php endif; ?>
+  <label class="company-full-width">Address<input name="office_address" autocomplete="street-address" value="<?= e($values['office_address']) ?>"></label>
+  <div class="company-form-actions"><label class="checkbox-line"><input type="checkbox" name="is_active" value="1" <?= $values['is_active'] ? 'checked' : '' ?>>Active</label></div>
+  <div class="company-form-actions"><button class="button" type="submit">Create company</button><a class="button secondary" href="<?= e(url('platform/index.php')) ?>">Cancel</a></div>
+ </form>
 </section>
 <?php include __DIR__ . '/../../app/views/partials/admin_footer.php'; ?>
