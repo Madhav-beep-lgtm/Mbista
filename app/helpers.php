@@ -2251,7 +2251,7 @@ function user_by_email(string $email): ?array
     return $user ?: null;
 }
 
-function login_user(string $email, string $password): bool
+function login_user(string $email, string $password, string $companyCode = ''): bool
 {
     $user = user_by_email($email);
 
@@ -2259,6 +2259,12 @@ function login_user(string $email, string $password): bool
         // Record the failure for throttling + the security log, but do not
         // reveal which of the two conditions failed to the caller.
         security_event('login_failed', 'failure', 'Invalid credentials or inactive account.', null, $user['id'] ?? null, $email);
+        return false;
+    }
+
+    $loginCompanyId = login_company_target($user, $companyCode);
+    if ($loginCompanyId === false) {
+        security_event('login_failed', 'failure', 'Invalid company credentials.', null, (int)$user['id'], $email);
         return false;
     }
 
@@ -2277,6 +2283,7 @@ function login_user(string $email, string $password): bool
 
     $_SESSION['user_id'] = (int) $user['id'];
     $_SESSION['auth_issued_at'] = time();
+    $_SESSION['login_company_id'] = $loginCompanyId;
 
     security_event('login', 'success', 'User authenticated.', (int) ($user['company_id'] ?? 0) ?: null, (int) $user['id'], $email);
 

@@ -35,8 +35,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('login.php');
     }
 
-    if (!login_user($email, $password)) {
-        flash('error', 'Invalid login credentials.');
+    if (!login_user($email, $password, (string)($_POST['company_code'] ?? ''))) {
+        flash('error', 'Invalid login credentials. Company users must enter their company code.');
         redirect('login.php');
     }
 
@@ -64,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $user = current_user();
     flash('success', 'Welcome back, ' . ($user['name'] ?? 'user') . '.');
+    finish_login_company_context($user);
     redirect(role_home_path($user));
 }
 
@@ -113,6 +114,13 @@ include __DIR__ . '/../app/views/partials/header.php';
             <h2>Welcome back</h2>
             <form method="post" class="auth2-form">
                 <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <label>Company code
+                    <span class="auth2-input">
+                        <?= icon('companies') ?>
+                        <input type="text" name="company_code" maxlength="30" autocomplete="organization" spellcheck="false" aria-describedby="company-code-help">
+                    </span>
+                    <small id="company-code-help">Required for company users. Platform admin and staff can leave this blank.</small>
+                </label>
                 <label>Email address
                     <span class="auth2-input">
                         <?= icon('profile') ?>

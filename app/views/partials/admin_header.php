@@ -383,7 +383,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <span class="admin-nav-group">Reports</span>
             <a class="<?= $headerScript === 'reports-center.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'report-schedules.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/report-schedules.php')) ?>"><?= icon('calendar') ?>Report Schedules</a>
-            <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
             <span class="admin-nav-group">System</span>
             <a href="<?= e(url('logout.php')) ?>"><?= icon('logout') ?>Logout</a>
             <?php else: ?>
@@ -454,7 +453,6 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             <a class="<?= in_array($headerScript, ['reports-center.php', 'report-schedules.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('admin/reports-center.php')) ?>"><?= icon('reports') ?>Reports Center</a>
             <a class="<?= $headerScript === 'documents.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/documents.php?view=requests')) ?>"><?= icon('documents') ?>Documents</a>
             <?php if (company_module_enabled('compliance')): ?><a class="<?= $headerScript === 'compliance.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/compliance.php?view=deadlines')) ?>"><?= icon('compliance') ?>Compliance</a><?php endif; ?>
-            <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail &amp; Approvals</a>
 
             <span class="admin-nav-group">Operations</span>
             <?php if (!$headerIsClientBooks): ?>
@@ -481,6 +479,14 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             </div>
 
             <?php endif; ?>
+            <?php endif; ?>
+            <?php if (empty($platformShell)): ?>
+                <?php if (user_can_do('accounting', 'view')): ?>
+                <a class="<?= $headerScript === 'audit-trail.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/audit-trail.php')) ?>"><?= icon('admin') ?>Audit Trail</a>
+                <?php endif; ?>
+                <?php if (company_can_manage_settings()): ?>
+                <a class="<?= $headerScript === 'company-settings.php' ? 'is-active' : '' ?>" href="<?= e(url('admin/company-settings.php')) ?>"><?= icon('settings') ?>Settings</a>
+                <?php endif; ?>
             <?php endif; ?>
         </nav>
     </aside>

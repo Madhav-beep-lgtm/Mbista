@@ -72,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         flash('success', 'Welcome back, ' . ($user['name'] ?? 'user') . '.');
     }
+    finish_login_company_context($user);
     redirect(role_home_path($user));
 }
 
