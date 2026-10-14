@@ -28,6 +28,11 @@ if (!$receipt) {
 }
 
 require_permission('reports', 'export');
+if (column_exists('invoice_payment_requests','source_voucher_id')) {
+    $source=db()->prepare('SELECT source_voucher_id FROM invoice_payment_requests WHERE id=? AND company_id=?');
+    $source->execute([$requestId,$currentCompany['id']]);
+    if ($voucherId=(int)$source->fetchColumn()) redirect('admin/voucher-view.php?id='.$voucherId);
+}
 
 $safeNo = preg_replace('/[^A-Za-z0-9\-_]/', '_', (string) ($receipt['receipt_no'] ?? $requestId));
 header('Content-Type: text/html; charset=utf-8');

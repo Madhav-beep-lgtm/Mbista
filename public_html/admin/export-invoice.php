@@ -35,6 +35,11 @@ if ($format === 'excel') {
     security_event('report_exported', 'success', 'Invoice #' . $invoiceId . ' exported.', (int) $currentCompany['id'], (int) (current_user()['id'] ?? 0));
     export_csv($filename, $data);
 } else {
+    if (table_exists('voucher_billing')) {
+        $source=db()->prepare("SELECT voucher_id FROM voucher_billing WHERE company_id=? AND kind='sales' AND document_id=?");
+        $source->execute([$currentCompany['id'],$invoiceId]);
+        if ($source->fetchColumn()) redirect('admin/invoice.php?action=view&id='.$invoiceId);
+    }
     // Export as printable PDF (HTML that can be printed to PDF)
     header('Content-Type: text/html; charset=utf-8');
     header('Content-Disposition: inline; filename="Invoice-' . $invoice['invoice_no'] . '.html"');

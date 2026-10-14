@@ -33,7 +33,31 @@ foreach (['submitted_by', 'approved_by'] as $role) {
 $voucherLabel = (string) voucher_type_spec((string) $voucher['voucher_type'])['label'];
 $totalDebit = 0;
 $totalCredit = 0;
+$receiptAllocation = [];
+if (column_exists('invoice_payment_requests','source_voucher_id')) {
+    $q=db()->prepare("SELECT p.id,p.payment_amount,p.notes,r.receipt_no,i.invoice_no,COALESCE(NULLIF(i.total_amount,0),i.amount) AS invoice_total,
+        COALESCE(a.name,cp.organization_name,'') AS client_name,
+        COALESCE(i.description,t.title,'') AS task_description,
+        COALESCE((SELECT SUM(pr.payment_amount) FROM invoice_payment_requests pr WHERE pr.invoice_id=i.id AND pr.id<p.id AND pr.status IN ('paid','partial')),0) AS previous
+        FROM invoice_payment_requests p JOIN task_invoices i ON i.id=p.invoice_id AND i.company_id=p.company_id
+        JOIN invoice_payment_receipts r ON r.payment_request_id=p.id AND r.company_id=p.company_id
+        LEFT JOIN accounting_parties a ON a.id=i.party_id AND a.company_id=i.company_id
+        LEFT JOIN client_tasks t ON t.id=i.task_id AND t.company_id=i.company_id
+        LEFT JOIN client_profiles cp ON cp.id=t.client_id
+        WHERE p.source_voucher_id=? AND p.company_id=?");
+    $q->execute([$voucher['id'],$company['id']]);
+    if ($receipt=$q->fetch()) {
+        $receiptAllocation=$receipt;
+        $receiptAllocation['received']=$receipt['payment_amount'];
+        $receiptAllocation['remaining']=max(0,round((float)$receipt['invoice_total']-(float)$receipt['previous']-(float)$receipt['payment_amount'],2));
+        if ($voucher['voucher_type']==='receipt') $voucherLabel='Detailed receipt';
+    }
+}
 if (isset($_GET['document']) && in_array((string) $voucher['voucher_type'], ['sales', 'purchase', 'debit_note', 'credit_note'], true)) {
+    $billing = voucher_billing_link((int) $voucher['id']);
+    if ($voucher['voucher_type'] === 'sales' && !empty($billing['document_id'])) {
+        redirect('admin/invoice.php?id=' . (int) $billing['document_id']);
+    }
     $documentTitle = match ((string) $voucher['voucher_type']) {
         'sales' => 'Sales Invoice', 'purchase' => 'Purchase Record',
         'debit_note' => 'Debit Note', 'credit_note' => 'Credit Note',

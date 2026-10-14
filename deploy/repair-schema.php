@@ -48,6 +48,7 @@ if ($errors !== []) {
 }
 
 require_once $appBase . '/app/company_name_cleanup.php';
+require_once $appBase . '/app/voucher_billing_schema.php';
 echo 'company names: cleaned ' . company_name_cleanup(db()) . " company(ies).\n";
 
 // Adopt on-hand jewellery stock into traced pieces, for shops that predate

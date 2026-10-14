@@ -9,7 +9,8 @@ $documentTax = 0.0;
 <link rel="stylesheet" href="<?= e(asset_url('assets/css/voucher-print.css')) ?>">
 </head><body>
 <nav class="print-toolbar"><button type="button" onclick="window.print()">Print / Save PDF</button>
-<a href="<?= e(url('admin/voucher-view.php?id=' . (int) $voucher['id'])) ?>">Journal entries</a></nav>
+<?php if (!empty($voucher['id'])): ?><a href="<?= e(url('admin/voucher-view.php?id=' . (int) $voucher['id'])) ?>">Journal entries</a><?php endif; ?>
+<a href="<?= e(url('admin/invoice.php')) ?>">Invoice list</a></nav>
 <main class="voucher-document">
 <header><h1><?= e((string) $company['name']) ?></h1><p><?= nl2br(e((string) ($company['address'] ?? ''))) ?></p>
 <h2><?= e($documentTitle) ?><?= $voucher['status'] !== 'posted' ? ' - ' . e(strtoupper((string) $voucher['status'])) : '' ?></h2></header>

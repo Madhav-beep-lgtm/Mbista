@@ -25,6 +25,8 @@ function client_mirror_decide(int $id,int $companyId,int $userId,string $decisio
     $pdo = db();
     $pdo->beginTransaction();
     try {
+        $companyLock = $pdo->prepare('SELECT id FROM companies WHERE id=? FOR UPDATE');
+        $companyLock->execute([$companyId]);
         $query = $pdo->prepare("SELECT * FROM vouchers WHERE id = ? AND company_id = ? AND requires_client_approval = 1 AND approval_state = 'pending_approval' AND status = 'draft' FOR UPDATE");
         $query->execute([$id,$companyId]);
         $voucher = $query->fetch();
@@ -34,6 +36,7 @@ function client_mirror_decide(int $id,int $companyId,int $userId,string $decisio
             if (!$fy || (int)$fy['company_id'] !== $companyId) throw new RuntimeException('Fiscal year unavailable.');
             $blocker = fiscal_year_posting_blocker($fy,(string)$voucher['voucher_date']);
             if ($blocker !== null) throw new RuntimeException($blocker);
+            if (function_exists('is_period_locked') && is_period_locked($companyId,(int)$voucher['fiscal_year_id'],(string)$voucher['voucher_date'])) throw new RuntimeException('Accounting period is locked.');
             $lines = $pdo->prepare('SELECT e.entry_type,e.amount,l.company_id FROM voucher_entries e JOIN ledgers l ON l.id = e.ledger_id WHERE e.voucher_id = ?');
             $lines->execute([$id]);
             $balance = 0; $count = 0;
@@ -46,7 +49,9 @@ function client_mirror_decide(int $id,int $companyId,int $userId,string $decisio
         }
         $pdo->prepare('UPDATE vouchers SET status = ?, approval_state = ?, client_approved_by = ?, client_approved_at = CURRENT_TIMESTAMP, approved_by = ?, approved_at = CURRENT_TIMESTAMP, posted_by = ?, posted_at = ? WHERE id = ? AND company_id = ?')
             ->execute([$decision === 'approve' ? 'posted' : 'cancelled',$decision === 'approve' ? 'approved' : 'rejected',$userId,$userId,$decision === 'approve' ? $userId : null,$decision === 'approve' ? date('Y-m-d H:i:s') : null,$id,$companyId]);
+        if ($decision === 'approve' && function_exists('voucher_billing_finalize')) voucher_billing_finalize($id);
         $pdo->commit();
+        if ($decision === 'approve' && function_exists('voucher_billing_notify')) voucher_billing_notify($id);
     } catch (Throwable $exception) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         throw $exception;

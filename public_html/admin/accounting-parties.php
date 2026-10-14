@@ -302,115 +302,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'record_payment') {
-        require_permission('receipts', 'create');
-        $invoiceId = (int) ($_POST['invoice_id'] ?? 0);
-        $amount = round((float) ($_POST['amount'] ?? 0), 2);
-        $receivedOn = trim((string) ($_POST['received_on'] ?? date('Y-m-d')));
-        $method = trim((string) ($_POST['payment_method'] ?? 'Cash'));
-        $note = trim((string) ($_POST['notes'] ?? ''));
-
-        $invoiceStmt = db()->prepare('
-            SELECT ti.id, ti.invoice_no, ti.total_amount,
-                   COALESCE((SELECT SUM(COALESCE(pr.payment_amount, 0)) FROM invoice_payment_requests pr
-                             WHERE pr.invoice_id = ti.id AND pr.status IN ("paid", "partial")), 0) AS paid_amount
-            FROM task_invoices ti
-            WHERE ti.id = :id AND ti.company_id = :company_id AND ti.status <> "cancelled"
-            LIMIT 1
-        ');
-        $invoiceStmt->execute(['id' => $invoiceId, 'company_id' => $companyId]);
-        $invoice = $invoiceStmt->fetch();
-        $outstanding = $invoice ? max(0.0, round((float) $invoice['total_amount'] - (float) $invoice['paid_amount'], 2)) : 0.0;
-
-        if (!$invoice || $amount <= 0 || $outstanding <= 0) {
-            flash('error', 'Choose an open invoice and enter a payment amount.');
-            redirect($partiesReturn('admin/accounting-parties.php?panel=payment'));
-        }
-
-        $amount = min($amount, $outstanding);
-        $paymentStatus = $amount >= $outstanding ? 'paid' : 'partial';
-
-        // Record the payment and post its receipt voucher ATOMICALLY. The invoice
-        // flips to paid/partial the instant the request row lands (the paid_amount
-        // subquery counts it), so if the voucher can't post — a locked period, or
-        // a missing cash/receivable mapping (the helper returns silently) — the
-        // whole thing must roll back rather than leave a "paid" invoice with no
-        // cash in the books.
-        db()->beginTransaction();
-        try {
-            db()->prepare('
-                INSERT INTO invoice_payment_requests
-                    (invoice_id, company_id, requested_by, amount_requested, payment_method, status, payment_received_on, payment_amount, notes)
-                VALUES (:invoice_id, :company_id, :requested_by, :amount_requested, :payment_method, :status, :received_on, :payment_amount, :notes)
-            ')->execute([
-                'invoice_id' => $invoiceId,
-                'company_id' => $companyId,
-                'requested_by' => $userId,
-                'amount_requested' => $amount,
-                'payment_method' => $method !== '' ? $method : 'Cash',
-                'status' => $paymentStatus,
-                'received_on' => $receivedOn !== '' ? $receivedOn : date('Y-m-d'),
-                'payment_amount' => $amount,
-                'notes' => $note !== '' ? $note : null,
-            ]);
-            $paymentRequestId = (int) db()->lastInsertId();
-
-            auto_post_invoice_payment_voucher($paymentRequestId, $userId);
-
-            // The auto-post helper returns silently when a mapping is missing, so
-            // confirm the receipt voucher actually exists before committing.
-            if (table_exists('vouchers')) {
-                $rvCheckStmt = db()->prepare("SELECT COUNT(*) FROM vouchers WHERE source_type = 'invoice_payment_request' AND source_id = :id");
-                $rvCheckStmt->execute(['id' => $paymentRequestId]);
-                if ((int) $rvCheckStmt->fetchColumn() === 0) {
-                    throw new RuntimeException('its receipt voucher did not post — check the cash / receivable ledger mappings in Settings');
-                }
-            }
-            db()->commit();
-        } catch (Throwable $exception) {
-            if (db()->inTransaction()) {
-                db()->rollBack();
-            }
-            flash('error', 'Payment was NOT recorded: ' . $exception->getMessage() . '. No cash movement was left in the books.');
-            redirect($partiesReturn('admin/accounting-parties.php?panel=payment'));
-        }
-
-        // Goods invoices whose stock leg hasn't run yet (e.g. issued while the
-        // ledger mappings were missing) get an idempotent retry on collection.
-        try {
-            $paymentStockNotes = invoice_issue_inventory_stock($invoiceId, $userId);
-            if ($paymentStockNotes !== []) {
-                flash('info', implode(' ', $paymentStockNotes));
-            }
-        } catch (Throwable $exception) {
-            // Stock issue is best-effort here; the payment is already recorded.
-        }
-
-        // Issue a receipt here too, so receipts exist no matter which desk
-        // recorded the payment (previously only the invoice desk did this).
-        if (table_exists('invoice_payment_receipts')) {
-            try {
-                db()->prepare('INSERT INTO invoice_payment_receipts (payment_request_id, invoice_id, company_id, receipt_no, amount_received, payment_method, received_on, notes, created_by)
-                    VALUES (:payment_request_id, :invoice_id, :company_id, :receipt_no, :amount_received, :payment_method, :received_on, :notes, :created_by)')
-                    ->execute([
-                        'payment_request_id' => $paymentRequestId,
-                        'invoice_id' => $invoiceId,
-                        'company_id' => $companyId,
-                        'receipt_no' => next_receipt_number($companyId),
-                        'amount_received' => $amount,
-                        'payment_method' => $method !== '' ? $method : null,
-                        'received_on' => $receivedOn !== '' ? $receivedOn : date('Y-m-d'),
-                        'notes' => $note !== '' ? $note : null,
-                        'created_by' => $userId,
-                    ]);
-            } catch (Throwable $exception) {
-                // Receipt issuance is best-effort; the payment is already recorded.
-            }
-        }
-
-        security_event('voucher_posted', 'success', 'Receipt recorded for invoice ' . $invoice['invoice_no'] . '.', $companyId, $userId);
-        log_activity('invoice_payment', $paymentRequestId, 'recorded', 'Payment recorded against invoice ' . $invoice['invoice_no'] . '.', $userId);
-        flash('success', 'Payment of ' . site_currency_symbol() . number_format($amount, 2) . ' recorded against ' . $invoice['invoice_no'] . '.');
-        redirect($partiesReturn('admin/accounting-parties.php?tab=sales', ['panel']));
+        flash('info','Record invoice collections through a Receipt voucher.');
+        redirect('admin/voucher-form.php?type=receipt');
     }
 
     if ($action === 'record_purchase') {
@@ -1856,31 +1749,7 @@ $partyPicked = $partyExplicitlySelected && $selectedParty !== null && (int) ($se
         </form>
     </section>
 <?php elseif ($panel === 'payment'): ?>
-    <?php $prefillInvoiceId = (int) ($_GET['invoice_id'] ?? 0); ?>
-    <section id="panel-forms" class="mbw-card reference-panel-card">
-        <div class="mbw-card-head"><h2>Record a Customer Payment</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>
-        <form method="post" class="reference-party-form">
-            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-            <input type="hidden" name="action" value="record_payment">
-            <input type="hidden" name="return_to" value="<?= e((string) ($_SERVER['QUERY_STRING'] ?? '')) ?>">
-            <label>Open invoice
-                <select name="invoice_id" required>
-                    <option value="">Select invoice</option>
-                    <?php foreach ($documents as $document): ?>
-                        <?php if ((float) $document['outstanding_amount'] > 0): ?>
-                            <option value="<?= e((int) $document['id']) ?>" <?= $prefillInvoiceId === (int) $document['id'] ? 'selected' : '' ?>><?= e($document['voucher_no'] . ' · ' . $document['party_name'] . ' · due ' . site_currency_symbol() . number_format((float) $document['outstanding_amount'], 2)) ?></option>
-                        <?php endif; ?>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-            <label>Amount received<input type="number" step="0.01" min="0.01" name="amount" required></label>
-            <label>Received on<input type="date" name="received_on" value="<?= e(date('Y-m-d')) ?>"></label>
-            <?= payment_method_field($companyId, '', 'payment_method', 'Method') ?>
-            <label class="span-2">Notes<textarea name="notes" placeholder="Receipt reference, remarks"></textarea></label>
-            <button type="submit"><?= icon('documents') ?>Record Payment</button>
-            <a class="button secondary" href="<?= e(parties_page_url(['panel' => null])) ?>">Cancel</a>
-        </form>
-    </section>
+<section class="mbw-card"><a class="button" href="<?= e(url('admin/voucher-form.php?type=receipt')) ?>">Receipt voucher</a></section>
 <?php elseif ($panel === 'purchase'): ?>
     <section id="panel-forms" class="mbw-card reference-panel-card">
         <div class="mbw-card-head"><h2>Record a Purchase Bill</h2><div class="mbw-card-tools"><a class="mbw-view-all" href="<?= e(parties_page_url(['panel' => null])) ?>">Close</a></div></div>

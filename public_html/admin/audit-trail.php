@@ -50,8 +50,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flash('error',$blocker);
             redirect('admin/audit-trail.php');
         }
-        db()->prepare("UPDATE vouchers SET approval_state = 'approved', status = 'posted', approved_by = :uid, approved_at = NOW() WHERE id = :id")
-            ->execute(['uid' => $userId, 'id' => $voucherId]);
+        try {
+            voucher_billing_approve($voucherId,$companyId,$userId);
+        } catch (Throwable $exception) {
+            flash('error',$exception instanceof PDOException ? 'Posting failed; no changes saved.' : $exception->getMessage());
+            redirect('admin/audit-trail.php');
+        }
         security_event('voucher_approved', 'success', 'Voucher #' . $voucherId . ' approved.', $companyId, $userId);
         log_field_changes('voucher', $voucherId, ['approval_state' => 'pending_approval'], ['approval_state' => 'approved'], $companyId, $userId);
         log_activity('voucher', $voucherId, 'approved', 'Voucher ' . $voucher['voucher_no'] . ' approved and posted.', $userId);

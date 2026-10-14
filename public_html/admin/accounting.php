@@ -89,8 +89,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 flash('error',$blocker);
                 redirect('admin/accounting.php');
             }
-            db()->prepare("UPDATE vouchers SET approval_state = 'approved', status = 'posted', approved_by = :approved_by, approved_at = NOW(), posted_by = :posted_by, posted_at = NOW(), rejection_reason = NULL WHERE id = :id AND company_id = :company_id")
-                ->execute(['approved_by' => $userId, 'posted_by' => $userId, 'id' => $voucherId, 'company_id' => $companyId]);
+        try {
+            voucher_billing_approve($voucherId,$companyId,$userId);
+        } catch (Throwable $exception) {
+            flash('error',$exception instanceof PDOException ? 'Posting failed; no changes saved.' : $exception->getMessage());
+            redirect('admin/accounting.php');
+        }
             security_event('voucher_approved', 'success', 'Voucher #' . $voucherId . ' approved.', $companyId, $userId);
             log_activity('voucher', $voucherId, 'approved', 'Voucher approved and posted.', $userId);
             flash('success', 'Voucher approved and posted.');

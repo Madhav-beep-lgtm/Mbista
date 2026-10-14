@@ -15,6 +15,7 @@
         <div><strong>Financial year:</strong> <?= e($financialYear) ?></div>
         <div><strong>Status:</strong> <?= e(ucfirst((string) $voucher['status'])) ?><?= !empty($voucher['approval_state']) ? ' / ' . e(ucwords(str_replace('_', ' ', (string) $voucher['approval_state']))) : '' ?></div>
     </section>
+    <?php include __DIR__ . '/receipt_allocation.php'; ?>
     <table><thead><tr><th class="serial">SN</th><th>Ledger name</th><th>Description</th><th class="amount">Debit</th><th class="amount">Credit</th></tr></thead><tbody>
     <?php foreach ($entries as $index => $entry):
         $debit = $entry['entry_type'] === 'debit' ? (float) $entry['amount'] : 0;

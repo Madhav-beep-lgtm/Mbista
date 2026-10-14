@@ -30,4 +30,11 @@ foreach (voucher_entry_type_catalog() as $type => $spec) {
     }
 }
 }
-echo "All voucher print types: header, dates, totals, signatures and escaping passed.\n";
+$receiptAllocation=['receipt_no'=>'RC-1-9','client_name'=>'Client <Name>','invoice_no'=>'INV-1-1','task_description'=>'Audit / Reporting','invoice_total'=>113,'previous'=>50,'received'=>63,'remaining'=>0];
+ob_start();
+include __DIR__.'/../app/views/vouchers/receipt_allocation.php';
+$receiptHtml=ob_get_clean();
+foreach (['RC-1-9','Client &lt;Name&gt;','INV-1-1','Audit / Reporting','113.00','50.00','63.00','0.00','Journal entries'] as $expected) {
+    if (!str_contains($receiptHtml,$expected)) throw new RuntimeException('Detailed receipt missing '.$expected);
+}
+echo "All voucher print types and detailed receipt: header, dates, allocation, totals, signatures and escaping passed.\n";

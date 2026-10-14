@@ -189,6 +189,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // across several of both at once. The party ledger is resolved here, where
     // the database lives, so the composer stays pure.
     $composeInput = $_POST;
+    if ($voucherType === 'sales' && voucher_billing_group($companyId) && $partyId <= 0) {
+        $selectedTaskId = (int)explode(':',(string)($_POST['billing_task'] ?? ''))[0];
+        $taskParty=db()->prepare('SELECT client_id FROM client_tasks WHERE id=? AND company_id=?');
+        $taskParty->execute([$selectedTaskId,$companyId]);
+        if ($taskClient=(int)$taskParty->fetchColumn()) $partyId=ensure_party_for_client($companyId,$taskClient);
+    }
+    if ($voucherType === 'receipt' && !empty($_POST['billing_invoice_id']) && $partyId <= 0) {
+        $billParty=db()->prepare('SELECT * FROM task_invoices WHERE id=? AND company_id=?');
+        $billParty->execute([(int)$_POST['billing_invoice_id'],$companyId]);
+        if ($selectedBill=$billParty->fetch()) $partyId=invoice_party_id($selectedBill,$companyId);
+    }
     if ((string) $spec['layout'] === 'trade') {
         $settlementMode = (string) ($_POST['settlement_mode'] ?? 'party');
         if (!in_array($settlementMode, ['party', 'cash', 'split'], true)) {
@@ -301,6 +312,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ], $composed['header']);
 
     try {
+        db()->beginTransaction();
+        $billingCompanyLock = db()->prepare('SELECT id FROM companies WHERE id=? FOR UPDATE');
+        $billingCompanyLock->execute([$companyId]);
         if ($editVoucherId > 0) {
             // === Edit: replace the header and lines, keep voucher_no and the
             // source link so auto-post idempotency (UNIQUE source) still holds.
@@ -328,7 +342,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $editFiscalYearId = (int) $dateFiscalYear['id'];
             }
 
-            db()->beginTransaction();
             $updateSql = 'UPDATE vouchers SET voucher_type = :voucher_type, voucher_date = :voucher_date, fiscal_year_id = :fiscal_year_id, narration = :narration, total_amount = :total_amount, status = :status';
             $updateParams = [
                 'voucher_type' => $voucherType,
@@ -377,7 +390,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'memo' => $entry['memo'] !== '' ? $entry['memo'] : null,
                 ]);
             }
-            db()->commit();
             $voucherId = $editVoucherId;
         } else {
             // voucher_no is UNIQUE per company: two people saving a payment in
@@ -489,6 +501,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             db()->prepare('UPDATE vouchers SET warehouse_id = :warehouse_id WHERE id = :id AND company_id = :company_id')
                 ->execute(['warehouse_id' => $warehouseId > 0 ? $warehouseId : null, 'id' => $voucherId, 'company_id' => $companyId]);
         }
+
+        voucher_billing_save($voucherId,$_POST,$entries);
+        db()->commit();
+        voucher_billing_notify($voucherId);
 
         // The goods follow the entry. Runs after the lines are stored because
         // it reads them back — and after the transaction, because a stock
@@ -944,7 +960,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                     $supportsServices = in_array($spec['key'], ['sales', 'credit_note'], true);
                     $hasExistingValues = !empty($prefill['values']);
                     $hasInventoryValues = count(array_filter($prefill['values'] ?? [], static fn (array $row): bool => (int) ($row['item_id'] ?? 0) > 0)) > 0;
-                    $tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? ($hasExistingValues && !$hasInventoryValues ? 'services' : 'goods')) : 'goods';
+                    $tradeMode = $supportsServices ? (string) ($prefill['trade_mode'] ?? (($hasExistingValues && !$hasInventoryValues) || (!$hasExistingValues && $type === 'sales' && voucher_billing_group($companyId)) ? 'services' : 'goods')) : 'goods';
                 ?>
                 <label><span><?= $supportsServices ? 'Sales category' : 'Purchase category' ?></span>
                     <select name="trade_mode" id="vch-trade-mode">
@@ -1000,6 +1016,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php if ($spec['layout'] === 'trade') include __DIR__ . '/../../app/views/vouchers/layout_trade.php'; ?>
         </section>
 
+        <?php include __DIR__ . '/../../app/views/vouchers/billing_selection.php'; ?>
         <?php if ($spec['layout'] !== 'trade') include __DIR__ . '/../../app/views/vouchers/layout_' . $spec['layout'] . '.php'; ?>
 
         <section class="mbw-card frm-section vch-support-card">

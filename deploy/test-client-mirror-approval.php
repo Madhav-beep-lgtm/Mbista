@@ -5,6 +5,7 @@ class MirrorTestDb extends PDO {
 }
 $pdo = new MirrorTestDb('sqlite::memory:');
 $pdo->setAttribute(PDO::ATTR_ERRMODE,PDO::ERRMODE_EXCEPTION);
+$pdo->exec('CREATE TABLE companies(id INTEGER PRIMARY KEY); INSERT INTO companies VALUES(10),(20)');
 function db(): PDO { global $pdo; return $pdo; }
 $capable = true; $locked = false;
 function client_portal_capability(string $capability): bool { global $capable; return $capable; }

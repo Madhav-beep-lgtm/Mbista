@@ -3788,11 +3788,11 @@ function create_voucher_with_entries(array $voucher, array $entries): int
         $extraValues .= ', :reference_no';
         $params['reference_no'] = $voucher['reference_no'] ?? null;
     }
-    foreach (['approval_state', 'submitted_by', 'approved_by', 'approved_at', 'rejection_reason', 'bill_details_json'] as $approvalColumn) {
+    foreach (['approval_state', 'submitted_by', 'approved_by', 'approved_at', 'rejection_reason', 'bill_details_json', 'requires_client_approval'] as $approvalColumn) {
         if (column_exists('vouchers', $approvalColumn)) {
             $extraColumns .= ', ' . $approvalColumn;
             $extraValues .= ', :' . $approvalColumn;
-            $params[$approvalColumn] = $voucher[$approvalColumn] ?? null;
+            $params[$approvalColumn] = $voucher[$approvalColumn] ?? ($approvalColumn === 'requires_client_approval' ? 0 : null);
         }
     }
     // approval_state is NOT NULL: default it from the posting status when the
@@ -4072,6 +4072,9 @@ function voucher_prime_mutation_checks(array $voucherIds): void
  */
 function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []): ?string
 {
+    if (function_exists('voucher_billing_link') && !empty(voucher_billing_link((int)($voucher['id'] ?? 0))['document_id'])) {
+        return 'This voucher has an issued invoice or allocated receipt. Correct it with a linked adjustment rather than changing the original journal.';
+    }
     if (function_exists('is_client_mirror_voucher') && is_client_mirror_voucher($voucher)) {
         return 'Client mirror entries cannot be edited or reposted here. The client must accept or reject the original entry in their approval queue.';
     }
@@ -4809,6 +4812,11 @@ function invoice_issue_inventory_stock(int $invoiceId, ?int $actorId = null): ar
  */
 function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): ?string
 {
+    if (table_exists('voucher_billing')) {
+        $linked = db()->prepare("SELECT voucher_id FROM voucher_billing WHERE kind='sales' AND document_id=?");
+        $linked->execute([$invoiceId]);
+        if ($linked->fetchColumn()) return null;
+    }
     if (!table_exists('vouchers') || !table_exists('voucher_entries') || !table_exists('ledgers')) {
         return null;
     }
@@ -4999,6 +5007,11 @@ function auto_post_task_invoice_voucher(int $invoiceId, ?int $actorId = null): ?
 
 function auto_post_invoice_payment_voucher(int $paymentRequestId, ?int $actorId = null): void
 {
+    if (column_exists('invoice_payment_requests','source_voucher_id')) {
+        $linked = db()->prepare('SELECT source_voucher_id FROM invoice_payment_requests WHERE id=?');
+        $linked->execute([$paymentRequestId]);
+        if ($linked->fetchColumn()) return;
+    }
     if (!table_exists('vouchers') || !table_exists('voucher_entries') || !table_exists('ledgers') || !table_exists('invoice_payment_requests')) {
         return;
     }
@@ -5322,6 +5335,7 @@ function client_mirror_voucher_exists(string $sourceType, int $sourceId): bool
 /** Inserts the mirror voucher as draft/pending, flagged for client approval. */
 function client_mirror_create_voucher(array $target, string $sourceType, int $sourceId, string $voucherType, string $voucherNo, string $voucherDate, string $narration, float $totalAmount, array $entries, ?int $actorId): void
 {
+    if (!column_exists('vouchers','requires_client_approval')) throw new RuntimeException('Client approval migration is required.');
     $voucherId = create_voucher_with_entries([
         'company_id' => (int) $target['books_company_id'],
         'fiscal_year_id' => (int) $target['fiscal_year_id'],
@@ -5334,6 +5348,7 @@ function client_mirror_create_voucher(array $target, string $sourceType, int $so
         'total_amount' => $totalAmount,
         'status' => 'draft',
         'approval_state' => 'pending_approval',
+        'requires_client_approval' => 1,
         'submitted_by' => $actorId,
     ], $entries);
 
@@ -5468,10 +5483,10 @@ function auto_post_client_mirror_payment(int $paymentRequestId, ?int $actorId = 
             $target,
             'client_mirror_payment',
             $paymentRequestId,
-            'payment',
+            'journal',
             'PP-' . date('Ymd') . '-' . str_pad((string) $paymentRequestId, 6, '0', STR_PAD_LEFT),
             (string) ($payment['payment_received_on'] ?? date('Y-m-d')),
-            'Payment for provider invoice ' . ($payment['invoice_no'] ?? '#' . (int) $payment['invoice_id']) . ' — awaiting your approval',
+            'Payment for provider invoice ' . ($payment['invoice_no'] ?? '#' . (int) $payment['invoice_id']) . ' — ' . (string)($payment['notes'] ?? ''),
             $amount,
             [
                 ['ledger_id' => (int) $payableLedger['id'], 'entry_type' => 'debit', 'amount' => $amount, 'memo' => 'Payable settled — ' . $target['provider_name']],
