@@ -171,6 +171,8 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                                 <input type="hidden" name="company_id" value="<?= $companyId ?>">
                                 <button type="submit" class="button secondary">Open books</button>
                             </form>
+                            <a class="button secondary" href="<?= e(url('platform/company-modules.php?company_id=' . $companyId)) ?>">Modules</a>
+                            <a class="button secondary" href="<?= e(url('platform/company-settings.php?company_id=' . $companyId)) ?>">Company details</a>
                             <?php if (!$servingCompany && $clientCount > 0): ?>
                                 <a class="button secondary" href="<?= e(url('platform/index.php?serving=' . $companyId)) ?>">Open companies</a>
                             <?php endif; ?>

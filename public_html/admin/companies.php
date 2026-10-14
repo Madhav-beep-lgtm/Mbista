@@ -233,7 +233,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             <?php endif; ?>
             <?php foreach ($companies as $company): ?>
                 <tr>
-                    <td><a href="<?= e(url('platform/company-settings.php?company_id=' . (int)$company['id'])) ?>">#<?= e((int) $company['id']) ?> · Settings</a></td>
+                    <td><a href="<?= e(url('platform/company-settings.php?company_id=' . (int)$company['id'])) ?>">#<?= e((int) $company['id']) ?> · Settings</a> <a class="button secondary" href="<?= e(url('platform/company-modules.php?company_id=' . (int)$company['id'])) ?>">Modules</a></td>
                     <td><?= e($company['name']) ?></td>
                     <td><?= e($company['code']) ?></td>
                     <?php if ($parentColumnExists): ?>

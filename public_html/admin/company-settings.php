@@ -19,9 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     try {
         $action = (string)($_POST['action'] ?? '');
-        if ($action === 'modules') {
-            company_modules_save($settingsCompanyId, (array)($_POST['modules'] ?? []));
-        } elseif ($action === 'fiscal_year') {
+        if ($action === 'fiscal_year') {
             $result = create_fiscal_year($settingsCompanyId, trim((string)($_POST['label'] ?? '')), (string)($_POST['start_date'] ?? ''), (string)($_POST['end_date'] ?? ''), isset($_POST['is_default']), (int)current_user()['id']);
             if (!$result['ok']) throw new RuntimeException($result['error']);
         } elseif ($action === 'default_year') {
@@ -86,16 +84,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
   <div class="company-form-actions">
   <?php if (!empty($companyProfile['logo_path'])): ?><img class="company-logo-preview" src="<?= e(url($companyProfile['logo_path'])) ?>" alt="Company logo" width="96" height="64"><?php endif; ?>
   <button class="button" type="submit">Save details</button></div>
- </form>
-</section>
-<section class="mbw-card">
- <div class="mbw-card-head"><h2>Optional modules</h2></div>
- <form method="post" class="workspace-form-grid">
-  <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="modules">
-  <?php foreach (company_optional_modules() as $key=>$label): ?>
-   <label class="company-module-option"><input type="checkbox" name="modules[]" value="<?= e($key) ?>" <?= company_module_enabled($key,$settingsCompanyId) ? 'checked' : '' ?> <?= user_is_super_admin() ? '' : 'disabled' ?>> <?= e($label) ?></label>
-  <?php endforeach; ?>
-  <div class="company-form-actions"><?php if (user_is_super_admin()): ?><button class="button" type="submit">Save modules</button><?php else: ?><p>Module access is managed by the super admin.</p><?php endif; ?></div>
  </form>
 </section>
 <section class="mbw-card">

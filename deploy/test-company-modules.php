@@ -26,3 +26,13 @@ check(company_route_module('fixed-assets.php',['view'=>'leases','action'=>'creat
 foreach (['salary-sheet','payroll-posting','consolidated-tax-report','overtime-report'] as $key) check(company_report_module($key) === 'payroll',$key);
 check(company_route_module('reports-center.php',['report'=>'stock-ledger']) === 'inventory','Reports protected');
 echo "Company module isolation, authority and route checks passed.\n";
+$tenantSettings = file_get_contents(__DIR__ . '/../public_html/admin/company-settings.php');
+check(!str_contains($tenantSettings, 'company_modules_save('), 'Tenant settings cannot save module limits');
+check(!str_contains($tenantSettings, 'name="modules[]"'), 'Tenant settings contain no module controls');
+$platformModules = file_get_contents(__DIR__ . '/../public_html/platform/company-modules.php');
+check(str_contains($platformModules, 'if (!user_is_super_admin()) deny_access('), 'Platform module route requires super admin');
+check(str_contains($platformModules, 'verify_csrf();'), 'Platform module changes require CSRF');
+check(!str_contains($platformModules, 'set_context(') && !str_contains($platformModules, 'handle_company_switch('), 'Module management never switches tenant context');
+$directory = file_get_contents(__DIR__ . '/../public_html/platform/index.php');
+check(str_contains($directory, 'platform/company-modules.php?company_id='), 'Company directory exposes module management');
+echo "Platform-only module controls and tenant separation checks passed.\n";
