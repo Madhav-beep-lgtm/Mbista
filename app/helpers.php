@@ -1300,6 +1300,7 @@ function all_settings(): array
 function update_settings(array $settings, int $companyId = 0): void
 {
     foreach (array_keys($settings) as $key) {
+        if ($key === 'company_license' && (!user_is_super_admin() || $companyId <= 0)) throw new RuntimeException('Only the super admin can manage licensing.');
         if (str_starts_with((string)$key, 'company_module_') && (!user_is_super_admin() || $companyId <= 0)) throw new RuntimeException('Only the super admin can change company modules.');
     }
     $companyId = max(0, $companyId);
@@ -2021,6 +2022,7 @@ function update_company_pin(int $companyId, string $pin): bool
 
 function activate_company_context(int $companyId, bool $markVerified = false): bool
 {
+    company_license_require($companyId);
     $company = company_by_id($companyId);
     if (!$company || (int) ($company['is_active'] ?? 0) !== 1 || !table_exists('fiscal_years')) {
         return false;
@@ -2279,7 +2281,7 @@ function login_user(string $email, string $password, string $companyCode = ''): 
     // else's organization. A new identity always starts with no tenant context.
     clear_company_pin_verification();
     clear_selected_company();
-    unset($_SESSION['company_id'], $_SESSION['fiscal_year_id']);
+    unset($_SESSION['company_id'], $_SESSION['fiscal_year_id'], $_SESSION['license_company_id']);
 
     $_SESSION['user_id'] = (int) $user['id'];
     $_SESSION['auth_issued_at'] = time();

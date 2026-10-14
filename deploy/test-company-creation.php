@@ -9,7 +9,7 @@ check(str_contains($source,'if (!user_is_super_admin()) deny_access('),'Super ad
 check(str_contains($source,"WHERE code = ? LIMIT 1"),'Duplicate code validation');
 check(str_contains($source,'FILTER_VALIDATE_EMAIL'),'Email validation');
 check(str_contains($source,'db()->beginTransaction();') && str_contains($source,'db()->rollBack();'),'Atomic company/details writes');
-check(str_contains($source,"redirect('platform/index.php');"),'Returns to company directory');
+check(str_contains($source,"redirect('platform/company-management.php');"),'Returns to company management with generated license');
 check(str_contains($source,"'periodic'"),'Periodic inventory default retained');
 check(!str_contains($source,'DELETE FROM'),'No existing data deleted');
 $settings = file_get_contents(__DIR__ . '/../public_html/admin/company-settings.php');

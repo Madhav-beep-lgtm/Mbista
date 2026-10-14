@@ -5,8 +5,5 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../app/bootstrap.php';
 require_admin();
 
-$platformReturnTo = 'platform/clients.php';
-require __DIR__ . '/_firm_context.php';
-
-$platformShell = true;
-require __DIR__ . '/../admin/manage-clients.php';
+if (!user_is_super_admin()) deny_access('Super admin required.');
+redirect('platform/company-management.php');

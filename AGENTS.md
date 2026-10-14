@@ -4,6 +4,8 @@
 
 These are the user's standing preferences for changes across this app:
 
+- Company licensing is controlled only from Platform Company Management. New companies receive a random company-bound license key, displayed once to Super Admin and stored hashed. Company owner/admin must activate it before opening books. Inactive/expired/unactivated companies are blocked server-side, including existing sessions; Super Admin retains recovery access. Renewal extends an explicitly chosen expiry date and must not bypass first activation.
+
 - Keep View, Accounts/search, Filter, Clear, Upload, Export and Create actions in a compact horizontal toolbar. Use narrow fields, aligned control heights and responsive wrapping on small screens.
 - Use an upload-icon dropdown containing Upload and Download template. Upload selects a file and opens a preview; preserve validation, permissions, CSRF protection and explicit import confirmation.
 - Presentation exports should be formatted Excel reports, not plain CSV: company name, company address, active fiscal year, report heading, Status where applicable, full table borders, bold group rows, readable column widths and repeating print headings. Preserve CSV separately where needed for data interchange.

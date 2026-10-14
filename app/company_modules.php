@@ -54,6 +54,7 @@ function company_route_module(string $script, array $query = []): ?string
 
 function company_modules_enforce_request(): void
 {
+    company_license_enforce_request();
     if (PHP_SAPI === 'cli' || str_contains((string)($_SERVER['SCRIPT_NAME'] ?? ''), '/platform/')) return;
     foreach ([$_GET, $_POST + $_GET] as $query) {
         $module = company_route_module((string)($_SERVER['SCRIPT_NAME'] ?? ''), $query);

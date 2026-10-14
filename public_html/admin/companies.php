@@ -21,6 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (($_POST['action'] ?? '') !== 'create_company') throw new RuntimeException('Only company creation is available here.');
         $onboarding = company_onboarding_values($_POST);
+        $licenseExpiry = company_license_expiry((string)($_POST['license_expires'] ?? ''));
         if (!column_exists('users','must_change_password')) throw new RuntimeException('Deploy the database updates before creating a company user.');
         if (user_by_email($onboarding['email'])) throw new RuntimeException('That user email is already registered.');
         if (mb_strlen($values['office_address']) > 255 || mb_strlen($values['registered_address']) > 255 || mb_strlen($values['support_phone']) > 60) throw new RuntimeException('Address or phone is too long.');
@@ -45,10 +46,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         update_settings(['site_name'=>$values['name'],'support_email'=>$values['support_email'],'support_phone'=>$values['support_phone'],'office_address'=>$values['office_address']],$companyId);
         update_settings(['company_pan'=>$onboarding['pan'],'registered_address'=>$values['registered_address']],$companyId);
         company_onboarding_save($companyId,$values,$onboarding,(int)current_user()['id']);
+        $licenseKey = company_license_issue($companyId,$licenseExpiry);
         db()->commit();
+        $_SESSION['issued_company_license'] = ['company_id'=>$companyId,'key'=>$licenseKey];
         log_activity('company',$companyId,'created','Company created from platform workflow.',(int)current_user()['id']);
         flash('success','Company and first user created. The user must change their temporary password at first login.');
-        redirect('platform/index.php');
+        redirect('platform/company-management.php');
     } catch (Throwable $exception) {
         if (db()->inTransaction()) db()->rollBack();
         flash('error',$exception instanceof PDOException ? 'Could not create company and user. No changes were saved. Check the company code and user email are unique.' : $exception->getMessage());
@@ -68,6 +71,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
   <?php if ($parentColumnExists): ?><label>Company group<select name="parent_company_id"><option value="">Independent company</option><?php foreach ($groupCompanies as $parent): ?><option value="<?= (int)$parent['id'] ?>" <?= (string)$parent['id'] === $values['parent_company_id'] ? 'selected' : '' ?>><?= e($parent['name']) ?></option><?php endforeach; ?></select></label><?php endif; ?>
   <label class="company-full-width">Address<input name="office_address" autocomplete="street-address" value="<?= e($values['office_address']) ?>"></label>
   <label>PAN<input name="company_pan" maxlength="60" value="<?= e($values['company_pan']) ?>"></label>
+  <label>License expiry date<input type="date" name="license_expires" required value="<?= e($_POST['license_expires'] ?? '') ?>"></label>
   <label class="workspace-span-2">Registered address<input name="registered_address" maxlength="255" value="<?= e($values['registered_address']) ?>"></label>
   <fieldset class="company-full-width"><legend>Bank accounts</legend><div id="company-bank-rows">
    <?php $bankRows = isset($_POST['banks']) && is_array($_POST['banks']) ? array_values(array_filter(array_slice($_POST['banks'],0,20),'is_array')) : []; if (!$bankRows) $bankRows = [[]]; foreach ($bankRows as $index=>$bank): ?>

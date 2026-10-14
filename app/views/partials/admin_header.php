@@ -333,7 +333,7 @@ if (($currentUser['role'] ?? '') === 'admin' && table_exists('client_profiles') 
             ?>
             <span class="admin-nav-group">Platform</span>
             <a class="<?= in_array($headerScript, ['index.php', 'companies.php'], true) ? 'is-active' : '' ?>" href="<?= e(url('platform/index.php')) ?>"><?= icon('companies') ?>Companies</a>
-            <a class="<?= $headerScript === 'clients.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/clients.php')) ?>"><?= icon('clients') ?>Clients</a>
+            <a class="<?= in_array($headerScript,['clients.php','company-management.php'],true) ? 'is-active' : '' ?>" href="<?= e(url('platform/company-management.php')) ?>"><?= icon('companies') ?>Company Management</a>
             <a class="<?= $headerScript === 'staff.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/staff.php')) ?>"><?= icon('users') ?>Staff</a>
             <a class="<?= $headerScript === 'work.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/work.php')) ?>"><?= icon('tasks') ?>Work Portal</a>
             <a class="<?= $headerScript === 'insights.php' ? 'is-active' : '' ?>" href="<?= e(url('platform/insights.php')) ?>"><?= icon('insights') ?>Website Insights</a>
