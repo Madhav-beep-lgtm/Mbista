@@ -17,6 +17,7 @@ if (!$company || !$fiscalYear) {
     redirect('admin/accounting-dashboard.php');
 }
 $companyId = (int) $company['id'];
+$isJewellery = company_business_type($companyId) === 'jewellery' && company_module_enabled('jewellery');
 $userId = (int) (current_user()['id'] ?? 0);
 $sym = site_currency_symbol();
 $fyStart = (string) $fiscalYear['start_date'];
@@ -205,6 +206,10 @@ $filters = [
     'ledger_id' => (int) ($_GET['ledger'] ?? 0),
 ];
 // Arriving from a GL ledger ("items behind this balance") groups by ledger so
+if (!$isJewellery) {
+    $filters['jewellery_stock_kind'] = '';
+    if ($filters['group_by'] === 'stock_kind') $filters['group_by'] = '';
+}
 // the subtotal that must equal the trial-balance line is immediately visible.
 if ($filters['ledger_id'] > 0 && $filters['group_by'] === '') {
     $filters['group_by'] = 'ledger';
@@ -456,8 +461,8 @@ $allItems = $allItemsStmt->fetchAll();
 
 $pageTitle = 'Inventory Summary';
 $pageSubtitle = 'Item-wise stock movement and valuation — opening, inward, outward, damage, and closing for the selected period and locations.';
-$pageHero = ['icon' => 'inventory'];
-$bodyClass = 'admin-layout accounting-module-page';
+$pageHero = false;
+$bodyClass = 'admin-layout accounting-module-page stock-summary-page';
 include __DIR__ . '/../../app/views/partials/admin_header.php';
 
 // A POSTING PURPOSE POINTED AT THE WRONG KIND OF ACCOUNT does not announce
@@ -472,11 +477,10 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
 ?>
 <?php if ($mappingGaps !== []): ?>
 <div class="notice error" role="alert" style="margin-bottom:12px">
-    <strong>Stock is posting to the wrong kind of account.</strong>
-    <p style="margin:6px 0">Purchases are charging to the profit and loss and the balance sheet carries no inventory.
-       Nothing below has been changed. Fix the mapping in
-       <a href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>">Inventory &rarr; Ledger mapping</a>,
-       then decide separately what to do about what is already posted.</p>
+    <strong>Ledger mappings need review.</strong>
+    <p style="margin:6px 0">Review the account types below in
+       <a href="<?= e(url('admin/accounting-inventory.php?view=mapping')) ?>">Ledger mapping</a>.
+       Existing entries have not been changed.</p>
     <ul style="margin:6px 0 0 18px">
         <?php foreach ($mappingGaps as $gap): ?>
             <li>
@@ -494,9 +498,9 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
 <?php endif; ?>
 <section class="mbw-card" aria-label="Stock summary filters">
     <div class="mbw-card-head">
-        <h2><?= icon('inventory') ?>Stock Summary Report</h2>
+        <h2><?= icon('inventory') ?>Inventory Summary</h2>
         <div class="mbw-card-tools">
-            <span class="mbw-pill tone-blue"><?= e((string) $fiscalYear['label']) ?> · <?= e($from) ?> → <?= e($to) ?></span>
+            <span class="mbw-pill tone-blue"><?= e((string) $fiscalYear['label']) ?></span>
             <?php if ($filters['ledger_id'] > 0): ?>
                 <?php $filterLedgerStmt = db()->prepare('SELECT code, name FROM ledgers WHERE id = :id AND company_id = :cid'); $filterLedgerStmt->execute(['id' => $filters['ledger_id'], 'cid' => $companyId]); $filterLedger = $filterLedgerStmt->fetch(); ?>
                 <span class="mbw-pill tone-amber">Ledger: <?= e((string) ($filterLedger['code'] ?? ('#' . $filters['ledger_id']))) ?>
@@ -505,11 +509,11 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
             <a class="mbw-view-all" href="<?= e(url('admin/stock-summary-report.php?' . $qs)) ?>" title="Refresh with the same filters">&#8635; Refresh</a>
         </div>
     </div>
-    <form method="get" class="workspace-form-grid">
+    <form method="get" class="workspace-form-grid ssr-filter-grid">
         <input type="hidden" name="applied" value="1">
-        <label>From (inside <?= e((string) $fiscalYear['label']) ?>)<input type="date" name="from" value="<?= e($from) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
+        <label>From<input type="date" name="from" value="<?= e($from) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
         <label>To<input type="date" name="to" value="<?= e($to) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-        <label>Search (code / name)<input type="search" name="q" value="<?= e($filters['search']) ?>" placeholder="ITM- or name"></label>
+        <label>Search<input type="search" name="q" value="<?= e($filters['search']) ?>" placeholder="Code or name"></label>
         <label>Item types
             <details class="ssr-msel">
                 <summary><?= $filters['types'] === [] ? 'All types' : count($filters['types']) . ' selected' ?></summary>
@@ -547,20 +551,20 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
                 <option value="negative" <?= $filters['stock_status'] === 'negative' ? 'selected' : '' ?>>Negative stock</option>
             </select>
         </label>
-        <label>Jewellery stock type
+        <?php if ($isJewellery): ?><label>Jewellery stock type
             <select name="jewellery_stock_kind">
                 <option value="">All stock types</option>
                 <option value="showroom" <?= $filters['jewellery_stock_kind'] === 'showroom' ? 'selected' : '' ?>>Showroom Stock</option>
                 <option value="customer_ordered" <?= $filters['jewellery_stock_kind'] === 'customer_ordered' ? 'selected' : '' ?>>Customer Ordered Stock</option>
             </select>
         </label>
-        <label>Group by
+        <?php endif; ?><label>Group by
             <select name="group_by">
                 <option value="">Item (code order)</option>
                 <option value="type" <?= $filters['group_by'] === 'type' ? 'selected' : '' ?>>Item type</option>
                 <option value="valuation" <?= $filters['group_by'] === 'valuation' ? 'selected' : '' ?>>Valuation method</option>
-                <option value="ledger" <?= $filters['group_by'] === 'ledger' ? 'selected' : '' ?>>GL ledger (ties to trial balance)</option>
-                <option value="stock_kind" <?= $filters['group_by'] === 'stock_kind' ? 'selected' : '' ?>>Jewellery stock type</option>
+                <option value="ledger" <?= $filters['group_by'] === 'ledger' ? 'selected' : '' ?>>Ledger</option>
+                <?php if ($isJewellery): ?><option value="stock_kind" <?= $filters['group_by'] === 'stock_kind' ? 'selected' : '' ?>>Jewellery stock type</option><?php endif; ?>
             </select>
         </label>
         <?php if ($filters['ledger_id'] > 0): ?>
@@ -575,7 +579,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
             </select>
         </label>
         <div style="display:flex;gap:8px;align-items:flex-end">
-            <button type="submit"><?= icon('search') ?>Apply Filters</button>
+            <button type="submit" class="button"><?= icon('search') ?>Apply</button>
             <a class="button secondary" href="<?= e(url('admin/stock-summary-report.php')) ?>">Reset</a>
         </div>
     </form>
@@ -606,26 +610,25 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
 
 <section class="mbw-card" aria-label="Counted closing stock">
     <div class="mbw-card-head">
-        <h2><?= icon('inventory') ?>Counted closing stock — punch what is actually on the shelf</h2>
+        <h2><?= icon('inventory') ?>Physical Count</h2>
         <div class="mbw-card-tools">
-            <span class="mbw-pill tone-blue">Count date <?= e($to) ?><?= $countReady ? ' · ' . e($countScopeLabel) : '' ?></span>
+            <span class="mbw-pill tone-blue"><?= e(app_date($to)) ?><?= $countReady ? ' · ' . e($countScopeLabel) : '' ?></span>
         </div>
     </div>
     <?php if (!sc_table_ready()): ?>
         
     <?php elseif ($countScope === null): ?>
         <p style="margin:0;color:var(--mbw-muted);font-size:12.5px">
-            <?= count($filters['warehouse_ids']) ?> locations are selected. A count is taken at ONE place — pick a single location,
-            or clear the filter to count the whole company, and the <strong>Counted Qty</strong> column appears in the sheet below.
+            Select one location or all locations to enter physical counts.
         </p>
     <?php else: ?>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <span class="mbw-pill <?= $countSummary['open'] > 0 ? 'tone-amber' : 'tone-blue' ?>"><?= (int) $countSummary['open'] ?> punched, not posted</span>
+            <span class="mbw-pill <?= $countSummary['open'] > 0 ? 'tone-amber' : 'tone-blue' ?>"><?= (int) $countSummary['open'] ?> pending</span>
             <?php if ($countSummary['shortfall_qty'] > 0): ?>
-                <span class="mbw-pill tone-red">Short on the shelf — <?= e($sym . number_format($countSummary['shortfall_value'], 2)) ?> to charge</span>
+                <span class="mbw-pill tone-red">Shortfall <?= e($sym . number_format($countSummary['shortfall_value'], 2)) ?></span>
             <?php endif; ?>
             <?php if ($countSummary['surplus_qty'] > 0): ?>
-                <span class="mbw-pill tone-green">Found over — <?= e($sym . number_format($countSummary['surplus_value'], 2)) ?> to credit back</span>
+                <span class="mbw-pill tone-green">Surplus <?= e($sym . number_format($countSummary['surplus_value'], 2)) ?></span>
             <?php endif; ?>
             <?php if ($countSummary['posted'] > 0): ?>
                 <span class="mbw-pill tone-green"><?= (int) $countSummary['posted'] ?> posted
@@ -645,17 +648,15 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
                     <option value="inventory_loss">Inventory Loss — it was broken, spoiled or stolen</option>
                 </select>
             </label>
-            <button type="submit"><?= icon('badge-check') ?>Post counted closing stock (<?= (int) $countSummary['open'] ?>)</button>
+            <button type="submit" class="button"><?= icon('badge-check') ?>Post counts (<?= (int) $countSummary['open'] ?>)</button>
         </form>
         <p style="margin:8px 0 0;color:var(--mbw-muted);font-size:12px">
-            This posts every count punched for <?= e($to) ?> at <?= e($countScopeLabel) ?>, including rows the current filters keep off the screen.
-            Stock found over the books is posted inward at carrying cost, crediting the same account.
-            An item with unmapped ledgers is left unposted, with its reason.
+            Posts all pending counts for <?= e(app_date($to)) ?> at <?= e($countScopeLabel) ?>, including filtered-out items. Items with missing ledger mappings remain pending.
         </p>
         <?php elseif (!$canPostCount): ?>
         
         <?php else: ?>
-        <p style="margin:0;color:var(--mbw-muted);font-size:12px">Nothing is waiting to be posted for <?= e($to) ?>. Enter a counted quantity in the sheet below to post one.</p>
+        <p style="margin:0;color:var(--mbw-muted);font-size:12px">No pending counts.</p>
         <?php endif; ?>
     <?php endif; ?>
 </section>
@@ -714,7 +715,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
         </thead>
         <tbody>
             <?php if ($pageRows === []): ?>
-                <tr><td colspan="<?= 27 + $jwCount ?>" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the filters for <?= e($from) ?> → <?= e($to) ?>.</td></tr>
+                <tr><td colspan="<?= 27 + $jwCount ?>" style="text-align:center;color:var(--mbw-muted);padding:24px">No items match the selected filters.</td></tr>
             <?php endif; ?>
             <?php
             // Per-GL-ledger subtotals when grouped by ledger — each subtotal is
@@ -839,7 +840,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
             <?php endforeach; ?>
             <?php if ($rows !== []): ?>
             <tr class="ssr-totals">
-                <td colspan="6">Totals — amounts only (quantities of different units are never combined)</td>
+                <td colspan="6">Total value</td>
                 <td colspan="2" class="grp-open"></td><td class="is-numeric grp-open"><?= e($sym . number_format($totals['opening_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-in"></td><td class="is-numeric grp-in"><?= e($sym . number_format($totals['in_amount'], 2)) ?></td>
                 <td colspan="2" class="grp-out"></td><td class="is-numeric grp-out"><?= e($sym . number_format($totals['out_amount'], 2)) ?></td>
@@ -859,18 +860,14 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
     </div>
     <?php if ($canPunchCount): ?>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px">
-            <button type="submit"><?= icon('badge-check') ?>Save counted quantities</button>
-            <small style="color:var(--mbw-muted)">
-                Saves the whole page of counts for <strong><?= e($to) ?></strong> at <strong><?= e($countScopeLabel) ?></strong>.
-                An empty box takes that item back off the sheet; <strong>0</strong> means the shelf is empty and is counted as such.
-                Saving records the count only &mdash; the books are unchanged until it is posted above.
-            </small>
+            <?php if ($rows !== []): ?><button type="submit" class="button secondary"><?= icon('badge-check') ?>Save counts</button>
+            <small>Draft only. Post counts to update stock and accounts.</small><?php endif; ?>
         </div>
     </form>
     <?php endif; ?>
     <nav class="ssr-pagination" aria-label="Stock summary pages">
         <div class="ssr-pagination-summary">
-            Showing <strong><?= $showingFrom ?>â€“<?= $showingTo ?></strong> of <strong><?= $rowCount ?></strong> records
+            <strong><?= $showingFrom ?>&ndash;<?= $showingTo ?></strong> of <strong><?= $rowCount ?></strong> items
         </div>
         <?php if ($pageCount > 1): ?>
             <?php
@@ -890,11 +887,11 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
                     <a href="<?= e($pageUrl($page - 1)) ?>" aria-label="Previous page">&lsaquo; Previous</a>
                 <?php endif; ?>
                 <a class="<?= $page === 1 ? 'is-active' : '' ?>" href="<?= e($pageUrl(1)) ?>" <?= $page === 1 ? 'aria-current="page"' : '' ?>>1</a>
-                <?php if ($windowStart > 2): ?><span class="ssr-pagination-gap">â€¦</span><?php endif; ?>
+                <?php if ($windowStart > 2): ?><span class="ssr-pagination-gap">&hellip;</span><?php endif; ?>
                 <?php for ($p = $windowStart; $p <= $windowEnd; $p++): ?>
                     <a class="<?= $p === $page ? 'is-active' : '' ?>" href="<?= e($pageUrl($p)) ?>" <?= $p === $page ? 'aria-current="page"' : '' ?>><?= $p ?></a>
                 <?php endfor; ?>
-                <?php if ($windowEnd < $pageCount - 1): ?><span class="ssr-pagination-gap">â€¦</span><?php endif; ?>
+                <?php if ($windowEnd < $pageCount - 1): ?><span class="ssr-pagination-gap">&hellip;</span><?php endif; ?>
                 <a class="<?= $page === $pageCount ? 'is-active' : '' ?>" href="<?= e($pageUrl($pageCount)) ?>" <?= $page === $pageCount ? 'aria-current="page"' : '' ?>><?= $pageCount ?></a>
                 <?php if ($page < $pageCount): ?>
                     <a href="<?= e($pageUrl($page + 1)) ?>" aria-label="Next page">Next &rsaquo;</a>
@@ -922,12 +919,12 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
             </form>
         <?php endif; ?>
     </nav>
-    <p style="margin:10px 0 0;color:var(--mbw-muted);font-size:12px">
+    <details class="ssr-instructions"><summary>Report instructions</summary><p>
         Outward and damage amounts are inventory <strong>cost</strong>, not selling price. Damage rows are excluded from outward.
-        Closing = opening + inward − outward − damage, valued from the remaining cost layers as at <?= e($to) ?>.
+        Closing = opening + inward − outward − damage, valued from the remaining cost layers as at <?= e(app_date($to)) ?>.
         Warehouse amounts value per-location quantities at company-level carrying cost.
         <strong>Physical Count</strong> changes nothing until posted; once posted, closing equals the counted quantity and the difference is charged as cost.
-    </p>
+    </p><p>Save counts records the current page only. A blank quantity removes a draft count; zero records an empty balance. Posting includes all pending counts for the selected date and location, including filtered-out items.</p></details>
 </section>
 
 <?php if (user_can_do('accounting', 'post')):
@@ -940,7 +937,7 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
 ?>
 <section class="mbw-card" aria-label="Reconcile stock to general ledger">
     <div class="mbw-card-head">
-        <h2><?= icon('reconcile') ?>Reconcile Stock ↔ General Ledger</h2>
+        <h2><?= icon('reconcile') ?>Stock Reconciliation</h2>
         <div class="mbw-card-tools">
             <span class="mbw-pill <?= abs($glDiff) < 0.01 ? 'tone-green' : 'tone-red' ?>">
                 Stock <?= e($sym . number_format($subNow, 2)) ?> vs GL <?= e($sym . number_format($glNow, 2)) ?><?= abs($glDiff) < 0.01 ? ' — matched' : ' — off by ' . e($sym . number_format($glDiff, 2)) ?>
@@ -964,15 +961,16 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
                 <input type="checkbox" name="zero_direct_openings" style="width:auto;min-height:auto">
                 Also zero direct openings typed on inventory GL ledgers (reversible from Opening Balances)
             </label>
-            <button type="submit"><?= icon('badge-check') ?>Reconcile now</button>
+            <button type="submit" class="button secondary"><?= icon('badge-check') ?>Reconcile now</button>
         </form>
         
     <?php endif; ?>
 </section>
 <?php endif; ?>
 
-<section class="mbw-card" aria-label="Location-specific item types">
-    <div class="mbw-card-head"><h2><?= icon('sliders') ?>Item type by department / location</h2></div>
+<?php if (user_can_do('inventory', 'edit') && $allItems !== [] && $warehouses !== []): ?>
+<details class="mbw-card ssr-location-settings" aria-label="Location-specific item types">
+    <summary>Location item types</summary>
     
     <?php if (user_can_do('inventory', 'edit')): ?>
     <form method="post" class="workspace-form-grid">
@@ -998,10 +996,11 @@ $mappingGaps = inventory_mapping_nature_gaps($companyId);
                 <?php endforeach; ?>
             </select>
         </label>
-        <div style="display:flex;align-items:flex-end"><button type="submit"><?= icon('badge-check') ?>Save mapping</button></div>
+        <div style="display:flex;align-items:flex-end"><button type="submit" class="button secondary"><?= icon('badge-check') ?>Save mapping</button></div>
     </form>
     <?php endif; ?>
-</section>
+ </details>
+<?php endif; ?>
 
 <style>
 /* The six column groups.

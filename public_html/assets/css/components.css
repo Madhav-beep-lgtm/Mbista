@@ -784,6 +784,14 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .voucher-type-purchase .frm-entry-totals { padding:10px 14px; border-radius:8px; background:var(--color-primary-soft); font-variant-numeric:tabular-nums; }
 .voucher-type-purchase .frm-footer { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; padding:14px 20px; border-radius:12px; }
 .voucher-type-purchase .frm-footer > a { margin-right:auto; }
+.stock-summary-page .ssr-filter-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px 16px; }
+.stock-summary-page .ssr-filter-grid :is(input:not([type="checkbox"]),select,.ssr-msel > summary) { min-height:38px; height:38px; font-size:13px; }
+.stock-summary-page .mbw-card-head h2 { display:flex; align-items:center; gap:8px; font-size:17px; }
+.stock-summary-page .ssr-instructions { margin-top:14px; font-size:13px; color:var(--color-text-muted); }
+.stock-summary-page :is(.ssr-instructions,.ssr-location-settings) > summary { cursor:pointer; font-weight:600; color:var(--color-text); }
+.stock-summary-page .ssr-location-settings[open] > summary { margin-bottom:16px; }
+@media(max-width:1000px) { .stock-summary-page .ssr-filter-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:600px) { .stock-summary-page .ssr-filter-grid { grid-template-columns:1fr; } }
 .purchase-items-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
 .purchase-items-toolbar h2 { margin:0; font-size:16px; }
 .purchase-item-import { position:relative; }
