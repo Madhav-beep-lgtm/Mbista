@@ -2199,7 +2199,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Upload Daily Sales Sheet</h2></div>
+        <div class="mbw-card-head"><h2>Upload Daily Sales Sheet</h2><button type="button" class="button secondary" id="sales-upload-instructions-open" aria-haspopup="dialog" aria-controls="sales-upload-instructions">Instructions</button></div>
         <?php if (!$canPost): ?>
             <div class="notice error">You do not have permission to post sales (hospitality create permission needed).</div>
         <?php else: ?>
@@ -2217,6 +2217,9 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </div>
         </form>
         <?php endif; ?>
+    </section>
+        <dialog id="sales-upload-instructions" aria-labelledby="sales-upload-instructions-title" style="width:min(960px,calc(100vw - 32px));padding:20px">
+        <div class="mbw-card-head"><h2 id="sales-upload-instructions-title">Upload instructions</h2><button type="button" class="button secondary" id="sales-upload-instructions-close" autofocus>Close</button></div>
         <div style="overflow-x:auto;margin-top:10px"><table>
             <thead><tr><th>Column</th><th>Required</th><th>What it takes</th></tr></thead>
             <tbody>
@@ -2229,7 +2232,17 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 <tr><td>VAT</td><td>Optional</td><td>Overrides the rate-based calculation for that row.</td></tr>
             </tbody>
         </table></div>
-    </section>
+        </dialog>
+        <script>
+        (() => {
+            const dialog = document.getElementById('sales-upload-instructions');
+            const opener = document.getElementById('sales-upload-instructions-open');
+            const closer = document.getElementById('sales-upload-instructions-close');
+            opener.addEventListener('click', () => dialog.showModal());
+            closer.addEventListener('click', () => dialog.close());
+            dialog.addEventListener('close', () => opener.focus());
+        })();
+        </script>
 
     <?php
     // What used to be an Upload History is now a set of readings OF what was
