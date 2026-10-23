@@ -72,6 +72,25 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3);
 }
 .frm-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* Hospitality sales upload: compact controls, consistent action alignment. */
+.hosp-upload-heading { gap:12px; flex-wrap:wrap; }
+.hosp-upload-heading h2 { flex:1; min-width:180px; }
+.hosp-upload-heading > .button { margin-left:auto; }
+.hosp-upload-heading .mbw-card-toggle { margin-left:0; }
+.hosp-upload-toolbar { display:flex; align-items:flex-end; flex-wrap:wrap; gap:16px; }
+.hosp-workbook-field { flex:1 1 360px; min-width:0; max-width:640px; display:grid; gap:8px; }
+.hosp-workbook-field > span { display:flex; align-items:baseline; flex-wrap:wrap; gap:8px 16px; }
+.hosp-workbook-field small { color:var(--color-text-muted); font-weight:400; font-size:12px; }
+.hosp-workbook-field input[type="file"] { width:100%; min-width:0; height:44px; padding:5px 8px; box-sizing:border-box; }
+.hosp-workbook-field input::file-selector-button { padding:6px 12px; margin-right:12px; border:1px solid var(--color-border); border-radius:var(--radius-control); background:var(--color-surface); color:var(--color-text); font:inherit; cursor:pointer; }
+.hosp-upload-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.hosp-upload-actions .button,.hosp-sales-filters > .button { min-height:44px; white-space:nowrap; justify-content:center; }
+.hosp-sales-filters { display:grid; grid-template-columns:minmax(220px,320px) repeat(2,minmax(160px,200px)) max-content; gap:12px; align-items:end; margin-bottom:20px; }
+.hosp-sales-filters > label { display:grid; gap:8px; min-width:0; }
+.hosp-sales-filters input,.hosp-sales-filters select { width:100%; min-width:0; height:44px; box-sizing:border-box; }
+.hosp-sales-empty { padding:28px 16px; text-align:center; color:var(--color-text-muted); }
+@media(max-width:1000px) { .hosp-sales-filters { grid-template-columns:repeat(2,minmax(0,1fr)); } .hosp-workbook-field { max-width:none; } }
+@media(max-width:600px) { .hosp-sales-filters { grid-template-columns:minmax(0,1fr); } .hosp-upload-actions { width:100%; } .hosp-upload-actions .button { flex:1 1 180px; } .hosp-workbook-field { flex-basis:100%; } }
 .workspace-span-2, .span-2 { grid-column: span 2; }
 .workspace-form-grid > *, .frm-grid > * { min-width: 0; }
 .company-settings-page .company-module-option { display:flex; align-items:center; gap:10px; min-height:48px; padding:10px 12px; border:1px solid var(--color-border); border-radius:var(--radius-control); background:var(--color-surface); }

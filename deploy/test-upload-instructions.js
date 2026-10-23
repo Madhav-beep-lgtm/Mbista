@@ -12,6 +12,13 @@ for (const label of ['Date (AD or BS)', 'Category', 'Item', 'Qty', 'Total Sales 
 assert.equal(source.split('<th>What it takes</th>').length - 1, 1, 'No duplicated inline guide');
 assert.ok(source.includes('value="sales_upload_file"'), 'Upload action retained');
 assert.ok(source.includes('template=xlsx'), 'Template download retained');
+assert.ok(source.includes('class="hosp-upload-toolbar"'), 'Compact upload toolbar retained');
+assert.ok(source.includes('class="hosp-sales-filters"'), 'Report filters have a dedicated layout');
+assert.ok(source.includes('class="button"><?= icon(\'upload\') ?>Upload &amp; Preview'), 'Upload button uses shared styling');
+assert.ok(source.includes('e(app_date($reportFrom))'), 'Empty state respects selected date mode');
+const css = fs.readFileSync(path.join(__dirname, '../public_html/assets/css/components.css'), 'utf8');
+assert.ok(css.includes('.hosp-upload-heading > .button { margin-left:auto; }'), 'Instructions align right');
+assert.ok(css.includes('@media(max-width:600px) { .hosp-sales-filters'), 'Mobile filter layout provided');
 const script = [...source.matchAll(/<script>([\s\S]*?)<\/script>/g)]
     .find(match => match[1].includes("const dialog = document.getElementById('sales-upload-instructions')"))[1];
 const elements = {};

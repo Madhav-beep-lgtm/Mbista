@@ -2199,21 +2199,21 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php endif; ?>
 
     <section class="mbw-card" data-collapsible>
-        <div class="mbw-card-head"><h2>Upload Daily Sales Sheet</h2><button type="button" class="button secondary" id="sales-upload-instructions-open" aria-haspopup="dialog" aria-controls="sales-upload-instructions">Instructions</button></div>
+        <div class="mbw-card-head hosp-upload-heading"><h2>Upload Daily Sales Sheet</h2><button type="button" class="button secondary" id="sales-upload-instructions-open" aria-haspopup="dialog" aria-controls="sales-upload-instructions">Instructions</button></div>
         <?php if (!$canPost): ?>
             <div class="notice error">You do not have permission to post sales (hospitality create permission needed).</div>
         <?php else: ?>
-        <form method="post" enctype="multipart/form-data" class="workspace-form-grid">
+        <form method="post" enctype="multipart/form-data" class="hosp-upload-toolbar">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="action" value="sales_upload_file">
             <input type="hidden" name="back_view" value="sales-upload">
-            <label class="workspace-span-2">Sales workbook — both sheets (.xlsx, max 10 MB)
+            <label class="hosp-workbook-field"><span>Sales workbook <small>.xlsx · Both sheets · Max 10 MB</small></span>
                 <input type="file" name="sales_file" accept=".xlsx" required>
                 
             </label>
-            <div class="workspace-span-2">
-                <button type="submit"><?= icon('upload') ?>Upload &amp; Preview</button>
-                <?php if ($hasXlsx): ?><a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=xlsx')) ?>">Excel template (both sheets)</a><?php endif; ?>
+            <div class="hosp-upload-actions">
+                <button type="submit" class="button"><?= icon('upload') ?>Upload &amp; Preview</button>
+                <?php if ($hasXlsx): ?><a class="button secondary" href="<?= e(url('admin/hospitality.php?view=sales-upload&template=xlsx')) ?>"><?= icon('download') ?>Download template</a><?php endif; ?>
             </div>
         </form>
         <?php endif; ?>
@@ -2285,7 +2285,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
                 </span>
             <?php endif; ?>
         </div>
-        <form method="get" class="workspace-form-grid" style="margin-bottom:12px">
+        <form method="get" class="hosp-sales-filters">
             <input type="hidden" name="view" value="sales-upload">
             <input type="hidden" name="rsort" value="<?= e($reportSort) ?>">
             <input type="hidden" name="rdir" value="<?= e($reportDir) ?>">
@@ -2298,7 +2298,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </label>
             <label>From<input type="date" name="rfrom" value="<?= e($reportFrom) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
             <label>To<input type="date" name="rto" value="<?= e($reportTo) ?>" min="<?= e($fyStart) ?>" max="<?= e($fyEnd) ?>"></label>
-            <div style="align-self:end"><button type="submit"><?= icon('search') ?>Show</button></div>
+            <button type="submit" class="button"><?= icon('search') ?>Show report</button>
         </form>
         <?php if (isset($report['note'])): ?>
             <div class="notice"><?= e((string) $report['note']) ?></div>
@@ -2344,7 +2344,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
             </tr></thead>
             <tbody>
                 <?php if ($report['rows'] === []): ?>
-                    <tr><td colspan="<?= max(1, count($report['columns'])) + ($showSelect ? 1 : 0) ?>">Nothing uploaded for <?= e($reportFrom) ?> to <?= e($reportTo) ?>.</td></tr>
+                    <tr><td class="hosp-sales-empty" colspan="<?= max(1, count($report['columns'])) + ($showSelect ? 1 : 0) ?>">No sales uploaded for <?= e(app_date($reportFrom)) ?> to <?= e(app_date($reportTo)) ?>.</td></tr>
                 <?php endif; ?>
                 <?php foreach ($report['rows'] as $reportRow): ?>
                     <?php $rowVouchers = (array) ($reportRow['voucher_id_list'] ?? []); ?>
