@@ -12,6 +12,9 @@ declare(strict_types=1);
  */
 ?>
 <section class="mbw-card frm-section vch-focus vch-entry-panel">
+    <?php if (company_module_enabled('fixed_assets',$companyId)): ?>
+        <?php include __DIR__.'/asset_popup.php'; ?>
+    <?php endif; ?>
     <div class="vch-grid" data-grid data-min-rows="2" data-prefill="<?= e(json_encode($prefill['journal'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">

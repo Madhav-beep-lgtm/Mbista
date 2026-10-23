@@ -194,6 +194,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($editVoucherId > 0 ? 'admin/voucher-form.php?edit=' . $editVoucherId : 'admin/voucher-form.php?type=purchase');
     }
 
+    if (($_POST['grid_action'] ?? '') === 'prepare_asset_journal' && $voucherType === 'journal') {
+        $_SESSION['voucher_retry']=['type'=>'journal','input'=>$_POST];
+        try {
+            $assetData=(array)($_POST['asset_fields'] ?? []);
+            db()->beginTransaction();
+            $plan=faj_validate($companyId,$assetData,(string)($_POST['voucher_date'] ?? ''));
+            db()->rollBack();
+            $input=$_POST;
+            foreach(['ledger_id','entry_type','amount','memo','line_cost_centre','line_reference','line_tax'] as $key) $input[$key]=[];
+            foreach($plan['deltas'] as $lid=>$delta) {
+                if(abs($delta)<0.005) continue;
+                $input['ledger_id'][]=$lid;$input['entry_type'][]=$delta>0?'debit':'credit';$input['amount'][]=abs($delta);
+                $input['memo'][]=trim(($assetData['name'] ?? '').' '.$assetData['operation']);
+                $input['line_cost_centre'][]=$assetData['cost_centre'] ?? '';
+            }
+            $input['asset_payload']=json_encode($assetData,JSON_THROW_ON_ERROR);
+            $_SESSION['voucher_retry']['input']=$input;
+            flash('success','Asset journal prepared for review. Nothing has been posted.');
+        } catch(Throwable $e) {
+            if(db()->inTransaction()) db()->rollBack();
+            flash('error',$e instanceof PDOException?'Could not prepare asset journal. Check the asset configuration.':$e->getMessage());
+        }
+        redirect($editVoucherId>0?'admin/voucher-form.php?edit='.$editVoucherId:'admin/voucher-form.php?type=journal');
+    }
     $saveMode = (string) ($_POST['save_mode'] ?? 'submit');
     $isDraft = $saveMode === 'draft';
     $formReturnUrl = $editVoucherId > 0 ? 'admin/voucher-form.php?edit=' . $editVoucherId : voucher_type_url($voucherType);
@@ -553,6 +577,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         voucher_billing_save($voucherId,$_POST,$entries);
+        $assetPayload=trim((string)($_POST['asset_payload'] ?? ''));
+        if ($assetPayload!=='') {
+            if(strlen($assetPayload)>16000) throw new RuntimeException('Asset details exceed the allowed size.');
+            faj_save($voucherId,$companyId,json_decode($assetPayload,true,32,JSON_THROW_ON_ERROR));
+        } elseif ($voucherType==='journal' && company_module_enabled('fixed_assets',$companyId)) {
+            if (faj_link($voucherId)) throw new RuntimeException('Asset details cannot be removed from this journal.');
+            $assetCheck=db()->prepare('SELECT COUNT(*) FROM voucher_entries e JOIN ledgers l ON l.id=e.ledger_id LEFT JOIN ledger_groups g ON g.id=l.group_id WHERE e.voucher_id=? AND (l.is_fixed_asset=1 OR g.is_fixed_asset=1)');
+            $assetCheck->execute([$voucherId]);
+            if((int)$assetCheck->fetchColumn()>0) throw new RuntimeException('Open Asset details and prepare the asset journal before saving.');
+        }
         // Stock and accounting commit together; failures roll back both.
         $stockNotes = [];
         if ($voucherId > 0) {
@@ -1095,7 +1129,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // A draft may be anything. A posting may not, and the server says so too —
     // this only saves the person the round trip.
     document.getElementById('voucher-form').addEventListener('submit', function (event) {
-        if (event.submitter && event.submitter.value === 'import_purchase_lines') { return; }
+        if (event.submitter && ['import_purchase_lines','prepare_asset_journal'].includes(event.submitter.value)) { return; }
         if (document.getElementById('frm-save-mode').value === 'draft') { return; }
         if (this.getAttribute('data-balanced') !== '1') {
             event.preventDefault();

@@ -540,6 +540,7 @@ function accounting_module_repair_database(): array
     });
 
     $run('Unified account creation metadata', 'accounting_repair_account_creation_schema');
+    $run('Fixed asset journal links', 'faj_schema');
     $run('Voucher bill details', 'accounting_repair_voucher_bill_schema');
 
     $run('Create accounting parties', static function (): void {

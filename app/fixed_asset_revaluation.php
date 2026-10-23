@@ -515,6 +515,7 @@ function fa_approve_revaluation_batch(
 
         $prepared = [];
         foreach ($lines as $line) {
+            if (function_exists('faj_managed_asset') && faj_managed_asset($companyId,(int)$line['asset_id'])) throw new RuntimeException('This batch contains a journal-managed asset. Revalue it through Journal Voucher.');
             $currentCarrying = round((float) $line['current_carrying'], 2);
             $previousCarrying = round((float) $line['previous_carrying_value'], 2);
             if (abs($currentCarrying - $previousCarrying) >= 0.01) {

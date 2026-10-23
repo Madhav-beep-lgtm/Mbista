@@ -20,3 +20,4 @@ require_once __DIR__ . '/inventory_valuation.php';
 // Loaded here rather than from the voucher pages: deleting a voucher has to
 // release the stock it moved, and that happens deep inside helpers.php.
 require_once __DIR__ . '/voucher_stock.php';
+require_once __DIR__ . '/fixed_asset_journal.php';

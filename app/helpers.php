@@ -4073,6 +4073,7 @@ function voucher_prime_mutation_checks(array $voucherIds): void
  */
 function voucher_mutation_blocker(array $voucher, array $allowModuleSources = []): ?string
 {
+    if (function_exists('faj_blocker') && ($assetBlock=faj_blocker((int)($voucher['id'] ?? 0)))) return $assetBlock;
     if (function_exists('business_note_blocker') && ($noteBlocker=business_note_blocker((int)($voucher['id'] ?? 0)))) return $noteBlocker;
     if (function_exists('voucher_billing_link') && !empty(voucher_billing_link((int)($voucher['id'] ?? 0))['document_id'])) {
         return 'This voucher has an issued invoice or allocated receipt. Correct it with a linked adjustment rather than changing the original journal.';
@@ -4307,6 +4308,7 @@ function delete_voucher_with_entries(int $voucherId, int $companyId, ?int $actor
  */
 function force_delete_voucher(int $voucherId, int $companyId, string $reason, ?int $actorId = null): array
 {
+    if (function_exists('faj_blocker') && ($assetBlock=faj_blocker($voucherId))) return ['ok'=>false,'error'=>$assetBlock,'voucher_no'=>'','summary'=>''];
     $actor = current_user();
     if (!$actor || (string) ($actor['role'] ?? '') !== 'admin') {
         return ['ok' => false, 'error' => 'Only an admin can force-delete a voucher.', 'voucher_no' => '', 'summary' => ''];

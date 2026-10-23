@@ -343,6 +343,11 @@ function voucher_import_parse(array $rows, int $companyId, int $fiscalYearId): a
 
     // Resolve profile once per file, not once for each imported voucher.
     $importBusiness = function_exists('company_business_type') ? company_business_type($companyId) : null;
+    $assetImportLedgers=[];
+    if(function_exists('faj_link') && company_module_enabled('fixed_assets',$companyId) && column_exists('ledgers','is_fixed_asset')) {
+        $assetQuery=db()->prepare('SELECT l.id FROM ledgers l LEFT JOIN ledger_groups g ON g.id=l.group_id WHERE l.company_id=? AND (l.is_fixed_asset=1 OR g.is_fixed_asset=1)');
+        $assetQuery->execute([$companyId]);$assetImportLedgers=array_map('intval',$assetQuery->fetchAll(PDO::FETCH_COLUMN));
+    }
     // Voucher-level validation.
     $duplicateStmt = null;
     if (column_exists('vouchers', 'reference_no')) {
@@ -357,6 +362,10 @@ function voucher_import_parse(array $rows, int $companyId, int $fiscalYearId): a
         }
 
         $voucher['type'] = voucher_import_normalize_type($voucher['type_raw']);
+        foreach($voucher['lines'] ?? [] as $entry) if(in_array((int)$entry['ledger_id'],$assetImportLedgers,true)) {
+            $voucher['errors'][]='Use Journal Voucher > Asset details for fixed-asset entries so the register and accounts update together.';
+            break;
+        }
         if ($voucher['type'] === 'purchase') {
             $voucher['errors'][] = 'Ledger-only purchase uploads are retired. Use the Purchase voucher item upload for hospitality/inventory, or Jewellery purchases for jewellery items.';
         } elseif ($voucher['type'] !== null && function_exists('company_voucher_import_allowed')

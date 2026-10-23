@@ -17,6 +17,10 @@ $currentUser = current_user();
 $companyId = (int) ($company['id'] ?? 0);
 $fiscalYearId = (int) ($fiscalYear['id'] ?? 0);
 $userId = (int) ($currentUser['id'] ?? 0);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && empty($_GET['legacy']) && empty($_GET['export'])) {
+    require __DIR__.'/../../app/views/fixed_asset_register.php';
+    return;
+}
 
 $inventoryBusinessType = company_accounting_business_type($companyId);
 $inventoryProfile = accounting_business_profile($inventoryBusinessType);
@@ -45,6 +49,11 @@ if (table_exists('accounting_parties')) {
 /** Asset scoped to the current company, or null. */
 function fa_company_asset(int $assetId, int $companyId): ?array
 {
+    if (($_SERVER['REQUEST_METHOD'] ?? '')==='POST' && faj_managed_asset($companyId,$assetId)) {
+        if(db()->inTransaction()) db()->rollBack();
+        flash('error','This asset is managed through Journal Voucher. Use Asset details to prepare its next transaction.');
+        redirect('admin/voucher-form.php?type=journal&asset_id='.$assetId);
+    }
     if ($assetId <= 0) {
         return null;
     }
@@ -167,6 +176,11 @@ function fa_purposes_for_asset(array $asset): array
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
+    if ($action==='add_asset') {
+        require_permission('accounting','create');
+        flash('error','Add new assets through Journal Voucher.');
+        redirect('admin/voucher-form.php?type=journal&asset_new=1');
+    }
 
     if ($action === 'add_asset') {
         require_permission('accounting', 'create');

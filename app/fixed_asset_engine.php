@@ -613,9 +613,23 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
         $rev[(int) $row['asset_id']] = $row;
     }
 
+    $journalEvents=[];
+    if (table_exists('fixed_asset_journals')) {
+        $jq=db()->prepare('SELECT j.payload,v.voucher_date FROM fixed_asset_journals j JOIN vouchers v ON v.id=j.voucher_id WHERE j.company_id=? AND j.applied=1 ORDER BY v.voucher_date,v.id');
+        $jq->execute([$companyId]);
+        foreach($jq->fetchAll(PDO::FETCH_ASSOC) as $event) {
+            $payload=json_decode($event['payload'],true);
+            if(is_array($payload) && isset($payload['after'])) $journalEvents[(int)$payload['asset_id']][]=['date'=>$event['voucher_date'],'data'=>$payload];
+        }
+    }
     $rows = [];
     foreach ($assets as $a) {
         $id = (int) $a['id'];
+        $assetEvents=$journalEvents[$id] ?? [];
+        if ($assetEvents!==[]) {
+            $baseline=$assetEvents[0]['data']['before'] ?? $assetEvents[0]['data']['after'];
+            $a['cost']=(float)$baseline['cost']+(float)$baseline['directly_attributable_cost']+(float)$baseline['restoration_provision'];
+        }
         $cost = (float) $a['cost'];
         $acquiredOn = (string) $a['acquired_on'];
         $disposedOn = (string) ($a['disposed_on'] ?? '');
@@ -641,6 +655,32 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
         $revOpening = (float) ($rev[$id]['opening'] ?? 0);
         $revCurrent = (float) ($rev[$id]['current'] ?? 0);
         $revClosing = $soldInWindow ? 0.0 : $revOpening + $revCurrent;
+
+        // Journal-led additions and revaluations are dated movements, not a
+        // rewrite of the asset's original acquisition in every prior period.
+        foreach($assetEvents as $event) {
+            if($event['date']>$to) continue;
+            $d=$event['data'];$opening=$event['date']<$from;
+            if($d['operation']==='addition') {
+                if($opening) $costOpening+=(float)$d['amount']; else $costAddition+=(float)$d['amount'];
+                if($soldInWindow) $costDisposal+=(float)$d['amount'];
+            }
+            if($d['operation']==='revaluation' && !empty($d['before'])) {
+                $before=$d['before'];$after=$d['after'];
+                $gross=(float)$after['cost']-((float)$before['cost']+(float)$before['directly_attributable_cost']+(float)$before['restoration_provision']);
+                if($opening) {
+                    $revOpening+=$gross;
+                    $depOpening-=(float)$before['accumulated_depreciation'];
+                    $impOpening-=(float)$before['accumulated_impairment'];
+                } else {
+                    $revCurrent+=$gross;
+                    $depReversal+=(float)$before['accumulated_depreciation'];
+                    $impReversal+=(float)$before['accumulated_impairment'];
+                }
+            }
+        }
+        if($soldInWindow){$depReversal=$depOpening+$depCurrent;$impReversal=$impOpening+$impCurrent;}
+        $revClosing=$soldInWindow?0.0:$revOpening+$revCurrent;
 
         $costClosing = $costOpening + $costAddition - $costDisposal;
         $depClosing = $depOpening + $depCurrent - $depReversal;
