@@ -7,9 +7,13 @@ $inventoryNavTask = (string)($_GET['task'] ?? ($inventoryNavView === 'manufactur
 $manufacturingNavActive = $headerScript === 'accounting-inventory.php' && $inventoryNavView === 'manufacturing';
 $inventoryNavActive = $inventoryNavActive && !$manufacturingNavActive;
 $inventoryNavProfile = accounting_business_profile(company_accounting_business_type((int)current_company_id()));
+$showInventoryManagement = company_module_enabled('inventory') && $inventoryNavProfile['show_inventory'];
+$showFixedAssetManagement = company_module_enabled('fixed_assets');
 ?>
+<?php if ($showInventoryManagement || $showFixedAssetManagement): ?>
 <span class="admin-nav-group">Management</span>
-<?php if (company_module_enabled('inventory') && $inventoryNavProfile['show_inventory']): ?>
+<?php endif; ?>
+<?php if ($showInventoryManagement): ?>
 <div class="mbw-nav-parent<?= $inventoryNavActive ? ' is-open' : '' ?>" data-nav-parent="inventory-management">
     <a href="#" data-nav-toggle aria-expanded="<?= $inventoryNavActive ? 'true' : 'false' ?>">
         <?= icon('box') ?>Inventory Management
@@ -35,7 +39,7 @@ $inventoryNavProfile = accounting_business_profile(company_accounting_business_t
 </div>
 <?php endif; ?>
 <?php endif; ?>
-<?php if (company_module_enabled('fixed_assets')): ?>
+<?php if ($showFixedAssetManagement): ?>
 <a class="<?= $headerScript === 'fixed-assets.php' && $headerView !== 'leases' ? 'is-active' : '' ?>" href="<?= e(url('admin/fixed-assets.php')) ?>"><?= icon('tag') ?>Fixed Asset Management</a>
 <?php endif; ?>
 <?php if (company_module_enabled('nfrs')): ?>
