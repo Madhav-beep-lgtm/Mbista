@@ -133,6 +133,23 @@ $settledLabel = $partyIsDebit ? 'Received' : 'Paid';
 </section>
 
 <section class="frm-section vch-entry-panel">
+    <?php if ($spec['key'] === 'purchase'): ?>
+        <div class="purchase-items-toolbar">
+            <h2>Purchase details</h2>
+            <details class="purchase-item-import" data-goods-field>
+                <summary class="button secondary"><?= icon('upload') ?>Import items</summary>
+                <div class="purchase-import-panel">
+                    <a class="button secondary" href="<?= e(url('admin/voucher-form.php?template=purchase-items')) ?>"><?= icon('download') ?>Download template</a>
+                    <label>Item file<input type="file" name="purchase_lines" accept=".csv,.xlsx"></label>
+                    <details class="purchase-import-help">
+                        <summary>Instructions</summary>
+                        <p>Import one supplier bill using the template. Item, quantity, rate, cost centre and tax columns populate the grid. Import replaces the displayed item rows; review them before saving or posting the voucher.</p>
+                    </details>
+                    <button class="button secondary" type="submit" name="grid_action" value="import_purchase_lines" formnovalidate>Upload and review</button>
+                </div>
+            </details>
+        </div>
+    <?php endif; ?>
     <div class="vch-grid" data-grid data-min-rows="1" data-prefill="<?= e(json_encode($prefill['values'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">

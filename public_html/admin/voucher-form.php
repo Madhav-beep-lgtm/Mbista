@@ -959,16 +959,6 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     <?php if ($editVoucher): ?><input type="hidden" name="voucher_id" value="<?= (int) $editVoucher['id'] ?>"><?php endif; ?>
 
     <div class="frm-main">
-        <?php if ($type === 'purchase'): ?>
-        <section class="mbw-card frm-section">
-            <details><summary class="button secondary is-square" aria-label="Upload and download template" title="Upload and download template"><?= icon('upload') ?></summary>
-                <a class="button secondary" href="<?= e(url('admin/voucher-form.php?template=purchase-items')) ?>">Download item template</a>
-                <label>Purchase items <input type="file" name="purchase_lines" accept=".csv,.xlsx"></label>
-                <button class="button secondary" type="submit" name="grid_action" value="import_purchase_lines" formnovalidate>Upload and review</button>
-            </details>
-            <small>One supplier bill per upload. Item, Quantity, Rate, Cost Centre, Tax Mode and Tax Rate match the item grid. Upload replaces the displayed item rows; saving uses the normal purchase voucher workflow.</small>
-        </section>
-        <?php endif; ?>
         <section class="mbw-card frm-section vch-head-card">
             <div class="frm-grid vch-header-grid<?= $spec['layout'] === 'trade' ? ' vch-trade-header-grid' : '' ?>">
                 <?php if ($editVoucher === null): ?>

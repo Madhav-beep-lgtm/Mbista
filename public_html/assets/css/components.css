@@ -767,6 +767,39 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .voucher-entry-page .vch-table th > em { position:absolute; top:3px; left:8px; font-size:11px; line-height:1; }
 @media(max-width:900px) { .frm-grid.vch-trade-header-grid { grid-template-columns:repeat(2,minmax(0,260px)); } }
 .vch-header-grid input:not([type="hidden"]), .vch-header-grid select { width:100%; min-width:0; height:40px; min-height:40px; }
+/* Purchase entry: manual-first layout, with optional import beside the grid. */
+.voucher-type-purchase .frm-main { gap:16px; }
+.voucher-type-purchase .vch-head-card,
+.voucher-type-purchase .vch-support-card { padding:20px; border-radius:12px; box-shadow:0 2px 8px rgba(15,23,42,.035); }
+.voucher-type-purchase .frm-grid.vch-trade-header-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:18px 20px; padding-top:0; }
+.voucher-type-purchase .vch-head-card > .vch-focus { padding:16px 0 0; margin:0; }
+.voucher-type-purchase .vch-head-card > .vch-entry-panel { padding:20px 0 0; margin:20px 0 0; border-top:1px solid var(--color-border); }
+.voucher-type-purchase #voucher-form label > span > em,
+.voucher-type-purchase #voucher-form label > em { position:static; font-size:inherit; margin-left:3px; }
+.voucher-type-purchase .vch-party-label { display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:3px; }
+.voucher-type-purchase .vch-table { min-width:1080px; }
+.voucher-type-purchase .vch-table :is(input,select) { min-height:38px; height:38px; font-size:13px; }
+.voucher-type-purchase .vch-table th { font-size:12px; white-space:nowrap; }
+.voucher-type-purchase .frm-entries-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:12px; }
+.voucher-type-purchase .frm-entry-totals { padding:10px 14px; border-radius:8px; background:var(--color-primary-soft); font-variant-numeric:tabular-nums; }
+.voucher-type-purchase .frm-footer { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; padding:14px 20px; border-radius:12px; }
+.voucher-type-purchase .frm-footer > a { margin-right:auto; }
+.purchase-items-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.purchase-items-toolbar h2 { margin:0; font-size:16px; }
+.purchase-item-import { position:relative; }
+.purchase-item-import > summary { list-style:none; cursor:pointer; }
+.purchase-item-import > summary::-webkit-details-marker { display:none; }
+.purchase-import-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:20; display:grid; gap:14px; width:min(360px,calc(100vw - 64px)); padding:18px; border:1px solid var(--color-border); border-radius:12px; background:var(--color-surface); box-shadow:0 12px 32px rgba(15,23,42,.14); }
+.purchase-import-panel input[type="file"] { max-width:100%; min-width:0; font-size:12px; }
+.purchase-import-help { font-size:13px; color:var(--color-text-muted); }
+.purchase-import-help summary { cursor:pointer; color:var(--color-text); }
+.purchase-import-help p { margin:8px 0 0; line-height:1.6; }
+@media(max-width:1000px) { .voucher-type-purchase .frm-grid.vch-trade-header-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:640px) {
+  .voucher-type-purchase .frm-grid.vch-trade-header-grid { grid-template-columns:1fr; }
+  .voucher-type-purchase .vch-head-card,.voucher-type-purchase .vch-support-card { padding:14px; }
+  .voucher-type-purchase .frm-footer { padding:12px; }
+}
 .voucher-preview { width:min(1000px,95vw); height:90vh; max-height:90vh; padding:0; border:1px solid #000; border-radius:8px; }
 .voucher-preview::backdrop { background:rgba(0,0,0,.45); }
 .voucher-preview-toolbar { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; }

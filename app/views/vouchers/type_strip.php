@@ -18,7 +18,7 @@ $pickerWorkflow = company_business_workflow($pickerBusiness);
         <?php foreach (voucher_entry_type_catalog() as $pickerKey => $pickerSpec): ?>
             <?php if (!company_voucher_type_allowed($pickerBusiness,$pickerKey)) continue; ?>
             <?php
-            $pickerLabel=match($pickerKey) {'sales'=>$pickerWorkflow['sales_label'],'purchase'=>$pickerWorkflow['purchase_label'],default=>(string)$pickerSpec['short']}; ?>
+            $pickerLabel=match($pickerKey) {'sales'=>$pickerWorkflow['sales_label'],'purchase'=>$pickerBusiness === 'hospitality' ? 'Purchase' : $pickerWorkflow['purchase_label'],default=>(string)$pickerSpec['short']}; ?>
             <option value="<?= e(url(voucher_type_url($pickerKey))) ?>" <?= $pickerKey === (string) $spec['key'] ? 'selected' : '' ?>><?= e($pickerLabel) ?></option>
         <?php endforeach; ?>
     </select>
