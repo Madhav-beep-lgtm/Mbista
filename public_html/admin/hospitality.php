@@ -48,6 +48,26 @@ if (!in_array($view, $allowedViews, true) && !isset($legacyViews[$view])) {
 }
 $canPost = user_can_do('hospitality', 'create');
 $hasXlsx = class_exists('ZipArchive');
+if ($view==='recipes' || str_starts_with((string)($_POST['action'] ?? ''),'recipe_import_')) {
+    require_once __DIR__.'/../../app/hospitality_recipe_import.php';
+}
+if ($view==='recipes' && isset($_GET['recipe_template'])) {
+    require_permission('hospitality','edit');
+    if ($_GET['recipe_template']==='xlsx' && $hasXlsx) {
+        $q=db()->prepare('SELECT code,name FROM hospitality_menu_items WHERE company_id=? AND active=1 ORDER BY code');
+        $q->execute([$companyId]); $menuCodes=array_merge([['Menu item code','Menu item name']],$q->fetchAll(PDO::FETCH_NUM));
+        $q=db()->prepare('SELECT code,name,recipe_unit FROM hospitality_ingredients WHERE company_id=? AND active=1 ORDER BY code');
+        $q->execute([$companyId]); $ingredientCodes=array_merge([['Ingredient code','Ingredient name','Recipe unit']],$q->fetchAll(PDO::FETCH_NUM));
+        $bytes=xlsx_build_sheets(['Recipes'=>[hospitality_recipe_import_headers()], 'Menu codes'=>$menuCodes, 'Ingredient codes'=>$ingredientCodes,
+            'Instructions'=>[['Recipe upload'],['Enter one ingredient per row on Recipes. Repeat recipe details for every ingredient.'],['Use active codes from the Menu codes and Ingredient codes sheets.'],['Use a new recipe code. Existing recipes are never overwritten.'],['Dates: YYYY-MM-DD in AD. Quantities use the listed recipe unit.'],['Blank batch yield and portions default to 1; blank costs and wastage default to 0.'],['Upload, review the preview, then confirm. All recipes are saved as drafts.']]]);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="recipe-template.xlsx"');
+        echo $bytes; exit;
+    }
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="recipe-template.csv"');
+    $out=fopen('php://output','w'); fputcsv($out,hospitality_recipe_import_headers(),',','"','\\'); fclose($out); exit;
+}
 
 /** One of a fixed set, or the fallback — a query string never picks its own value. */
 function jw_enum_like(?string $value, array $allowed, string $fallback): string
@@ -159,6 +179,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
     $action = (string) ($_POST['action'] ?? '');
     $back = 'admin/hospitality.php?view=' . urlencode((string) ($_POST['back_view'] ?? $view));
+    if (str_starts_with($action,'recipe_import_')) {
+        require_permission('hospitality','edit');
+        try {
+            if ($action==='recipe_import_preview') {
+                unset($_SESSION['hospitality_recipe_import']);
+                $file=$_FILES['recipe_file'] ?? [];
+                if (($file['error'] ?? UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_OK || !is_uploaded_file((string)($file['tmp_name'] ?? ''))) throw new RuntimeException('Choose a recipe workbook or CSV.');
+                if ((int)$file['size']>5*1024*1024) throw new RuntimeException('Recipe uploads must be 5 MB or smaller.');
+                $ext=strtolower(pathinfo((string)$file['name'],PATHINFO_EXTENSION));
+                if (!in_array($ext,['xlsx','csv'],true)) throw new RuntimeException('Upload .xlsx or .csv.');
+                if ($ext==='xlsx') {
+                    if (!$hasXlsx) throw new RuntimeException('Excel support is unavailable. Use CSV.');
+                    $zip=new ZipArchive();
+                    if ($zip->open($file['tmp_name'])!==true) throw new RuntimeException('Invalid Excel workbook.');
+                    try {
+                        $expanded=0;
+                        for($i=0;$i<$zip->numFiles;$i++) $expanded+=(int)$zip->statIndex($i)['size'];
+                        if ($expanded>30*1024*1024 || $zip->numFiles>2000) throw new RuntimeException('Workbook is too large when expanded.');
+                    } finally { $zip->close(); }
+                }
+                $rows=spreadsheet_read_rows($file['tmp_name'],$file['name'],1002);
+                if (strlen(json_encode($rows,JSON_THROW_ON_ERROR))>1024*1024) throw new RuntimeException('Recipe content is too large. Split it into smaller uploads.');
+                hospitality_recipe_import_preview($companyId,$rows);
+                $_SESSION['hospitality_recipe_import']=['rows'=>$rows,'company_id'=>$companyId,'user_id'=>$userId,'fiscal_year_id'=>$fiscalYearId,'expires'=>time()+1800,'token'=>bin2hex(random_bytes(24))];
+            } elseif (in_array($action,['recipe_import_confirm','recipe_import_cancel'],true)) {
+                $held=$_SESSION['hospitality_recipe_import'] ?? [];
+                if (($held['company_id'] ?? 0)!==$companyId || ($held['user_id'] ?? 0)!==$userId || ($held['fiscal_year_id'] ?? 0)!==$fiscalYearId
+                    || ($held['expires'] ?? 0)<time() || !hash_equals((string)($held['token'] ?? ''),(string)($_POST['import_token'] ?? '')) || empty($held['token'])) throw new RuntimeException('Preview expired or company changed. Upload the file again.');
+                if ($action==='recipe_import_confirm') {
+                    $ids=hospitality_recipe_import_save($companyId,$held['rows'],$userId);
+                    flash('success',count($ids).' recipe draft(s) imported.');
+                }
+                unset($_SESSION['hospitality_recipe_import']);
+            } else throw new RuntimeException('Invalid recipe upload action.');
+        } catch(Throwable $e) {
+            flash('error',$e instanceof PDOException ? 'Could not import recipes. No recipes were saved; review the template and retry.' : $e->getMessage());
+        }
+        redirect('admin/hospitality.php?view=recipes');
+    }
 
     // Only the recipe side of an ingredient is editable here. Its code, name,
     // category, purchase unit and cost belong to the inventory item and are
@@ -1448,6 +1507,7 @@ include __DIR__ . '/../../app/views/partials/admin_header.php';
     </section>
 
 <?php elseif ($view === 'recipes'): ?>
+    <?php if ($canEdit) include __DIR__.'/../../app/views/partials/recipe_import.php'; ?>
     <?php
     $menuFilter = (int) ($_GET['menu_item'] ?? 0);
     $recipeId = (int) ($_GET['recipe'] ?? 0);

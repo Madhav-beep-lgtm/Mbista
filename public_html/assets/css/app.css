@@ -266,6 +266,18 @@ input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; accent-
 }
 .frm-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 /* Hospitality sales upload: compact controls, consistent action alignment. */
+.recipe-import-toolbar { margin-bottom:16px; }
+.recipe-upload-menu { max-width:720px; }
+.recipe-upload-menu > summary { width:max-content; cursor:pointer; }
+.recipe-upload-panel { margin-top:10px; padding:16px; border:1px solid var(--color-border); border-radius:var(--radius-panel); background:var(--color-surface); }
+.recipe-upload-form { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.recipe-upload-form label { flex:1 1 260px; min-width:0; display:grid; gap:8px; }
+.recipe-upload-form input { width:100%; min-width:0; box-sizing:border-box; }
+.recipe-preview-item { margin:0 0 16px; padding:16px; border:1px solid var(--color-border); border-radius:var(--radius-control); }
+.recipe-preview-item > summary { cursor:pointer; font-weight:600; }
+.recipe-preview-meta { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:16px 0; }
+.recipe-preview-meta dt { color:var(--color-text-muted); font-size:12px; }
+.recipe-preview-meta dd { margin:4px 0 0; overflow-wrap:anywhere; }
 .hosp-upload-heading { gap:12px; flex-wrap:wrap; }
 .hosp-upload-heading h2 { flex:1; min-width:180px; }
 .hosp-upload-heading > .button { margin-left:auto; }
