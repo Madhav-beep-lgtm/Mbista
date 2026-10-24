@@ -619,7 +619,9 @@ function fa_register_schedule(int $companyId, string $from, string $to, array $f
         $jq->execute([$companyId]);
         foreach($jq->fetchAll(PDO::FETCH_ASSOC) as $event) {
             $payload=json_decode($event['payload'],true);
-            if(is_array($payload) && isset($payload['after'])) $journalEvents[(int)$payload['asset_id']][]=['date'=>$event['voucher_date'],'data'=>$payload];
+            if(is_array($payload)) foreach(($payload['events'] ?? [$payload]) as $assetEvent) {
+                if(isset($assetEvent['after'])) $journalEvents[(int)$assetEvent['asset_id']][]=['date'=>$event['voucher_date'],'data'=>$assetEvent];
+            }
         }
     }
     $rows = [];

@@ -9,10 +9,12 @@ $q=db()->prepare('SELECT COUNT(*) FROM fixed_assets WHERE '.$where);$q->execute(
 $page=max(1,min((int)($_GET['page'] ?? 1),max(1,(int)ceil($total/50))));$offset=($page-1)*50;
 $q=db()->prepare('SELECT * FROM fixed_assets WHERE '.$where.' ORDER BY asset_code,id LIMIT 50 OFFSET '.$offset);$q->execute($params);$assets=$q->fetchAll(PDO::FETCH_ASSOC);
 $selected=null;$events=[];$schedule=[];
-if(!empty($_GET['asset_id'])) {
-    $q=db()->prepare('SELECT * FROM fixed_assets WHERE company_id=? AND id=?');$q->execute([$companyId,(int)$_GET['asset_id']]);$selected=$q->fetch(PDO::FETCH_ASSOC);
+if(!empty($_GET['asset_id']) || !empty($_GET['view'])) {
+    $q=db()->prepare('SELECT * FROM fixed_assets WHERE company_id=? AND id=?');$q->execute([$companyId,(int)($_GET['asset_id'] ?? $_GET['view'])]);$selected=$q->fetch(PDO::FETCH_ASSOC);
     if(!$selected) deny_access('Asset not found.');
-    $q=db()->prepare("SELECT v.id,v.voucher_no,v.voucher_date,v.status,j.payload FROM fixed_asset_journals j JOIN vouchers v ON v.id=j.voucher_id WHERE j.company_id=? AND JSON_UNQUOTE(JSON_EXTRACT(j.payload,'$.asset_id'))=? ORDER BY v.voucher_date DESC,v.id DESC LIMIT 100");$q->execute([$companyId,(string)$selected['id']]);$events=$q->fetchAll(PDO::FETCH_ASSOC);
+    $q=db()->prepare("SELECT v.id,v.voucher_no,v.voucher_date,v.status,j.payload FROM fixed_asset_journals j JOIN vouchers v ON v.id=j.voucher_id WHERE j.company_id=? AND ".faj_asset_filter('j.payload')." ORDER BY v.voucher_date DESC,v.id DESC LIMIT 100");$q->execute([$companyId,(string)$selected['id'],(int)$selected['id']]);$events=$q->fetchAll(PDO::FETCH_ASSOC);
+    foreach($events as &$event) foreach(faj_events(json_decode($event['payload'],true)) as $detail) if((int)$detail['asset_id']===(int)$selected['id']) $event['payload']=json_encode($detail);
+    unset($event);
     $q=db()->prepare('SELECT * FROM asset_depreciation_schedule WHERE company_id=? AND asset_id=? ORDER BY period_date DESC LIMIT 100');$q->execute([$companyId,$selected['id']]);$schedule=$q->fetchAll(PDO::FETCH_ASSOC);
 }
 $pageTitle='Fixed Assets';$pageHero=false;$bodyClass='admin-layout accounting-module-page';

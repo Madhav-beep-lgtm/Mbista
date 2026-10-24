@@ -1,0 +1,17 @@
+<?php
+declare(strict_types=1);
+require __DIR__.'/../app/bootstrap.php';
+if(!in_array(DB_HOST,['localhost','127.0.0.1'],true)) throw new RuntimeException('Local database only.');
+$companyId=(int)db()->query('SELECT id FROM companies ORDER BY id LIMIT 1')->fetchColumn();
+$editVoucher=null;$costCentres=[];$optionsAll=[];$defaultEntryDate=date('Y-m-d');$prefill=[];
+$renderLedgerOptions=static fn(array $options,int $selected):string=>'';
+$events=[['operation'=>'acquisition','name'=>'Machine </script><script>alert(1)</script>','code'=>'UI-1','amount'=>100],['operation'=>'acquisition','name'=>'Desk','code'=>'UI-2','amount'=>200]];
+$retry=['input'=>['asset_payload'=>json_encode(['events'=>$events]),'asset_event_index'=>1]];
+ob_start();
+require __DIR__.'/../app/views/vouchers/asset_popup.php';
+$html=ob_get_clean();
+foreach(['asset-event-picker','asset-add-another','remove_asset_journal','impairment_reversal','asset_event_index'] as $required) if(!str_contains($html,$required))throw new RuntimeException('Missing popup control: '.$required);
+if(str_contains($html,'Machine </script><script>'))throw new RuntimeException('Asset name is not escaped');
+if(!preg_match('~<script>(.*?)</script>~s',$html,$script))throw new RuntimeException('Popup script missing');
+if(in_array('--javascript',$argv,true))echo $script[1];
+else echo "Asset popup: multi-asset controls, impairment controls and output escaping passed.\n";

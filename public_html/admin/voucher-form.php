@@ -194,22 +194,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($editVoucherId > 0 ? 'admin/voucher-form.php?edit=' . $editVoucherId : 'admin/voucher-form.php?type=purchase');
     }
 
-    if (($_POST['grid_action'] ?? '') === 'prepare_asset_journal' && $voucherType === 'journal') {
+    if (in_array(($_POST['grid_action'] ?? ''),['prepare_asset_journal','remove_asset_journal'],true) && $voucherType === 'journal') {
         $_SESSION['voucher_retry']=['type'=>'journal','input'=>$_POST];
         try {
             $assetData=(array)($_POST['asset_fields'] ?? []);
+            $rawPayload=trim((string)($_POST['asset_payload'] ?? ''));
+            if(strlen($rawPayload)>200000) throw new RuntimeException('Asset details exceed the allowed size.');
+            $events=$rawPayload!==''?faj_events(json_decode($rawPayload,true,32,JSON_THROW_ON_ERROR)):[];
+            $eventIndex=(int)($_POST['asset_event_index'] ?? -1);
+            if (($_POST['grid_action'] ?? '')==='remove_asset_journal') {
+                if(!isset($events[$eventIndex]) || count($events)<2) throw new RuntimeException('Keep at least one asset transaction in this journal.');
+                array_splice($events,$eventIndex,1);
+            } elseif($eventIndex>=0 && isset($events[$eventIndex])) $events[$eventIndex]=$assetData;
+            else $events[]=$assetData;
             db()->beginTransaction();
-            $plan=faj_validate($companyId,$assetData,(string)($_POST['voucher_date'] ?? ''));
+            $bundle=faj_bundle_plan($companyId,faj_pack($events),(string)($_POST['voucher_date'] ?? ''));
             db()->rollBack();
             $input=$_POST;
             foreach(['ledger_id','entry_type','amount','memo','line_cost_centre','line_reference','line_tax'] as $key) $input[$key]=[];
-            foreach($plan['deltas'] as $lid=>$delta) {
+            foreach($bundle['events'] as $index=>$assetData) foreach($bundle['plans'][$index]['deltas'] as $lid=>$delta) {
                 if(abs($delta)<0.005) continue;
                 $input['ledger_id'][]=$lid;$input['entry_type'][]=$delta>0?'debit':'credit';$input['amount'][]=abs($delta);
                 $input['memo'][]=trim(($assetData['name'] ?? '').' '.$assetData['operation']);
                 $input['line_cost_centre'][]=$assetData['cost_centre'] ?? '';
             }
-            $input['asset_payload']=json_encode($assetData,JSON_THROW_ON_ERROR);
+            $input['asset_payload']=json_encode(faj_pack($bundle['events']),JSON_THROW_ON_ERROR);
+            $input['asset_event_index']=min(max(0,$eventIndex),count($bundle['events'])-1);
+            $input['asset_fields']=$bundle['events'][$input['asset_event_index']];
             $_SESSION['voucher_retry']['input']=$input;
             flash('success','Asset journal prepared for review. Nothing has been posted.');
         } catch(Throwable $e) {
@@ -579,7 +590,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         voucher_billing_save($voucherId,$_POST,$entries);
         $assetPayload=trim((string)($_POST['asset_payload'] ?? ''));
         if ($assetPayload!=='') {
-            if(strlen($assetPayload)>16000) throw new RuntimeException('Asset details exceed the allowed size.');
+            if(strlen($assetPayload)>200000) throw new RuntimeException('Asset details exceed the allowed size.');
             faj_save($voucherId,$companyId,json_decode($assetPayload,true,32,JSON_THROW_ON_ERROR));
         } elseif ($voucherType==='journal' && company_module_enabled('fixed_assets',$companyId)) {
             if (faj_link($voucherId)) throw new RuntimeException('Asset details cannot be removed from this journal.');
@@ -1129,7 +1140,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // A draft may be anything. A posting may not, and the server says so too —
     // this only saves the person the round trip.
     document.getElementById('voucher-form').addEventListener('submit', function (event) {
-        if (event.submitter && ['import_purchase_lines','prepare_asset_journal'].includes(event.submitter.value)) { return; }
+        if (event.submitter && ['import_purchase_lines','prepare_asset_journal','remove_asset_journal'].includes(event.submitter.value)) { return; }
         if (document.getElementById('frm-save-mode').value === 'draft') { return; }
         if (this.getAttribute('data-balanced') !== '1') {
             event.preventDefault();

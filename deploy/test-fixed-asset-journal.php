@@ -18,3 +18,16 @@ $data['operation']='disposal';$data['amount']=1100;$plan=faj_plan($data,$asset);
 faj_test($plan['deltas']===[1=>-1200.0,4=>200.0,2=>1100.0,7=>-100.0] && $plan['changes']['status']==='disposed','Disposal journal');
 $data['amount']=900;$plan=faj_plan($data,$asset);faj_test($plan['deltas'][6]===100.0,'Disposal loss');
 echo "Fixed asset journal plans: acquisition, addition, depreciation cap, revaluation allocation and disposal passed.\n";
+$asset['revaluation_reserve']=0;
+$data['operation']='impairment';$data['amount']=700;
+$plan=faj_plan($data,$asset);
+faj_test($plan['deltas']===[8=>-300.0,6=>300.0] && $plan['changes']['carrying_amount']===700.0,'Impairment journal');
+$asset=array_merge($asset,$plan['changes']);
+$data['operation']='impairment_reversal';$data['reversal_ledger']=9;$data['amount']=5000;
+$plan=faj_plan($data,$asset);
+faj_test($plan['deltas']===[8=>300.0,9=>-300.0] && $plan['changes']['carrying_amount']===1000.0,'Reversal capped at recognised impairment');
+$data['amount']=600;
+try{faj_plan($data,$asset);throw new LogicException('Non-positive reversal accepted');}catch(RuntimeException $e){}
+$asset['carrying_amount']=123;
+try{faj_plan($data,$asset);throw new LogicException('Legacy valuation mismatch silently changed');}catch(RuntimeException $e){}
+echo "Impairment, reversal cap and historical-value guards passed.\n";
