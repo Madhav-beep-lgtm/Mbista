@@ -12,9 +12,6 @@ declare(strict_types=1);
  */
 ?>
 <section class="mbw-card frm-section vch-focus vch-entry-panel">
-    <?php if (company_module_enabled('fixed_assets',$companyId)): ?>
-        <?php include __DIR__.'/asset_popup.php'; ?>
-    <?php endif; ?>
     <div class="vch-grid" data-grid data-min-rows="2" data-prefill="<?= e(json_encode($prefill['journal'] ?? [], JSON_UNESCAPED_SLASHES)) ?>">
         <div class="mbw-tablewrap">
             <table class="frm-entries vch-table">
@@ -65,6 +62,9 @@ declare(strict_types=1);
         </template>
     </div>
 
+    <?php if (company_module_enabled('fixed_assets',$companyId)): ?>
+        <?php include __DIR__.'/asset_details.php'; ?>
+    <?php endif; ?>
     <div class="notice vch-warning" id="vch-cash-warning" hidden>
         <strong>Cash or bank on a journal.</strong> Money that really moved is better recorded as a payment, receipt, or contra voucher, where the instrument and the bank side are captured. This will still post.
     </div>

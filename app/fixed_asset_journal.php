@@ -56,6 +56,20 @@ function faj_pack(array $events): array
     return count($events)===1 ? $events[0] : ['events'=>array_values($events)];
 }
 
+/** Asset acquisition metadata follows the user's journal, never writes its lines. */
+function faj_from_journal_line(array $data,array $input): array
+{
+    if (!in_array($data['operation'] ?? '',['acquisition','addition'],true)) return $data;
+    $line=filter_var($data['journal_line'] ?? null,FILTER_VALIDATE_INT);
+    $credit=filter_var($data['credit_line'] ?? null,FILTER_VALIDATE_INT);
+    if ($line===false || $credit===false || $line<0 || $credit<0 || ($input['entry_type'][$line] ?? '')!=='debit' || ($input['entry_type'][$credit] ?? '')!=='credit') throw new RuntimeException('Enter the asset debit and funding credit in the journal, then select those entries in Asset details.');
+    $data['cost_ledger']=(int)($input['ledger_id'][$line] ?? 0);
+    $data['counter_ledger']=(int)($input['ledger_id'][$credit] ?? 0);
+    $data['amount']=round((float)($input['amount'][$line] ?? 0),2);
+    if ($data['amount']<=0 || (float)($input['amount'][$credit] ?? 0)<=0) throw new RuntimeException('Enter positive debit and credit amounts in the journal first.');
+    return $data;
+}
+
 // Column names are supplied by application code, never by a request.
 function faj_asset_filter(string $column): string
 {
@@ -208,7 +222,7 @@ function faj_check_entries(int $voucherId,array $plan): void
 {
     $q=db()->prepare('SELECT ledger_id,entry_type,amount FROM voucher_entries WHERE voucher_id=?');$q->execute([$voucherId]);$actual=[];
     foreach ($q->fetchAll() as $line) $actual[(int)$line['ledger_id']]=round(($actual[(int)$line['ledger_id']] ?? 0)+($line['entry_type']==='debit'?1:-1)*(float)$line['amount'],2);
-    foreach (array_unique(array_merge(array_keys($actual),array_keys($plan['deltas']))) as $lid) if (abs(($actual[$lid] ?? 0)-($plan['deltas'][$lid] ?? 0))>0.005) throw new RuntimeException('Journal amounts differ from the asset transaction. Reopen Asset details and apply its journal lines.');
+    foreach (array_unique(array_merge(array_keys($actual),array_keys($plan['deltas']))) as $lid) if (abs(($actual[$lid] ?? 0)-($plan['deltas'][$lid] ?? 0))>0.005) throw new RuntimeException('Journal debit and credit entries do not match the attached asset details. Review the entries and reattach any changed asset details before saving.');
 }
 
 function faj_finalize(int $voucherId,int $cid): void

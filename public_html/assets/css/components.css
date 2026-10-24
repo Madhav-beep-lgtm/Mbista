@@ -792,8 +792,8 @@ body:has(.ov-kpis) .admin-content { display: grid; gap: var(--space-4); }
 .stock-summary-page .ssr-location-settings[open] > summary { margin-bottom:16px; }
 @media(max-width:1000px) { .stock-summary-page .ssr-filter-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:600px) { .stock-summary-page .ssr-filter-grid { grid-template-columns:1fr; } }
-.asset-journal-dialog { width:min(900px,calc(100vw - 32px)); max-height:90vh; padding:0; border:1px solid var(--color-border); border-radius:14px; color:var(--color-text); background:var(--color-surface); }
-.asset-journal-dialog::backdrop { background:rgba(15,23,42,.5); }
+.asset-journal-details { margin-top:16px; border:1px solid var(--color-border); border-radius:10px; background:var(--color-surface); }
+.asset-journal-details > summary { padding:12px 16px; cursor:pointer; font-weight:600; }
 .asset-dialog-head,.asset-dialog-foot { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:16px 20px; border-bottom:1px solid var(--color-border); }
 .asset-dialog-head h2 { margin:0; font-size:19px; }
 .asset-dialog-foot { border-top:1px solid var(--color-border); border-bottom:0; }

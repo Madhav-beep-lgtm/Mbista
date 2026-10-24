@@ -17,11 +17,10 @@ foreach($assetChoices as &$choice) {
 } unset($choice);
 $flagQuery=db()->prepare("SELECT l.id FROM ledgers l LEFT JOIN ledger_groups g ON g.id=l.group_id WHERE l.company_id=? AND l.status='active' AND (l.is_fixed_asset=1 OR g.is_fixed_asset=1)");$flagQuery->execute([$companyId]);$assetLedgerIds=array_map('intval',$flagQuery->fetchAll(PDO::FETCH_COLUMN));
 ?>
-<div class="purchase-items-toolbar"><h2>Journal entries</h2><button type="button" class="button secondary" id="asset-open">Asset details</button></div>
 <input type="hidden" name="asset_payload" value="<?= e($assetPayload) ?>">
 <input type="hidden" name="asset_event_index" value="<?= $assetEventIndex ?>">
-<dialog id="asset-dialog" class="asset-journal-dialog" aria-labelledby="asset-dialog-title">
-    <div class="asset-dialog-head"><h2 id="asset-dialog-title">Fixed asset journal</h2><button type="button" class="button secondary" id="asset-close" aria-label="Close asset details">Close</button></div>
+<details id="asset-details" class="asset-journal-details" <?= $assetEvents?'open':'' ?>>
+    <summary>Asset details<?= $assetEvents?' ('.count($assetEvents).')':'' ?></summary>
     <div class="asset-dialog-fields">
         <?php if($assetEvents): ?><label>Journal asset<select id="asset-event-picker"><option value="-1">New asset transaction</option><?php foreach($assetEvents as $eventIndex=>$assetEvent): ?><option value="<?= $eventIndex ?>" <?= $eventIndex===$assetEventIndex?'selected':'' ?>><?= e(($assetEvent['name'] ?? $assetEvent['code'] ?? 'Asset').' / '.ucwords(str_replace('_',' ',$assetEvent['operation']))) ?></option><?php endforeach; ?></select></label><div><button type="button" class="button secondary" id="asset-add-another">Add another asset</button></div><?php endif; ?>
         <label>Transaction<select name="asset_fields[operation]" id="asset-operation">
@@ -30,8 +29,9 @@ $flagQuery=db()->prepare("SELECT l.id FROM ledgers l LEFT JOIN ledger_groups g O
         <label data-asset-existing>Asset<select name="asset_fields[asset_id]" id="asset-existing"><option value="">Select asset</option><?php foreach($assetChoices as $choice): ?><option value="<?= (int)$choice['id'] ?>" <?= (int)($assetFields['asset_id'] ?? $_GET['asset_id'] ?? 0)===(int)$choice['id']?'selected':'' ?>><?= e($choice['asset_code'].' — '.$choice['name']) ?></option><?php endforeach; ?></select></label>
         <label data-asset-new>Asset code<input name="asset_fields[code]" maxlength="80" value="<?= e((string)($assetFields['code'] ?? '')) ?>"></label>
         <label data-asset-new>Item name<input name="asset_fields[name]" maxlength="190" value="<?= e((string)($assetFields['name'] ?? '')) ?>"></label>
-        <label><span id="asset-amount-label">Asset value</span><input type="number" name="asset_fields[amount]" min="0" step="0.01" value="<?= e((string)($assetFields['amount'] ?? '')) ?>"></label>
-        <label>Cost centre<select name="asset_fields[cost_centre]"><option value="">Select cost centre</option><?php foreach($costCentres as $centre): ?><option <?= ($assetFields['cost_centre'] ?? '')===$centre?'selected':'' ?>><?= e($centre) ?></option><?php endforeach; ?></select></label>
+        <label data-asset-acquisition>Asset debit entry<select name="asset_fields[journal_line]" id="asset-debit-entry" data-selected="<?= e((string)($assetFields['journal_line'] ?? '')) ?>"><option value="">Select journal debit</option></select></label>
+        <label data-asset-acquisition>Funding credit entry<select name="asset_fields[credit_line]" id="asset-credit-entry" data-selected="<?= e((string)($assetFields['credit_line'] ?? '')) ?>"><option value="">Select journal credit</option></select></label>
+        <label id="asset-value-field"><span id="asset-amount-label">Asset value</span><input type="number" name="asset_fields[amount]" min="0" step="0.01" value="<?= e((string)($assetFields['amount'] ?? '')) ?>"></label>
         <label data-asset-new>Depreciation basis<select name="asset_fields[method]"><option value="straight_line">Straight-line / original cost</option><option value="diminishing_balance" <?= ($assetFields['method'] ?? '')==='diminishing_balance'?'selected':'' ?>>Diminishing / carrying value</option></select></label>
         <label data-asset-new>Annual depreciation rate (%)<input type="number" name="asset_fields[rate]" min="0.001" max="100" step="0.001" value="<?= e((string)($assetFields['rate'] ?? 20)) ?>"></label>
         <label data-asset-new>Useful life (months)<input type="number" name="asset_fields[life_months]" min="1" max="1200" value="<?= e((string)($assetFields['life_months'] ?? 60)) ?>"></label>
@@ -42,11 +42,11 @@ $flagQuery=db()->prepare("SELECT l.id FROM ledgers l LEFT JOIN ledger_groups g O
         <?php endforeach; ?>
         <label data-asset-revaluation>Valuation reference / evidence<input name="asset_fields[evidence]" maxlength="255" value="<?= e((string)($assetFields['evidence'] ?? '')) ?>"></label>
     </div>
-    <div class="asset-dialog-foot"><small>Rebuilds journal lines for all selected assets. Posting updates the register.</small><?php if(count($assetEvents)>1): ?><button type="submit" class="button secondary" name="grid_action" value="remove_asset_journal" id="asset-remove" formnovalidate>Remove selected asset</button><?php endif; ?><button type="submit" class="button" name="grid_action" value="prepare_asset_journal" formnovalidate>Prepare journal</button></div>
-</dialog>
+    <div class="asset-dialog-foot"><?php if(count($assetEvents)>1): ?><button type="submit" class="button secondary" name="grid_action" value="remove_asset_journal" id="asset-remove" formnovalidate>Remove selected asset details</button><?php endif; ?><button type="submit" class="button secondary" name="grid_action" value="prepare_asset_journal" formnovalidate>Attach asset details</button></div>
+</details>
 <script>
 document.addEventListener('DOMContentLoaded',function(){
-    const dialog=document.getElementById('asset-dialog'), form=document.getElementById('voucher-form'), opener=document.getElementById('asset-open');
+    const dialog=document.getElementById('asset-details'), form=document.getElementById('voucher-form');
     const ids=<?= json_encode($assetLedgerIds) ?>, assets=<?= json_encode($assetChoices,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>;
     const field=k=>form.elements.namedItem('asset_fields['+k+']');
     const events=<?= json_encode($assetEvents,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>;
@@ -62,7 +62,9 @@ document.addEventListener('DOMContentLoaded',function(){
     if(picker)picker.addEventListener('change',()=>chooseEvent(Number(picker.value)));
     const addAnother=document.getElementById('asset-add-another');if(addAnother)addAnother.addEventListener('click',()=>chooseEvent(-1));
     function refresh(){
-        const op=field('operation').value, fresh=op==='acquisition';
+        const op=field('operation').value, fresh=op==='acquisition', acquisition=['acquisition','addition'].includes(op);
+        dialog.querySelectorAll('[data-asset-acquisition]').forEach(el=>el.hidden=!acquisition);
+        document.getElementById('asset-value-field').hidden=acquisition;
         dialog.querySelectorAll('[data-asset-new]').forEach(el=>el.hidden=!fresh);
         dialog.querySelector('[data-asset-existing]').hidden=fresh;
         dialog.querySelector('[data-asset-revaluation]').hidden=!['revaluation','impairment','impairment_reversal'].includes(op);
@@ -70,19 +72,31 @@ document.addEventListener('DOMContentLoaded',function(){
         dialog.querySelectorAll('[data-asset-ledger]').forEach(el=>{
             const key=el.dataset.assetLedger;
             const operations={counter_ledger:['acquisition','addition','disposal'],reserve_ledger:['revaluation'],loss_ledger:['revaluation','disposal','impairment'],gain_ledger:['disposal'],impairment_ledger:['revaluation','disposal','impairment','impairment_reversal'],reversal_ledger:['impairment_reversal']};
-            el.hidden=operations[key]&&!operations[key].includes(op);
+            el.hidden=(acquisition&&['cost_ledger','counter_ledger'].includes(key)) || (operations[key]&&!operations[key].includes(op));
         });
         if(!fresh){const asset=assets.find(a=>Number(a.id)===Number(field('asset_id').value));if(asset){['cost_ledger','accumulated_ledger','expense_ledger'].forEach(k=>field(k).value=asset[k]);['impairment_ledger','reversal_ledger'].forEach(k=>{if(asset[k])field(k).value=asset[k];});field('name').value=asset.name;}}
     }
-    opener.addEventListener('click',()=>{refresh();dialog.showModal();});
-    document.getElementById('asset-close').addEventListener('click',()=>dialog.close());
-    dialog.addEventListener('close',()=>opener.focus());
+    function syncEntryChoices(){
+        const rows=Array.from(form.querySelectorAll('[data-rows] tr')).filter(row=>row.querySelector('.vch-journal-ledger'));
+        [['journal_line','debit'],['credit_line','credit']].forEach(([key,side])=>{
+            const select=field(key), chosen=select.value||select.dataset.selected||'';
+            select.replaceChildren(new Option('Select journal '+side,''));
+            rows.forEach((row,index)=>{
+                const ledger=row.querySelector('.vch-journal-ledger'),amount=Number(row.querySelector(side==='debit'?'.vch-dr':'.vch-cr').value)||0;
+                if(!ledger.value || (side==='debit'&&!ids.includes(Number(ledger.value))) || amount<=0)return;
+                select.add(new Option((index+1)+'. '+ledger.options[ledger.selectedIndex].text+' / '+amount.toFixed(2),String(index)));
+            });
+            if(Array.from(select.options).some(option=>option.value===chosen))select.value=chosen;
+            if(!select.value&&select.options.length===2)select.selectedIndex=1;
+            select.dataset.selected=select.value;
+        });
+    }
     field('operation').addEventListener('change',refresh);field('asset_id').addEventListener('change',refresh);
-    form.addEventListener('change',event=>{if(event.target.matches('.vch-journal-ledger')&&ids.includes(Number(event.target.value))&&!form.elements.asset_payload.value){field('cost_ledger').value=event.target.value;refresh();dialog.showModal();}});
+    form.addEventListener('change',event=>{if(event.target.matches('.vch-journal-ledger')&&ids.includes(Number(event.target.value)))dialog.open=true;});
+    form.addEventListener('vch:change',syncEntryChoices);form.addEventListener('input',event=>{if(event.target.closest('[data-rows]'))syncEntryChoices();});
+    form.addEventListener('change',event=>{if(event.target.closest('[data-rows]'))syncEntryChoices();});
     field('life_months').addEventListener('change',()=>{if(field('method').value==='straight_line'&&Number(field('life_months').value)>0)field('rate').value=(1200/Number(field('life_months').value)).toFixed(3);});
-    refresh();
-    <?php if(!empty($_GET['asset_id']) || !empty($_GET['asset_new'])): ?>
-    <?php if(!empty($_GET['asset_id'])): ?>field('operation').value='addition';refresh();<?php endif; ?>dialog.showModal();
-    <?php endif; ?>
+    refresh();syncEntryChoices();
+    <?php if(!empty($_GET['asset_id'])): ?>field('operation').value='addition';refresh();dialog.open=true;<?php endif; ?>
 });
 </script>

@@ -31,3 +31,10 @@ try{faj_plan($data,$asset);throw new LogicException('Non-positive reversal accep
 $asset['carrying_amount']=123;
 try{faj_plan($data,$asset);throw new LogicException('Legacy valuation mismatch silently changed');}catch(RuntimeException $e){}
 echo "Impairment, reversal cap and historical-value guards passed.\n";
+$journal=['ledger_id'=>[1,2],'entry_type'=>['debit','credit'],'amount'=>[1200,1200],'memo'=>['Machine purchase','Supplier payable'],'line_cost_centre'=>['Office','Office']];
+$original=$journal;
+$bound=faj_from_journal_line(['operation'=>'acquisition','journal_line'=>0,'credit_line'=>1,'amount'=>999,'cost_ledger'=>999],$journal);
+faj_test($bound['amount']===1200.0 && $bound['cost_ledger']===1 && $bound['counter_ledger']===2,'Asset must use manually entered journal debit');
+faj_test($journal===$original,'Attaching details must not change journal rows');
+try{faj_from_journal_line(['operation'=>'acquisition','journal_line'=>1,'credit_line'=>0],$journal);throw new LogicException('Credit accepted as asset debit');}catch(RuntimeException $e){}
+echo "Journal-first asset metadata and debit/credit direction checks passed.\n";

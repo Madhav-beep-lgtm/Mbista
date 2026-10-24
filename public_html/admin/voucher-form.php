@@ -198,6 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['voucher_retry']=['type'=>'journal','input'=>$_POST];
         try {
             $assetData=(array)($_POST['asset_fields'] ?? []);
+            if (($_POST['grid_action'] ?? '')!=='remove_asset_journal') $assetData=faj_from_journal_line($assetData,$_POST);
             $rawPayload=trim((string)($_POST['asset_payload'] ?? ''));
             if(strlen($rawPayload)>200000) throw new RuntimeException('Asset details exceed the allowed size.');
             $events=$rawPayload!==''?faj_events(json_decode($rawPayload,true,32,JSON_THROW_ON_ERROR)):[];
@@ -211,18 +212,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bundle=faj_bundle_plan($companyId,faj_pack($events),(string)($_POST['voucher_date'] ?? ''));
             db()->rollBack();
             $input=$_POST;
-            foreach(['ledger_id','entry_type','amount','memo','line_cost_centre','line_reference','line_tax'] as $key) $input[$key]=[];
-            foreach($bundle['events'] as $index=>$assetData) foreach($bundle['plans'][$index]['deltas'] as $lid=>$delta) {
-                if(abs($delta)<0.005) continue;
-                $input['ledger_id'][]=$lid;$input['entry_type'][]=$delta>0?'debit':'credit';$input['amount'][]=abs($delta);
-                $input['memo'][]=trim(($assetData['name'] ?? '').' '.$assetData['operation']);
-                $input['line_cost_centre'][]=$assetData['cost_centre'] ?? '';
-            }
+            // Preserve all manually entered debit/credit rows, narration and cost centres.
             $input['asset_payload']=json_encode(faj_pack($bundle['events']),JSON_THROW_ON_ERROR);
             $input['asset_event_index']=min(max(0,$eventIndex),count($bundle['events'])-1);
             $input['asset_fields']=$bundle['events'][$input['asset_event_index']];
             $_SESSION['voucher_retry']['input']=$input;
-            flash('success','Asset journal prepared for review. Nothing has been posted.');
+            flash('success','Asset details attached. Journal debit and credit entries are unchanged.');
         } catch(Throwable $e) {
             if(db()->inTransaction()) db()->rollBack();
             flash('error',$e instanceof PDOException?'Could not prepare asset journal. Check the asset configuration.':$e->getMessage());
@@ -596,7 +591,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (faj_link($voucherId)) throw new RuntimeException('Asset details cannot be removed from this journal.');
             $assetCheck=db()->prepare('SELECT COUNT(*) FROM voucher_entries e JOIN ledgers l ON l.id=e.ledger_id LEFT JOIN ledger_groups g ON g.id=l.group_id WHERE e.voucher_id=? AND (l.is_fixed_asset=1 OR g.is_fixed_asset=1)');
             $assetCheck->execute([$voucherId]);
-            if((int)$assetCheck->fetchColumn()>0) throw new RuntimeException('Open Asset details and prepare the asset journal before saving.');
+            if((int)$assetCheck->fetchColumn()>0) throw new RuntimeException('Attach asset details to the journal entries before saving.');
         }
         // Stock and accounting commit together; failures roll back both.
         $stockNotes = [];
