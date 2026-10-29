@@ -991,7 +991,6 @@ document.addEventListener('DOMContentLoaded', () => {
     workspace: {
       client_id: 'admin/workspace.php?view=clients',
       team_id: 'admin/workspace.php?view=teams',
-      industry_id: 'admin/workspace.php?view=industries',
       contract_id: 'admin/workspace.php?view=contracts',
       compliance_type_id: 'admin/compliance.php?view=types',
       type_id: 'admin/compliance.php?view=types',

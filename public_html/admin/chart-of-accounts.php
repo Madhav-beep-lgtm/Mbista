@@ -457,7 +457,7 @@ $coaRowPill = static function (string $status): string {
                     </tr>
                     <?php foreach ($groupsByNature[$nature] as $g): ?>
                         <?php $gid = (int) $g['id']; ?>
-                        <tr class="coa-node coa-child coa-group-row" data-branch="g<?= $gid ?>" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
+                        <tr class="coa-node coa-group-row" data-branch="g<?= $gid ?>" data-parent-of="m<?= e($digit) ?>" data-name="<?= e(strtolower($g['name'] . ' ' . $g['code'])) ?>">
                             <td><?= e($g['code']) ?></td>
                             <td style="padding-left:18px"><?= e($g['name']) ?></td>
                             <td><span class="mbw-pill tone-purple"><?= !empty($g['parent_group_id']) ? 'Subgroup' : 'Group' ?></span></td>
@@ -466,7 +466,7 @@ $coaRowPill = static function (string $status): string {
                             <td><div class="coa-row-actions"><a class="coa-action" href="<?= e(url('admin/create-account.php?edit_kind=group&edit_id=' . $gid)) ?>">Edit</a></div></td>
                         </tr>
                         <?php foreach ($ledgersByGroup[$gid] ?? [] as $l): ?>
-                            <tr class="coa-node coa-child" data-parent-of="m<?= e($digit) ?> g<?= $gid ?>" data-name="<?= e(strtolower($l['name'] . ' ' . $l['code'])) ?>">
+                            <tr class="coa-node" data-parent-of="m<?= e($digit) ?> g<?= $gid ?>" data-name="<?= e(strtolower($l['name'] . ' ' . $l['code'])) ?>">
                                 <td><?= e($l['code']) ?></td>
                                 <td style="padding-left:36px"><?= e($l['name']) ?></td>
                                 <td><span class="mbw-pill tone-teal"><?= !empty($l['parent_ledger_id']) ? 'Subledger' : 'Ledger' ?></span></td>

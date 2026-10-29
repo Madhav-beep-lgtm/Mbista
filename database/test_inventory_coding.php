@@ -121,7 +121,10 @@ ok(inv_hs_code_error('84A1') !== null, 'A letter in an HS code is refused');
 ok(inv_hs_code_error('.471') !== null, 'An HS code starting with a dot is refused');
 
 echo "\n4. The form and the save path enforce the same rule\n";
-$formSource = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php');
+// The creation form lives in a partial; the save path stays on the page.
+// Both are the form as far as these rules are concerned.
+$formSource = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php')
+    . (string) @file_get_contents(dirname(__DIR__) . '/app/views/partials/item_creation_form.php');
 ok(str_contains($formSource, 'inv_item_code_error('),
     'The save path checks the code through the shared rule, not its own');
 ok(str_contains($formSource, 'inv_item_name_error(') && str_contains($formSource, 'inv_hs_code_error('),
@@ -225,7 +228,8 @@ ok((int) db()->query("SELECT COUNT(*) FROM inventory_units WHERE company_id = {$
 echo "
 8. The item form chooses from the masters
 ";
-$formSource = (string) file_get_contents(dirname(__DIR__) . "/public_html/admin/accounting-inventory.php");
+$formSource = (string) file_get_contents(dirname(__DIR__) . "/public_html/admin/accounting-inventory.php")
+    . (string) @file_get_contents(dirname(__DIR__) . "/app/views/partials/item_creation_form.php");
 ok(str_contains($formSource, '<select name="unit_id" required>'),
     'The unit is chosen from a list, not typed');
 ok(str_contains($formSource, '<select name="category_id" required>'),

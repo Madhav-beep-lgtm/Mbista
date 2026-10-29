@@ -754,7 +754,19 @@ function coa_import_commit(int $companyId, int $importId, int $userId = 0): arra
         if ($lockedBatch->fetchColumn() !== 'staged') throw new RuntimeException('This upload is no longer staged.');
         coa_import_revalidate($companyId, $importId);
         $freshBatch = coa_import_batch($companyId, $importId);
-        if ((int)$freshBatch['error_count'] > 0 || coa_import_balance_error($freshBatch) !== null) throw new RuntimeException('Correct all upload errors and balance the opening amounts before committing.');
+        // Re-checked INSIDE the lock because the sheet is revalidated a line
+        // above: a row that was ready when the preview was drawn may have
+        // stopped being ready since.
+        //
+        // Only the balance is fatal. An errored row is refused on its own and
+        // reported by name; it does not refuse the rows beside it. Making any
+        // single bad row reject the whole file meant a 200-line chart with one
+        // typo imported nothing, and left the preview offering to correct or
+        // remove rows that could no longer be skipped past. Nothing importable
+        // at all is already caught by the ready_count guard above.
+        if (coa_import_balance_error($freshBatch) !== null) {
+            throw new RuntimeException((string) coa_import_balance_error($freshBatch));
+        }
         $rows = coa_import_rows($companyId, $importId);
         $order = ['group'=>0,'subgroup'=>1,'ledger'=>2,'subledger'=>3];
         usort($rows, static fn($a,$b) => ($order[strtolower($a['raw_level'])] ?? 4) <=> ($order[strtolower($b['raw_level'])] ?? 4));

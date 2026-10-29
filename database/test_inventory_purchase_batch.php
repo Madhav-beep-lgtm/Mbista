@@ -516,7 +516,7 @@ echo "\n== The register itself ==\n";
 // three new buttons live and where a <form> inside a <form> would silently
 // stop the counted lines being sent at all.
 $_SERVER['REQUEST_METHOD'] = 'GET';
-$_SERVER['SCRIPT_NAME'] = '/admin/accounting-inventory.php';
+$_SERVER['SCRIPT_NAME'] = '/admin/inventory-purchases.php';
 $_SERVER['HTTPS'] = 'on';
 $_SERVER['HTTP_HOST'] = '127.0.0.1';
 $_SESSION['user_id'] = (int) db()->query("SELECT id FROM users WHERE role = 'admin' AND status = 'active' ORDER BY id LIMIT 1")->fetchColumn();
@@ -527,12 +527,12 @@ mark_company_pin_verified($cid);
 // It is rendered in its edit view, which draws the register AND the form
 // filled back in from a recorded bill — every piece of the new markup at once.
 $editTarget = (int) db()->query("SELECT id FROM vouchers WHERE company_id=$cid AND reference_no='ABC-9001' LIMIT 1")->fetchColumn();
-$_GET = ['view' => 'inventory', 'task' => 'purchase', 'edit_bill' => $editTarget];
+$_GET = ['edit_bill' => $editTarget];
 $_POST = [];
 ob_start();
 $renderError = null;
 try {
-    include dirname(__DIR__) . '/public_html/admin/accounting-inventory.php';
+    include dirname(__DIR__) . '/public_html/admin/inventory-purchases.php';
 } catch (Throwable $e) {
     $renderError = get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine();
 }

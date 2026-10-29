@@ -201,12 +201,21 @@ function makeDom(options) {
         getElementById: function (id) { return head.children.filter(function (c) { return c.id === id; })[0] || null; },
         createElement: function (tag) { return new El(tag); },
         querySelectorAll: function (sel2) { return body.querySelectorAll(sel2); },
-        addEventListener: function () {}
+        addEventListener: function () {},
+        removeEventListener: function () {}
     };
     var windowObj = {
         innerWidth: options.viewport.width,
         innerHeight: options.viewport.height,
         addEventListener: function (type, fn) { (listeners.window[type] = listeners.window[type] || []).push(fn); },
+        // The code under test detaches its scroll/resize listeners when a
+        // list closes. Without this the stub threw on the first blur and the
+        // harness died before printing its own summary -- so the suite that
+        // reads that summary reported a harness fault, not a placement one.
+        removeEventListener: function (type, fn) {
+            var kept = (listeners.window[type] || []).filter(function (f) { return f !== fn; });
+            listeners.window[type] = kept;
+        },
         // Run straight away: the blur handler defers its close by 120ms and
         // the test wants to see what the close leaves behind.
         setTimeout: function (fn) { fn(); return 0; }
