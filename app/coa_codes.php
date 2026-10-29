@@ -85,7 +85,24 @@ function coa_code_plan(array $groups, array $ledgers): array
         $gid = (int) ($ledger['group_id'] ?? 0);
         if ($gid && !isset($result['ledger_groups'][$gid])) throw new RuntimeException('Missing group for ledger ID ' . $ledger['id']);
         $base = $gid ? $result['ledger_groups'][$gid] : coa_code_format(COA_NATURE_CODES[$ledger['type']]);
-        if ((int) $base[0] !== COA_NATURE_CODES[$ledger['type']]) throw new RuntimeException('Ledger/group nature mismatch at ledger ID ' . $ledger['id']);
+        // A CONTRA account sits under the head it reduces, carrying the
+        // opposite nature: Purchase Returns is a credit filed under Purchases,
+        // Sales Returns a debit filed under Sales. That is how both read on a
+        // trading account -- as deductions from the head above them, not as
+        // income and expense of their own somewhere else in the chart.
+        //
+        // Demanding the two natures match outright refused those, and refused
+        // them at code-allocation time, so the whole chart failed to number.
+        // The code still comes from the GROUP, which is what puts the account
+        // under the right head. Only revenue and expense pair this way; an
+        // asset in an equity group is still a fault and still says so.
+        $ledgerNature = COA_NATURE_CODES[$ledger['type']];
+        $groupNature = (int) $base[0];
+        $contraPair = [COA_NATURE_CODES['revenue'], COA_NATURE_CODES['expense']];
+        if ($groupNature !== $ledgerNature
+            && !(in_array($groupNature, $contraPair, true) && in_array($ledgerNature, $contraPair, true))) {
+            throw new RuntimeException('Ledger/group nature mismatch at ledger ID ' . $ledger['id']);
+        }
         $buckets[$base][] = $ledger;
     }
     foreach ($buckets as $base => $rows) $allocate($rows, array_map('intval', explode('.', $base)), 3, 'ledgers');
@@ -132,7 +149,16 @@ function coa_trial_balance_rows(array $balances, array $groups, bool $hideZero):
             $group = $byGroup[$gid];
             $pid = (int) ($group['parent_group_id'] ?? 0);
             if (isset($byGroup[$pid])) $path[] = ['key' => 'g' . $pid, 'code' => $byGroup[$pid]['code'], 'name' => $byGroup[$pid]['name']];
-            $path[] = ['key' => 'g' . $gid, 'code' => $group['code'], 'name' => $group['name']];
+            // A group with no head is broken data -- nothing refused the empty
+            // value when it was written. The row is still filed under the
+            // ledger's own nature so the account is never dropped from the
+            // trial balance, but the heading says so, because an account filed
+            // somewhere plausible by guesswork is one nobody will ever go and fix.
+            $groupLabel = (string) $group['name'];
+            if ((string) ($group['master_key'] ?? '') === '') {
+                $groupLabel .= ' (Unclassified)';
+            }
+            $path[] = ['key' => 'g' . $gid, 'code' => $group['code'], 'name' => $groupLabel];
         }
         $parent = '';
         foreach ($path as $level => $item) {

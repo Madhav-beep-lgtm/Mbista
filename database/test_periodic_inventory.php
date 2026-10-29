@@ -1027,7 +1027,10 @@ foreach ($tbReport['rows'] as $reportRow) {
 ok(str_contains($printed, 'Sundry debtors'), 'The properly filed account is printed');
 ok(str_contains($printed, 'Sales'),
     'AND SO IS THE HOMELESS ONE — it used to be dropped without a word');
-ok(stripos($printed, 'Unclassified') !== false,
+// The heading was renamed Unclassified -> Ungrouped. What matters is that
+// an account with no group is still SHOWN, under a heading that says so,
+// rather than dropped from the trial balance without a word.
+ok(stripos($printed, 'Ungrouped') !== false || stripos($printed, 'Unclassified') !== false,
     '  ...under a heading that says what is wrong with it, so it can be fixed');
 
 // The point of all of it: the totals have to agree.
@@ -1458,7 +1461,9 @@ with_method('periodic', static function () use ($piCo, $piFy, $piUser, $piA, $pi
 });
 
 // And the form has to ASK, or none of the above can ever be set.
-$itemFormSource = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php');
+// The item form moved into a partial; the page keeps the save path.
+$itemFormSource = (string) file_get_contents(dirname(__DIR__) . '/public_html/admin/accounting-inventory.php')
+    . (string) @file_get_contents(dirname(__DIR__) . '/app/views/partials/item_creation_form.php');
 ok(preg_match('~inv_accounting_method\(\$companyId\) === .periodic.\s*\?\s*\[.purchases.~', $itemFormSource) === 1,
     'The item form asks for the Purchases account when THIS COMPANY keeps periodic books');
 ok(str_contains($itemFormSource, "'inventory_asset', 'purchases', 'purchase_returns'"),
