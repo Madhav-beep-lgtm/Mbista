@@ -92,9 +92,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!isset($masters[$masterKey])) throw new InvalidArgumentException('Select a valid master.');
         } elseif (($level === 'subgroup' || $level === 'ledger') && str_starts_with($parent, 'group:')) {
             $groupId = (int) substr($parent, 6);
-            $find = db()->prepare('SELECT master_key FROM ledger_groups WHERE id = :id AND company_id = :cid AND is_active = 1');
+            $find = db()->prepare('SELECT master_key, name FROM ledger_groups WHERE id = :id AND company_id = :cid AND is_active = 1');
             $find->execute(['id' => $groupId, 'cid' => $companyId]);
-            $masterKey = (string) ($find->fetchColumn() ?: '');
+            $parentGroupRow = $find->fetch(PDO::FETCH_ASSOC) ?: [];
+            $masterKey = (string) ($parentGroupRow['master_key'] ?? '');
+            $parentName = (string) ($parentGroupRow['name'] ?? '');
         } elseif ($level === 'subledger' && str_starts_with($parent, 'ledger:')) {
             $ledgerParent = (int) substr($parent, 7);
             $find = db()->prepare('SELECT l.group_id, g.master_key, l.type FROM ledgers l JOIN ledger_groups g ON g.id = l.group_id AND g.company_id = l.company_id WHERE l.id = :id AND l.company_id = :cid AND l.status = \'active\' AND l.parent_ledger_id IS NULL');
@@ -104,7 +106,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $groupId = (int) $parentRow['group_id'];
             $masterKey = (string) $parentRow['master_key'];
         }
-        if ($masterKey === '' || ledger_master_nature($masterKey) !== $nature) throw new InvalidArgumentException('Select a parent of the same nature and correct level.');
+        if ($masterKey === '') {
+            throw new InvalidArgumentException('Choose a parent for this ' . $level . '.');
+        }
+        $parentNature = ledger_master_nature($masterKey);
+        if ($parentNature !== $nature) {
+            // Name the parent, name both natures, and say which two things
+            // disagree. "Select a parent of the same nature" told somebody
+            // putting an asset under Share Capital neither what they had
+            // chosen nor what Share Capital is.
+            $natureLabel = static function (?string $n): string {
+                foreach (LEDGER_MASTERS as $m) {
+                    if (($m['nature'] ?? '') === $n) { return strtolower((string) $n); }
+                }
+                return strtolower((string) $n);
+            };
+            throw new InvalidArgumentException(sprintf(
+                '%s is %s %s account, and this is %s %s account. Change the nature, or choose %s parent.',
+                ($parentName ?? '') !== '' ? $parentName : 'That parent',
+                in_array($parentNature, ['asset', 'equity', 'expense'], true) ? 'an' : 'a',
+                $natureLabel($parentNature),
+                in_array($nature, ['asset', 'equity', 'expense'], true) ? 'an' : 'a',
+                $natureLabel($nature),
+                in_array($nature, ['asset', 'equity', 'expense'], true) ? 'an ' . $natureLabel($nature) : 'a ' . $natureLabel($nature)
+            ));
+        }
         $table = $isGroup ? 'ledger_groups' : 'ledgers';
         $duplicate = db()->prepare("SELECT id FROM $table WHERE company_id = :cid AND LOWER(TRIM(name)) = LOWER(:name) AND id <> :edit_id LIMIT 1");
         $duplicate->execute(['cid' => $companyId, 'name' => $name, 'edit_id' => $editId]);
