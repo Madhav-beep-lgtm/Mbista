@@ -1143,6 +1143,19 @@ function jw_ledger_group_id(int $companyId, string $name, string $masterKey): in
     if (!table_exists('ledger_groups')) {
         return 0;
     }
+    // Refuse a head that is not one, rather than letting MySQL write ''.
+    //
+    // `purchases` joined the master_key ENUM in migration 132, but this
+    // function was already being passed it. Outside strict mode an invalid
+    // ENUM value is not an error -- it is stored as the empty string. So the
+    // group was created with no head, the next run's lookup on master_key =
+    // 'purchases' did not match that '' row, and another group was created.
+    // Several companies ended up with duplicate "Purchase Accounts" groups
+    // that nothing could number, which stopped the account-code migration for
+    // the whole installation.
+    if (!isset(LEDGER_MASTERS[$masterKey])) {
+        throw new InvalidArgumentException('Unknown accounting head "' . $masterKey . '" for group "' . $name . '".');
+    }
     $stmt = db()->prepare('SELECT id FROM ledger_groups WHERE company_id = :cid AND name = :name AND master_key = :mk
         ORDER BY id ASC LIMIT 1');
     $stmt->execute(['cid' => $companyId, 'name' => $name, 'mk' => $masterKey]);
