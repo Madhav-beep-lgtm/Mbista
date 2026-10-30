@@ -26,6 +26,35 @@ $base = $argv[1] ?? dirname(__DIR__);
 $apply = in_array('--apply', $argv, true);
 require $base . '/app/bootstrap.php';
 
+// --set=ID:master files ONE group by hand: the answer for a group a person
+// made, which this script will not guess at. It still refuses a head that is
+// not a head, and it still will not touch a group that already has one.
+foreach ($argv as $arg) {
+    if (!preg_match('/^--set=(\d+):([a-z_]+)$/D', $arg, $m)) { continue; }
+    [$id, $master] = [(int) $m[1], $m[2]];
+    if (!isset(LEDGER_MASTERS[$master])) {
+        fwrite(STDERR, 'Unknown head "' . $master . '". One of: ' . implode(', ', array_keys(LEDGER_MASTERS)) . "\n");
+        exit(2);
+    }
+    $stmt = db()->prepare('SELECT company_id, name, master_key FROM ledger_groups WHERE id = ?');
+    $stmt->execute([$id]);
+    $group = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$group) { fwrite(STDERR, "Group {$id} not found.\n"); exit(1); }
+    if ((string) $group['master_key'] !== '') {
+        fwrite(STDERR, "Group {$id} \"{$group['name']}\" is already filed under {$group['master_key']}. Nothing changed.\n");
+        exit(1);
+    }
+    printf("%-6s group %-6s company %-4s %-26s -> %s\n", $apply ? 'SET' : 'WOULD',
+        $id, $group['company_id'], substr((string) $group['name'], 0, 26), $master);
+    if ($apply) {
+        db()->prepare('UPDATE ledger_groups SET master_key = :mk WHERE id = :id')->execute(['mk' => $master, 'id' => $id]);
+        echo "Done.\n";
+    } else {
+        echo "Re-run with --apply to write.\n";
+    }
+    exit;
+}
+
 // name (lower-cased) => master key, taken from LEDGER_MASTERS itself.
 $known = [];
 foreach (ledger_masters() as $masterKey => $meta) {
