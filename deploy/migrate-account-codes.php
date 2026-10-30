@@ -65,7 +65,19 @@ try {
         echo count($rows) . " group(s) have no accounting head. No data changed.\n";
         exit;
     }
-    $preview = coa_migrate_codes(false);
+    // Named on EVERY run, in both modes. A company that does not migrate is a
+    // standing fact about the installation, not a one-off warning somebody saw
+    // scroll past during a deploy three weeks ago.
+    $announce = static function (array $skipped): void {
+        foreach ($skipped as $cid => $why) {
+            $stmt = db()->prepare('SELECT name FROM companies WHERE id = ?');
+            $stmt->execute([$cid]);
+            fwrite(STDERR, 'SKIPPED company ' . $cid . ' (' . ($stmt->fetchColumn() ?: '?') . '): ' . $why . "\n");
+        }
+    };
+
+    $preview = coa_migrate_codes(false, null, $skipped);
+    $announce($skipped);
     if ($mode === '--apply' && $preview) {
         foreach (['ledger_groups', 'ledgers'] as $table) {
             if (!column_exists($table, 'legacy_code')) db()->exec("ALTER TABLE {$table} ADD COLUMN legacy_code VARCHAR(80) DEFAULT NULL");
@@ -78,7 +90,8 @@ try {
         if (fwrite($handle, $json) !== strlen($json)) throw new RuntimeException('Cannot write migration audit file.');
         fclose($handle);
         chmod($path, 0600);
-        $applied = coa_migrate_codes(true, $preview);
+        $applied = coa_migrate_codes(true, $preview, $skipped);
+        $announce($skipped);
         echo count($applied) . " account codes updated; IDs and transaction links unchanged. Audit: {$path}\n";
     } else {
         echo count($preview) . " codes require migration. No data changed.\n";

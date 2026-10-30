@@ -268,14 +268,33 @@ function coa_create_system_ledger(int $companyId, int $groupId, string $alias, s
     }
 }
 
-/** Explicit CLI migration only. Schema changes happen before the data transaction. */
-function coa_migrate_codes(bool $apply = false, ?array $expectedChanges = null): array
+/**
+ * Explicit CLI migration only. Schema changes happen before the data transaction.
+ *
+ * A company whose chart cannot be numbered is SKIPPED, with its reason, rather
+ * than refusing the installation. Codes are per company, and one shop with
+ * 4,752 ledgers in a single group -- more than the three digits of
+ * M.GG.SS.LLL.UU have room for -- is a real chart that has outgrown the
+ * format. What to do about it belongs to whoever keeps those books. It is not
+ * a reason for every other company to stay unnumbered, and it is not something
+ * a deploy should sit and wait on.
+ *
+ * Nothing goes quiet: $skipped comes back as company id => why, and the caller
+ * names them every run.
+ */
+function coa_migrate_codes(bool $apply = false, ?array $expectedChanges = null, ?array &$skipped = null): array
 {
     $plans = [];
     $changes = [];
+    $skipped = [];
     foreach (db()->query('SELECT id FROM companies ORDER BY id')->fetchAll(PDO::FETCH_COLUMN) as $cid) {
         $rows = coa_company_code_rows((int) $cid);
-        $plan = coa_code_plan($rows['ledger_groups'], $rows['ledgers'], true);
+        try {
+            $plan = coa_code_plan($rows['ledger_groups'], $rows['ledgers'], true);
+        } catch (RuntimeException $planFailure) {
+            $skipped[(int) $cid] = $planFailure->getMessage();
+            continue;
+        }
         $plans[(int) $cid] = $plan;
         foreach ($rows as $table => $items) foreach ($items as $row) {
             $new = $plan[$table][(int) $row['id']];
