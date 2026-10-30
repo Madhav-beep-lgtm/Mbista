@@ -199,6 +199,32 @@ body.admin-layout .vch-table, body.admin-layout .frm-entries { width: auto; min-
 .notice.warning, .alert.warning { border-left-color: var(--color-warning); background: var(--color-warning-soft); }
 .flash-notice { margin-bottom: var(--space-4); }
 
+/* Flash messages float; main.js moves them here so they do not shift the page. */
+#toast-root {
+  position: fixed; top: var(--space-4); right: var(--space-4); z-index: 1200;
+  display: flex; width: min(380px, calc(100vw - var(--space-4) * 2));
+  flex-direction: column; gap: var(--space-2); pointer-events: none;
+}
+#toast-root .toast {
+  display: flex; align-items: flex-start; gap: var(--space-3); margin: 0;
+  box-shadow: var(--shadow-panel); pointer-events: auto;
+  animation: toast-in 180ms ease-out both;
+}
+#toast-root .toast.toast-out { animation: toast-out 300ms ease-in both; }
+.toast-close {
+  margin-left: auto; padding: 0 2px; border: 0; background: none; color: var(--color-text-muted);
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.toast-close:hover { color: var(--color-text); }
+@keyframes toast-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes toast-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(16px); } }
+@media (prefers-reduced-motion: reduce) {
+  #toast-root .toast, #toast-root .toast.toast-out { animation: none; }
+}
+@media (max-width: 640px) {
+  #toast-root { top: auto; right: var(--space-3); bottom: var(--space-3); left: var(--space-3); width: auto; }
+}
+
 /* Neutral dashboard summaries */
 .mbw-kpi-grid, .mbw-qa-grid, .cr-kpi-grid, .ov-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .mbw-kpi, .mbw-stat, .mbw-qa, .cr-kpi, .ov-kpi {
