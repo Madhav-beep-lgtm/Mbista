@@ -86,30 +86,30 @@ $mkLedger = static function (string $code, string $name, string $master) use ($c
     db()->prepare('INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,:n,:c,:m)')
         ->execute(['cid' => $cid, 'n' => 'JW ' . $code, 'c' => 'G' . $code, 'm' => $master]);
     $gid = (int) db()->lastInsertId();
-    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,:n,:c)')
-        ->execute(['cid' => $cid, 'g' => $gid, 'n' => $name, 'c' => $code]);
+    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
+        ->execute(['cid' => $cid, 'g' => $gid, 'n' => $name, 'c' => $code, 't' => ledger_master_nature($master)]);
 
     return (int) db()->lastInsertId();
 };
 foreach ([
-    ['stock_metal', 'STKM', 'Metal Stock', 'assets'],
-    ['stock_finished', 'STKF', 'Finished Stock', 'assets'],
-    ['stock_karigar', 'STKK', 'Metal with Karigar', 'assets'],
-    ['making_expense', 'MAKE', 'Making Charges', 'expenses'],
-    ['wastage_loss', 'WAST', 'Wastage Loss', 'expenses'],
-    ['karigar_payable', 'KARP', 'Karigar Payable', 'liabilities'],
-    ['cogs', 'COGS', 'Cost of Goods Sold', 'expenses'],
-    ['sales_metal', 'SALM', 'Sales Metal', 'income'],
-    ['sales_making', 'SALK', 'Sales Making', 'income'],
-    ['sales_stone', 'SALS', 'Sales Stone', 'income'],
-    ['vat_output', 'VATO', 'VAT Output', 'liabilities'],
-    ['vat_input', 'VATI', 'VAT Input', 'assets'],
-    ['spt_output', 'SPTO', 'SD Tax Output', 'liabilities'],
-    ['spt_input', 'SPTI', 'SD Tax Input', 'assets'],
+    ['stock_metal', 'STKM', 'Metal Stock', 'current_asset'],
+    ['stock_finished', 'STKF', 'Finished Stock', 'current_asset'],
+    ['stock_karigar', 'STKK', 'Metal with Karigar', 'current_asset'],
+    ['making_expense', 'MAKE', 'Making Charges', 'direct_expense'],
+    ['wastage_loss', 'WAST', 'Wastage Loss', 'direct_expense'],
+    ['karigar_payable', 'KARP', 'Karigar Payable', 'current_liability'],
+    ['cogs', 'COGS', 'Cost of Goods Sold', 'direct_expense'],
+    ['sales_metal', 'SALM', 'Sales Metal', 'direct_income'],
+    ['sales_making', 'SALK', 'Sales Making', 'direct_income'],
+    ['sales_stone', 'SALS', 'Sales Stone', 'direct_income'],
+    ['vat_output', 'VATO', 'VAT Output', 'current_liability'],
+    ['vat_input', 'VATI', 'VAT Input', 'current_asset'],
+    ['spt_output', 'SPTO', 'SD Tax Output', 'current_liability'],
+    ['spt_input', 'SPTI', 'SD Tax Input', 'current_asset'],
 ] as [$purpose, $code, $name, $master]) {
     jewellery_save_mapping($cid, $purpose, $mkLedger($code, $name, $master), $uid);
 }
-$cash = $mkLedger('CASHJ', 'Cash', 'assets');
+$cash = $mkLedger('CASHJ', 'Cash', 'current_asset');
 
 db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status) VALUES (:c,'SUP1','Bullion House','supplier','active')")->execute(['c' => $cid]);
 $supplier = (int) db()->lastInsertId();

@@ -83,8 +83,8 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
     return (int) db()->lastInsertId();
 };
 foreach ([
-    ['stock_metal', 'OSTKM', 'Metal Stock', 'assets', 'asset'],
-    ['stock_finished', 'OSTKF', 'Finished Stock', 'assets', 'asset'],
+    ['stock_metal', 'OSTKM', 'Metal Stock', 'current_asset', 'asset'],
+    ['stock_finished', 'OSTKF', 'Finished Stock', 'current_asset', 'asset'],
     ['opening_equity', 'OOPEQ', 'Opening Equity', 'equity', 'equity'],
 ] as [$purpose, $code, $name, $master, $type]) {
     jewellery_save_mapping($cid, $purpose, $mkLedger($cid, $code, $name, $master, $type), $uid);

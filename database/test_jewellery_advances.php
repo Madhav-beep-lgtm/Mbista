@@ -103,7 +103,7 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
     $gid = (int) db()->lastInsertId();
     db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
         ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code,
-            't' => $master === 'equity' ? 'equity' : ($master === 'liabilities' || $master === 'current_liability' ? 'liability'
+            't' => $master === 'equity' ? 'equity' : ($master === 'current_liability' ? 'liability'
                 : (str_ends_with($master, '_income') ? 'revenue'
                     : (str_ends_with($master, '_expense') ? 'expense' : 'asset')))]);
 

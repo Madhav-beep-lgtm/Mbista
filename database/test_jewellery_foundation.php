@@ -247,7 +247,7 @@ echo "\n11. Ledger mapping ladder and cross-tenant guard\n";
 // Two ledgers per company, created through the same path the app uses.
 $mkLedger = static function (int $companyId, string $code, string $name): int {
     db()->prepare('INSERT INTO ledger_groups (company_id, name, code, master_key) VALUES (:cid, :n, :c, :m)')
-        ->execute(['cid' => $companyId, 'n' => 'JW ' . $name, 'c' => 'JWG' . $code, 'm' => 'assets']);
+        ->execute(['cid' => $companyId, 'n' => 'JW ' . $name, 'c' => 'JWG' . $code, 'm' => 'current_asset']);
     $groupId = (int) db()->lastInsertId();
     db()->prepare('INSERT INTO ledgers (company_id, group_id, name, code) VALUES (:cid, :g, :n, :c)')
         ->execute(['cid' => $companyId, 'g' => $groupId, 'n' => $name, 'c' => $code]);

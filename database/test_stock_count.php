@@ -83,7 +83,7 @@ $mkLedger = static function (string $code, string $name, string $type) use ($cid
 $lStock = $mkLedger('STC-1400', 'Inventory Asset', 'asset');
 $lCogs = $mkLedger('STC-5000', 'Cost of Goods Sold', 'expense');
 $lLoss = $mkLedger('STC-5100', 'Inventory Loss', 'expense');
-$lGain = $mkLedger('STC-4100', 'Inventory Gain', 'income');
+$lGain = $mkLedger('STC-4100', 'Inventory Gain', 'direct_income');
 $lClearing = $mkLedger('STC-2100', 'Purchase Clearing', 'liability');
 $lEquity = $mkLedger('STC-3000', 'Opening Equity', 'equity');
 foreach ([['inventory_asset', $lStock], ['cogs', $lCogs], ['inventory_loss', $lLoss],

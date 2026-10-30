@@ -141,29 +141,29 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
     db()->prepare('INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,:n,:c,:m)')
         ->execute(['cid' => $companyId, 'n' => 'TX ' . $code, 'c' => 'G' . $code, 'm' => $master]);
     $gid = (int) db()->lastInsertId();
-    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,:n,:c)')
-        ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code]);
+    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
+        ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code, 't' => ledger_master_nature($master)]);
 
     return (int) db()->lastInsertId();
 };
 $L = [];
 foreach ([
-    ['stock_metal', 'TSTKM', 'Metal Stock', 'assets'],
-    ['stock_finished', 'TSTKF', 'Finished Stock', 'assets'],
-    ['sales_metal', 'TSALM', 'Sales Metal', 'income'],
-    ['sales_making', 'TSALK', 'Sales Making', 'income'],
-    ['sales_stone', 'TSALS', 'Sales Stone', 'income'],
-    ['cogs', 'TCOGS', 'COGS', 'expenses'],
-    ['vat_input', 'TVATI', 'VAT Input', 'assets'],
-    ['vat_output', 'TVATO', 'VAT Output', 'liabilities'],
-    ['spt_input', 'TSPTI', 'SPT Input', 'assets'],
-    ['spt_output', 'TSPTO', 'SPT Output', 'liabilities'],
+    ['stock_metal', 'TSTKM', 'Metal Stock', 'current_asset'],
+    ['stock_finished', 'TSTKF', 'Finished Stock', 'current_asset'],
+    ['sales_metal', 'TSALM', 'Sales Metal', 'direct_income'],
+    ['sales_making', 'TSALK', 'Sales Making', 'direct_income'],
+    ['sales_stone', 'TSALS', 'Sales Stone', 'direct_income'],
+    ['cogs', 'TCOGS', 'COGS', 'direct_expense'],
+    ['vat_input', 'TVATI', 'VAT Input', 'current_asset'],
+    ['vat_output', 'TVATO', 'VAT Output', 'current_liability'],
+    ['spt_input', 'TSPTI', 'SPT Input', 'current_asset'],
+    ['spt_output', 'TSPTO', 'SPT Output', 'current_liability'],
     ['opening_equity', 'TOPEQ', 'Opening Equity', 'equity'],
 ] as [$purpose, $code, $name, $master]) {
     $L[$purpose] = $mkLedger($cid, $code, $name, $master);
     jewellery_save_mapping($cid, $purpose, $L[$purpose], $uid);
 }
-$cash = $mkLedger($cid, 'TCASH', 'Cash', 'assets');
+$cash = $mkLedger($cid, 'TCASH', 'Cash', 'current_asset');
 
 $chain = jewellery_save_item($cid, ['code' => 'CH-1', 'name' => 'Chain', 'item_type' => 'ornament',
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'vat_applicable' => 0], $uid);
@@ -229,7 +229,7 @@ ok(count($breakdown) === 1, 'Only the SD tax was charged, so only it is in the b
 echo "\n6. Item-wise sales ledgers\n";
 // Point the RING's metal revenue at its own ledger. The CHAIN keeps the
 // company default, and neither posting path changes.
-$ringSales = $mkLedger($cid, 'TSALR', 'Sales — Stone Rings', 'income');
+$ringSales = $mkLedger($cid, 'TSALR', 'Sales — Stone Rings', 'direct_income');
 db()->prepare("INSERT INTO inventory_ledger_mappings (company_id, scope, purpose, item_id, ledger_id, created_by)
     VALUES (:cid,'item','sales_revenue',:iid,:lid,:by)")
     ->execute(['cid' => $cid, 'iid' => $ring, 'lid' => $ringSales, 'by' => $uid]);

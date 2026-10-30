@@ -87,14 +87,14 @@ $mkLedger = static function (string $code, string $name, string $type, string $m
     return (int) db()->lastInsertId();
 };
 $LED = [
-    'asset' => $mkLedger('PCF-1000', 'Bank', 'asset', 'assets'),
-    'stock' => $mkLedger('PCF-1400', 'Inventory Asset', 'asset', 'assets'),
-    'liability' => $mkLedger('PCF-2000', 'Trade Payable', 'liability', 'liabilities'),
+    'asset' => $mkLedger('PCF-1000', 'Bank', 'asset', 'current_asset'),
+    'stock' => $mkLedger('PCF-1400', 'Inventory Asset', 'asset', 'current_asset'),
+    'liability' => $mkLedger('PCF-2000', 'Trade Payable', 'liability', 'current_liability'),
     'equity' => $mkLedger('PCF-3000', 'Capital', 'equity', 'equity'),
-    'revenue' => $mkLedger('PCF-4000', 'Sales', 'revenue', 'income'),
-    'expense' => $mkLedger('PCF-5000', 'Rent', 'expense', 'expenses'),
-    'clearing' => $mkLedger('PCF-2100', 'Purchase Clearing', 'liability', 'liabilities'),
-    'cogs' => $mkLedger('PCF-5100', 'Cost of Goods Sold', 'expense', 'expenses'),
+    'revenue' => $mkLedger('PCF-4000', 'Sales', 'revenue', 'direct_income'),
+    'expense' => $mkLedger('PCF-5000', 'Rent', 'expense', 'direct_expense'),
+    'clearing' => $mkLedger('PCF-2100', 'Purchase Clearing', 'liability', 'current_liability'),
+    'cogs' => $mkLedger('PCF-5100', 'Cost of Goods Sold', 'expense', 'direct_expense'),
     'equity_open' => $mkLedger('PCF-3100', 'Opening Equity', 'equity', 'equity'),
 ];
 foreach ([['inventory_asset', $LED['stock']], ['purchase_clearing', $LED['clearing']],
@@ -441,7 +441,7 @@ ok($readsOpening === [],
 // terms does not change the sum. What was wrong was the column.
 echo "\n7. An opening balance reads as an opening, not as a day-one transaction\n";
 
-$obLedger = $mkLedger('PCF-1200', 'Opening Test Debtor', 'asset', 'assets');
+$obLedger = $mkLedger('PCF-1200', 'Opening Test Debtor', 'asset', 'current_asset');
 $obEquity = $mkLedger('PCF-3200', 'Opening Balance Adjustments', 'equity', 'equity');
 
 // Dated on the fiscal year's first day, exactly as post_ledger_opening_balance()
@@ -528,7 +528,7 @@ ok($obMissing === [], 'Every opening writer is named in accounting_opening_sourc
 // and anybody could post to it by hand.
 echo "\n8. A single-sided opening is balanced by a computed difference\n";
 
-$diffLedger = $mkLedger('PCF-1300', 'Single Sided Debtor', 'asset', 'assets');
+$diffLedger = $mkLedger('PCF-1300', 'Single Sided Debtor', 'asset', 'current_asset');
 db()->prepare("UPDATE ledgers SET opening_balance = 65000.00, opening_side = 'debit' WHERE id = ?")
     ->execute([$diffLedger]);
 

@@ -16,7 +16,16 @@ function coa_code_format(int $master, int $group = 0, int $subgroup = 0, int $le
  * Produce a deterministic, non-mutating migration plan. IDs and parents never
  * change. Already-valid slots are reserved before allocating legacy records.
  */
-function coa_code_plan(array $groups, array $ledgers): array
+/**
+ * Code every group and ledger of one company.
+ *
+ * $strict is for the CLI migration, which renumbers a whole installation
+ * and should refuse to touch anything while the data is inconsistent. Day to
+ * day this runs on every account creation, where a legacy group with no head
+ * must not stop somebody opening an unrelated ledger: those groups and their
+ * ledgers are skipped, and the trial balance names them "(Unclassified)".
+ */
+function coa_code_plan(array $groups, array $ledgers, bool $strict = false): array
 {
     $result = ['ledger_groups' => [], 'ledgers' => []];
     $byGroup = array_column($groups, null, 'id');
@@ -58,12 +67,17 @@ function coa_code_plan(array $groups, array $ledgers): array
             $result[$table][(int) $row['id']] = $code;
         }
     };
+    $unclassifiedGroups = [];
     foreach ($groups as $group) {
         $parent = (int) ($group['parent_group_id'] ?? 0);
         if ($parent && (!isset($byGroup[$parent]) || !empty($byGroup[$parent]['parent_group_id']))) {
             throw new RuntimeException('Missing parent or excessive group depth at group ID ' . $group['id']);
         }
         if (!isset(COA_NATURE_CODES[ledger_master_nature((string) $group['master_key']) ?? ''])) {
+            if (!$strict) {
+                $unclassifiedGroups[(int) $group['id']] = true;
+                continue;
+            }
             throw new RuntimeException('Unclassified group ID ' . $group['id'] . ' (company ' . ($group['company_id'] ?? '?') . ', name ' . json_encode($group['name'] ?? '') . ', master_key ' . json_encode($group['master_key']) . '). No codes changed. Inspect with --inspect-group=' . $group['id'] . ' before assigning its accounting classification.');
         }
     }
@@ -80,9 +94,18 @@ function coa_code_plan(array $groups, array $ledgers): array
     }
     $buckets = [];
     foreach ($ledgers as $ledger) {
-        if (!isset(COA_NATURE_CODES[$ledger['type']])) throw new RuntimeException('Unknown nature for ledger ID ' . $ledger['id']);
+        if (!isset(COA_NATURE_CODES[$ledger['type']])) {
+            // No nature means no head and no number. Skipped like an
+            // unclassified group, so one bad row does not stop the company
+            // creating accounts; the migration still refuses outright.
+            if (!$strict) { continue; }
+            throw new RuntimeException('Unknown nature for ledger ID ' . $ledger['id']);
+        }
         if (!empty($ledger['parent_ledger_id'])) continue;
         $gid = (int) ($ledger['group_id'] ?? 0);
+        // Its group was skipped for having no head, so there is nothing to
+        // hang a code off. Skipped too, rather than refusing the whole chart.
+        if ($gid && isset($unclassifiedGroups[$gid])) { continue; }
         if ($gid && !isset($result['ledger_groups'][$gid])) throw new RuntimeException('Missing group for ledger ID ' . $ledger['id']);
         $base = $gid ? $result['ledger_groups'][$gid] : coa_code_format(COA_NATURE_CODES[$ledger['type']]);
         // A CONTRA account sits under the head it reduces, carrying the
@@ -115,6 +138,10 @@ function coa_code_plan(array $groups, array $ledgers): array
     }
     foreach ($ledgers as $parent) {
         if (!empty($parent['parent_ledger_id'])) continue;
+        // A parent that was skipped for sitting in an unclassified group has
+        // no code, so its subledgers have nothing to extend. They are skipped
+        // with it rather than exploding on a null.
+        if (!isset($result['ledgers'][(int) $parent['id']])) { continue; }
         $children = array_values(array_filter($ledgers, static fn ($l) => (int) ($l['parent_ledger_id'] ?? 0) === (int) $parent['id']));
         $allocate($children, array_map('intval', explode('.', $result['ledgers'][(int) $parent['id']])), 4, 'ledgers');
     }
@@ -194,7 +221,18 @@ function coa_allocate_code(int $companyId, string $table, array $newRow): string
     $newRow += ['id' => PHP_INT_MAX, 'code' => '', 'group_id' => null, 'parent_group_id' => null, 'parent_ledger_id' => null];
     $rows[$table][] = $newRow;
     $plan = coa_code_plan($rows['ledger_groups'], $rows['ledgers']);
-    return $plan[$table][PHP_INT_MAX];
+    $code = $plan[$table][PHP_INT_MAX] ?? null;
+    if ($code === null) {
+        // The planner skipped this row: its group has no accounting head, so
+        // there is no number to hang a code off. Name the group rather than
+        // leaving the caller with a return-type error.
+        $holder = (int) ($newRow['group_id'] ?: $newRow['parent_group_id']);
+        throw new RuntimeException($holder
+            ? 'Group ID ' . $holder . ' has no accounting head, so accounts under it cannot be numbered.'
+            : 'This account has no accounting head, so it cannot be numbered.');
+    }
+
+    return $code;
 }
 
 /** Keep semantic system identifiers separate from the visible numeric code. */
@@ -228,7 +266,7 @@ function coa_migrate_codes(bool $apply = false, ?array $expectedChanges = null):
     $changes = [];
     foreach (db()->query('SELECT id FROM companies ORDER BY id')->fetchAll(PDO::FETCH_COLUMN) as $cid) {
         $rows = coa_company_code_rows((int) $cid);
-        $plan = coa_code_plan($rows['ledger_groups'], $rows['ledgers']);
+        $plan = coa_code_plan($rows['ledger_groups'], $rows['ledgers'], true);
         $plans[(int) $cid] = $plan;
         foreach ($rows as $table => $items) foreach ($items as $row) {
             $new = $plan[$table][(int) $row['id']];

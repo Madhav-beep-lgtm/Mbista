@@ -112,35 +112,35 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
     $gid = (int) db()->lastInsertId();
     db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
         ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code,
-            't' => $master === 'equity' ? 'equity' : ($master === 'liabilities' || $master === 'current_liability' ? 'liability'
-                : ($master === 'income' ? 'revenue' : ($master === 'expenses' ? 'expense' : 'asset')))]);
+            't' => $master === 'equity' ? 'equity' : ($master === 'current_liability' ? 'liability'
+                : ($master === 'direct_income' ? 'revenue' : ($master === 'direct_expense' ? 'expense' : 'asset')))]);
 
     return (int) db()->lastInsertId();
 };
 $L = [];
 foreach ([
-    ['stock_metal', 'OSTKM', 'Metal Stock', 'assets'],
-    ['stock_finished', 'OSTKF', 'Finished Stock', 'assets'],
-    ['stock_karigar', 'OSTKK', 'Metal with Karigar', 'assets'],
-    ['making_expense', 'OMAKE', 'Making Charges', 'expenses'],
-    ['wastage_loss', 'OWAST', 'Wastage Loss', 'expenses'],
-    ['karigar_payable', 'OKARP', 'Karigar Payable', 'liabilities'],
-    ['sales_metal', 'OSALM', 'Sales Metal', 'income'],
-    ['sales_making', 'OSALK', 'Sales Making', 'income'],
-    ['sales_stone', 'OSALS', 'Sales Stone', 'income'],
-    ['cogs', 'OCOGS', 'COGS', 'expenses'],
-    ['vat_input', 'OVATI', 'VAT Input', 'assets'],
+    ['stock_metal', 'OSTKM', 'Metal Stock', 'current_asset'],
+    ['stock_finished', 'OSTKF', 'Finished Stock', 'current_asset'],
+    ['stock_karigar', 'OSTKK', 'Metal with Karigar', 'current_asset'],
+    ['making_expense', 'OMAKE', 'Making Charges', 'direct_expense'],
+    ['wastage_loss', 'OWAST', 'Wastage Loss', 'direct_expense'],
+    ['karigar_payable', 'OKARP', 'Karigar Payable', 'current_liability'],
+    ['sales_metal', 'OSALM', 'Sales Metal', 'direct_income'],
+    ['sales_making', 'OSALK', 'Sales Making', 'direct_income'],
+    ['sales_stone', 'OSALS', 'Sales Stone', 'direct_income'],
+    ['cogs', 'OCOGS', 'COGS', 'direct_expense'],
+    ['vat_input', 'OVATI', 'VAT Input', 'current_asset'],
     ['vat_output', 'OVATO', 'VAT Output', 'current_liability'],
-    ['spt_input', 'OSPTI', 'SPT Input', 'assets'],
+    ['spt_input', 'OSPTI', 'SPT Input', 'current_asset'],
     ['spt_output', 'OSPTO', 'SPT Output', 'current_liability'],
     ['customer_advance', 'OADVC', 'Customer Advances', 'current_liability'],
     ['opening_equity', 'OOPEQ', 'Opening Equity', 'equity'],
-    ['rounding', 'OROUN', 'Rounding', 'expenses'],
+    ['rounding', 'OROUN', 'Rounding', 'direct_expense'],
 ] as [$purpose, $code, $name, $master]) {
     $L[$purpose] = $mkLedger($cid, $code, $name, $master);
     jewellery_save_mapping($cid, $purpose, $L[$purpose], $uid);
 }
-$cash = $mkLedger($cid, 'OCASH', 'Cash', 'assets');
+$cash = $mkLedger($cid, 'OCASH', 'Cash', 'current_asset');
 
 $locket = jewellery_save_item($cid, ['code' => 'LKT22', 'name' => 'Locket', 'item_type' => 'ornament',
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola, 'vat_applicable' => 0], $uid);

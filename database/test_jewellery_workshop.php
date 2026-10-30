@@ -98,37 +98,37 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
     db()->prepare('INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,:n,:c,:m)')
         ->execute(['cid' => $companyId, 'n' => 'JW ' . $code, 'c' => 'G' . $code, 'm' => $master]);
     $gid = (int) db()->lastInsertId();
-    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,:n,:c)')
-        ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code]);
+    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
+        ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code, 't' => ledger_master_nature($master)]);
 
     return (int) db()->lastInsertId();
 };
 $L = [];
 foreach ([
-    ['stock_metal', 'STKM', 'Metal Stock', 'assets'],
-    ['stock_finished', 'STKF', 'Finished Stock', 'assets'],
-    ['stock_karigar', 'STKK', 'Metal with Karigar', 'assets'],
-    ['stock_refinery', 'STKR', 'Metal with Refinery', 'assets'],
-    ['making_expense', 'MAKE', 'Making Charges', 'expenses'],
-    ['wastage_loss', 'WAST', 'Wastage Loss', 'expenses'],
-    ['karigar_payable', 'KARP', 'Karigar Payable', 'liabilities'],
-    ['refinery_loss', 'RFLS', 'Refining Loss', 'expenses'],
-    ['refinery_charges', 'RFCH', 'Refinery Charges', 'expenses'],
-    ['cogs', 'COGS', 'Cost of Goods Sold', 'expenses'],
-    ['sales_metal', 'SALM', 'Sales Metal', 'income'],
-    ['sales_making', 'SALK', 'Sales Making', 'income'],
-    ['sales_stone', 'SALS', 'Sales Stone', 'income'],
-    ['vat_output', 'VATO', 'VAT Output', 'liabilities'],
-    ['vat_input', 'VATI', 'VAT Input', 'assets'],
+    ['stock_metal', 'STKM', 'Metal Stock', 'current_asset'],
+    ['stock_finished', 'STKF', 'Finished Stock', 'current_asset'],
+    ['stock_karigar', 'STKK', 'Metal with Karigar', 'current_asset'],
+    ['stock_refinery', 'STKR', 'Metal with Refinery', 'current_asset'],
+    ['making_expense', 'MAKE', 'Making Charges', 'direct_expense'],
+    ['wastage_loss', 'WAST', 'Wastage Loss', 'direct_expense'],
+    ['karigar_payable', 'KARP', 'Karigar Payable', 'current_liability'],
+    ['refinery_loss', 'RFLS', 'Refining Loss', 'direct_expense'],
+    ['refinery_charges', 'RFCH', 'Refinery Charges', 'direct_expense'],
+    ['cogs', 'COGS', 'Cost of Goods Sold', 'direct_expense'],
+    ['sales_metal', 'SALM', 'Sales Metal', 'direct_income'],
+    ['sales_making', 'SALK', 'Sales Making', 'direct_income'],
+    ['sales_stone', 'SALS', 'Sales Stone', 'direct_income'],
+    ['vat_output', 'VATO', 'VAT Output', 'current_liability'],
+    ['vat_input', 'VATI', 'VAT Input', 'current_asset'],
     // Needed now this suite raises a real bill: delivery goes through a sale,
     // and a sale levies the Skills Development tax on its own account.
-    ['spt_output', 'SPTO', 'SD Tax Output', 'liabilities'],
-    ['spt_input', 'SPTI', 'SD Tax Input', 'assets'],
+    ['spt_output', 'SPTO', 'SD Tax Output', 'current_liability'],
+    ['spt_input', 'SPTI', 'SD Tax Input', 'current_asset'],
 ] as [$purpose, $code, $name, $master]) {
     $L[$purpose] = $mkLedger($cidA, $code, $name, $master);
     jewellery_save_mapping($cidA, $purpose, $L[$purpose], $userA);
 }
-$cash = $mkLedger($cidA, 'CASHJ', 'Cash', 'assets');
+$cash = $mkLedger($cidA, 'CASHJ', 'Cash', 'current_asset');
 
 db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status) VALUES (:c,'REF1','City Refinery','supplier','active')")->execute(['c' => $cidA]);
 $refiner = (int) db()->lastInsertId();

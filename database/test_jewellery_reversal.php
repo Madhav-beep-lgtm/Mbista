@@ -163,30 +163,30 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
 };
 $L = [];
 foreach ([
-    ['stock_metal', 'RSTKM', 'Metal Stock', 'assets', 'asset'],
-    ['stock_finished', 'RSTKF', 'Finished Stock', 'assets', 'asset'],
-    ['stock_karigar', 'RSTKK', 'Metal with Karigar', 'assets', 'asset'],
-    ['stock_refinery', 'RSTKR', 'Metal with Refinery', 'assets', 'asset'],
-    ['refinery_loss', 'RREFL', 'Refining Loss', 'expenses', 'expense'],
-    ['refinery_charges', 'RREFC', 'Refinery Charges', 'expenses', 'expense'],
-    ['sales_metal', 'RSALM', 'Sales Metal', 'income', 'revenue'],
-    ['sales_making', 'RSALK', 'Sales Making', 'income', 'revenue'],
-    ['sales_stone', 'RSALS', 'Sales Stone', 'income', 'revenue'],
-    ['cogs', 'RCOGS', 'COGS', 'expenses', 'expense'],
-    ['making_expense', 'RMAKE', 'Making Expense', 'expenses', 'expense'],
-    ['wastage_loss', 'RWAST', 'Wastage Loss', 'expenses', 'expense'],
+    ['stock_metal', 'RSTKM', 'Metal Stock', 'current_asset', 'asset'],
+    ['stock_finished', 'RSTKF', 'Finished Stock', 'current_asset', 'asset'],
+    ['stock_karigar', 'RSTKK', 'Metal with Karigar', 'current_asset', 'asset'],
+    ['stock_refinery', 'RSTKR', 'Metal with Refinery', 'current_asset', 'asset'],
+    ['refinery_loss', 'RREFL', 'Refining Loss', 'direct_expense', 'expense'],
+    ['refinery_charges', 'RREFC', 'Refinery Charges', 'direct_expense', 'expense'],
+    ['sales_metal', 'RSALM', 'Sales Metal', 'direct_income', 'revenue'],
+    ['sales_making', 'RSALK', 'Sales Making', 'direct_income', 'revenue'],
+    ['sales_stone', 'RSALS', 'Sales Stone', 'direct_income', 'revenue'],
+    ['cogs', 'RCOGS', 'COGS', 'direct_expense', 'expense'],
+    ['making_expense', 'RMAKE', 'Making Expense', 'direct_expense', 'expense'],
+    ['wastage_loss', 'RWAST', 'Wastage Loss', 'direct_expense', 'expense'],
     ['karigar_payable', 'RKARP', 'Karigar Payable', 'current_liability', 'liability'],
-    ['vat_input', 'RVATI', 'VAT Input', 'assets', 'asset'],
+    ['vat_input', 'RVATI', 'VAT Input', 'current_asset', 'asset'],
     ['vat_output', 'RVATO', 'VAT Output', 'current_liability', 'liability'],
-    ['spt_input', 'RSPTI', 'SPT Input', 'assets', 'asset'],
+    ['spt_input', 'RSPTI', 'SPT Input', 'current_asset', 'asset'],
     ['spt_output', 'RSPTO', 'SPT Output', 'current_liability', 'liability'],
     ['opening_equity', 'ROPEQ', 'Opening Equity', 'equity', 'equity'],
-    ['rounding', 'RROUN', 'Rounding', 'expenses', 'expense'],
+    ['rounding', 'RROUN', 'Rounding', 'direct_expense', 'expense'],
 ] as [$purpose, $code, $name, $master, $type]) {
     $L[$purpose] = $mkLedger($cid, $code, $name, $master, $type);
     jewellery_save_mapping($cid, $purpose, $L[$purpose], $uid);
 }
-$cash = $mkLedger($cid, 'RCASH', 'Cash', 'assets', 'asset');
+$cash = $mkLedger($cid, 'RCASH', 'Cash', 'current_asset', 'asset');
 
 $chain = jewellery_save_item($cid, ['code' => 'RV-CH', 'name' => 'Reversal Chain', 'item_type' => 'ornament',
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $tola], $uid);

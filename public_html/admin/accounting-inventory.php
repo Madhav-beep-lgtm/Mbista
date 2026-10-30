@@ -2524,6 +2524,48 @@ if (!defined('INVENTORY_PAGE') && $sampleCount > 0 && (string) (current_user()['
     };
     ?>
 
+    <?php
+    // What periodic books post to, and whether those accounts are mapped yet.
+    // Checked BEFORE the switch rather than at the first refused purchase.
+    $invMethod = inv_accounting_method($companyId);
+    $methodMapped = [];
+    foreach (['purchases' => 'Purchases', 'inventory_change' => 'Change in Inventory'] as $methodPurpose => $methodLabel) {
+        if (!inv_resolve_mapping($companyId, $methodPurpose)) {
+            $methodMapped[] = $methodLabel;
+        }
+    }
+    ?>
+    <section class="mbw-card" id="inventory-method" data-collapsible aria-label="Inventory accounting system">
+        <div class="mbw-card-head">
+            <h2>Inventory accounting system</h2>
+            <div class="mbw-card-tools"><span class="mbw-pill <?= $invMethod === 'periodic' ? 'tone-amber' : 'tone-green' ?>"><?= $invMethod === 'periodic' ? 'Periodic' : 'Perpetual' ?></span></div>
+        </div>
+        <form method="post" class="workspace-form-grid" style="grid-template-columns:1fr;gap:14px">
+            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+            <input type="hidden" name="action" value="save_inventory_method">
+            <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
+                <input type="radio" name="inventory_accounting" value="perpetual" <?= $invMethod === 'perpetual' ? 'checked' : '' ?> style="margin-top:4px">
+                <span>
+                    <strong>Perpetual</strong><br>
+                    <small style="color:var(--mbw-muted)">Purchases debit Inventory. Each sale posts its own cost of sales.</small>
+                </span>
+            </label>
+            <label style="display:flex;gap:12px;align-items:flex-start;padding:12px;border:1px solid var(--mbw-border);border-radius:10px;cursor:pointer">
+                <input type="radio" name="inventory_accounting" value="periodic" <?= $invMethod === 'periodic' ? 'checked' : '' ?> style="margin-top:4px">
+                <span>
+                    <strong>Periodic</strong><br>
+                    <small style="color:var(--mbw-muted)">Purchases debit Purchases. Cost of sales is derived at period end.</small>
+                </span>
+            </label>
+            <?php if ($methodMapped !== []): ?>
+                <div class="notice">Unmapped for periodic: <?= e(implode(', ', $methodMapped)) ?>.</div>
+            <?php endif; ?>
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+                <small style="color:var(--mbw-muted)">Applies to future postings only.</small>
+                <button type="submit" class="button" data-confirm="Change the inventory accounting system for this company?">Save</button>
+            </div>
+        </form>
+    </section>
     <section class="mbw-card" id="valuation-nrv" data-collapsible aria-label="Valuation and NRV">
         <div class="mbw-card-head">
             <h2>Valuation &amp; NRV (IAS 2)</h2>

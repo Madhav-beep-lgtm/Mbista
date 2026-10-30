@@ -106,24 +106,24 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
 };
 $L = [];
 foreach ([
-    ['stock_metal', 'ISTKM', 'Metal Stock', 'assets', 'asset'],
-    ['stock_finished', 'ISTKF', 'Finished Stock', 'assets', 'asset'],
-    ['stock_stone', 'ISTKS', 'Stone Stock', 'assets', 'asset'],
-    ['sales_metal', 'ISALM', 'Sales Metal', 'income', 'revenue'],
-    ['sales_making', 'ISALK', 'Sales Making', 'income', 'revenue'],
-    ['sales_stone', 'ISALS', 'Sales Stone', 'income', 'revenue'],
-    ['cogs', 'ICOGS', 'COGS', 'expenses', 'expense'],
-    ['vat_input', 'IVATI', 'VAT Input', 'assets', 'asset'],
+    ['stock_metal', 'ISTKM', 'Metal Stock', 'current_asset', 'asset'],
+    ['stock_finished', 'ISTKF', 'Finished Stock', 'current_asset', 'asset'],
+    ['stock_stone', 'ISTKS', 'Stone Stock', 'current_asset', 'asset'],
+    ['sales_metal', 'ISALM', 'Sales Metal', 'direct_income', 'revenue'],
+    ['sales_making', 'ISALK', 'Sales Making', 'direct_income', 'revenue'],
+    ['sales_stone', 'ISALS', 'Sales Stone', 'direct_income', 'revenue'],
+    ['cogs', 'ICOGS', 'COGS', 'direct_expense', 'expense'],
+    ['vat_input', 'IVATI', 'VAT Input', 'current_asset', 'asset'],
     ['vat_output', 'IVATO', 'VAT Payable', 'current_liability', 'liability'],
-    ['spt_input', 'ISPTI', 'SD Tax Input', 'assets', 'asset'],
+    ['spt_input', 'ISPTI', 'SD Tax Input', 'current_asset', 'asset'],
     ['spt_output', 'ISPTO', 'SD Tax Payable', 'current_liability', 'liability'],
     ['opening_equity', 'IOPEQ', 'Opening Equity', 'equity', 'equity'],
-    ['rounding', 'IROUN', 'Rounding', 'expenses', 'expense'],
+    ['rounding', 'IROUN', 'Rounding', 'direct_expense', 'expense'],
 ] as [$purpose, $code, $name, $master, $type]) {
     $L[$purpose] = $mkLedger($cid, $code, $name, $master, $type);
     jewellery_save_mapping($cid, $purpose, $L[$purpose], $uid);
 }
-$cash = $mkLedger($cid, 'ICASH', 'Cash', 'assets', 'asset');
+$cash = $mkLedger($cid, 'ICASH', 'Cash', 'current_asset', 'asset');
 
 $ring = jewellery_save_item($cid, ['code' => 'RG-148', 'name' => 'RING STOCK', 'item_type' => 'ornament',
     'metal_id' => $gold, 'purity_id' => $p22, 'unit_id' => $gram], $uid);
@@ -429,9 +429,9 @@ echo "\nAnd the tender split POSTS the way it prints\n";
  * though it were all cash. The cash book then disagreed with the till by the
  * card takings, every day, with nothing in the books to explain the gap.
  */
-$tenderCash = $mkLedger($cid, 'TCASH', 'Cash in hand', 'assets', 'asset');
-$tenderCard = $mkLedger($cid, 'TCARD', 'Card settlement', 'assets', 'asset');
-$tenderQr = $mkLedger($cid, 'TQR', 'QR wallet', 'assets', 'asset');
+$tenderCash = $mkLedger($cid, 'TCASH', 'Cash in hand', 'current_asset', 'asset');
+$tenderCard = $mkLedger($cid, 'TCARD', 'Card settlement', 'current_asset', 'asset');
+$tenderQr = $mkLedger($cid, 'TQR', 'QR wallet', 'current_asset', 'asset');
 jewellery_save_mapping($cid, 'tender_cash', $tenderCash, $uid);
 jewellery_save_mapping($cid, 'tender_card', $tenderCard, $uid);
 jewellery_save_mapping($cid, 'tender_qr', $tenderQr, $uid);

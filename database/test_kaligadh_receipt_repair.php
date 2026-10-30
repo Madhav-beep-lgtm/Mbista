@@ -100,26 +100,26 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
     db()->prepare('INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,:n,:c,:m)')
         ->execute(['cid' => $companyId, 'n' => 'KR ' . $code, 'c' => 'G' . $code, 'm' => $master]);
     $gid = (int) db()->lastInsertId();
-    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,:n,:c)')
-        ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code]);
+    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
+        ->execute(['cid' => $companyId, 'g' => $gid, 'n' => $name, 'c' => $code, 't' => ledger_master_nature($master)]);
 
     return (int) db()->lastInsertId();
 };
 $L = [];
 foreach ([
-    ['stock_metal', 'STKM', 'Metal Stock', 'assets'],
-    ['stock_finished', 'STKF', 'Finished Stock', 'assets'],
-    ['stock_stone', 'STKS', 'Stone Stock', 'assets'],
-    ['stock_karigar', 'STKK', 'Metal with Karigar', 'assets'],
-    ['making_expense', 'MAKE', 'Making Charges', 'expenses'],
-    ['wastage_loss', 'WAST', 'Wastage Loss', 'expenses'],
-    ['karigar_payable', 'KARP', 'Karigar Payable', 'liabilities'],
-    ['cogs', 'COGS', 'Cost of Goods Sold', 'expenses'],
+    ['stock_metal', 'STKM', 'Metal Stock', 'current_asset'],
+    ['stock_finished', 'STKF', 'Finished Stock', 'current_asset'],
+    ['stock_stone', 'STKS', 'Stone Stock', 'current_asset'],
+    ['stock_karigar', 'STKK', 'Metal with Karigar', 'current_asset'],
+    ['making_expense', 'MAKE', 'Making Charges', 'direct_expense'],
+    ['wastage_loss', 'WAST', 'Wastage Loss', 'direct_expense'],
+    ['karigar_payable', 'KARP', 'Karigar Payable', 'current_liability'],
+    ['cogs', 'COGS', 'Cost of Goods Sold', 'direct_expense'],
 ] as [$purpose, $code, $name, $master]) {
     $L[$purpose] = $mkLedger($cid, $code, $name, $master);
     jewellery_save_mapping($cid, $purpose, $L[$purpose], $uid);
 }
-$cash = $mkLedger($cid, 'CASHK', 'Cash', 'assets');
+$cash = $mkLedger($cid, 'CASHK', 'Cash', 'current_asset');
 db()->prepare("INSERT INTO accounting_parties (company_id, code, name, party_type, status) VALUES (:c,'SUP1','Supplier','supplier','active')")->execute(['c' => $cid]);
 $supplier = (int) db()->lastInsertId();
 

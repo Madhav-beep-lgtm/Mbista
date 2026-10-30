@@ -69,13 +69,13 @@ db()->prepare("UPDATE fiscal_years SET status='open' WHERE id=?")->execute([$fy[
 $fyId = (int) $fy['id'];
 $adminId = (int) db()->query("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")->fetchColumn();
 
-db()->prepare("INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,'JW Assets','JWGA','assets')")->execute(['cid' => $cid]);
+db()->prepare("INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,'JW Assets','JWGA','current_asset')")->execute(['cid' => $cid]);
 $ga = (int) db()->lastInsertId();
 db()->prepare("INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,'Jewellery Stock','JWSTK')")->execute(['cid' => $cid, 'g' => $ga]);
 $ldgStock = (int) db()->lastInsertId();
 db()->prepare("INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,'JW Equity','JWGE','equity')")->execute(['cid' => $cid]);
 $ge = (int) db()->lastInsertId();
-db()->prepare("INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,'Opening Equity','JWEQ')")->execute(['cid' => $cid, 'g' => $ge]);
+db()->prepare("INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,'Opening Equity','JWEQ','equity')")->execute(['cid' => $cid, 'g' => $ge]);
 $ldgEquity = (int) db()->lastInsertId();
 
 jewellery_settings($cid);

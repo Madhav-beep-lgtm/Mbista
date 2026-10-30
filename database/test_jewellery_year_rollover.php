@@ -87,17 +87,17 @@ $mkLedger = static function (string $code, string $name, string $master) use ($c
     db()->prepare('INSERT INTO ledger_groups (company_id,name,code,master_key) VALUES (:cid,:n,:c,:m)')
         ->execute(['cid' => $cid, 'n' => 'JW ' . $code, 'c' => 'G' . $code, 'm' => $master]);
     $gid = (int) db()->lastInsertId();
-    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code) VALUES (:cid,:g,:n,:c)')
-        ->execute(['cid' => $cid, 'g' => $gid, 'n' => $name, 'c' => $code]);
+    db()->prepare('INSERT INTO ledgers (company_id,group_id,name,code,type) VALUES (:cid,:g,:n,:c,:t)')
+        ->execute(['cid' => $cid, 'g' => $gid, 'n' => $name, 'c' => $code, 't' => ledger_master_nature($master)]);
 
     return (int) db()->lastInsertId();
 };
 foreach ([
-    ['stock_metal', 'STKM', 'Metal Stock', 'assets'], ['stock_finished', 'STKF', 'Finished Stock', 'assets'],
-    ['stock_karigar', 'STKK', 'With Karigar', 'assets'], ['opening_equity', 'OPEQ', 'Opening Equity', 'equity'],
-    ['karigar_payable', 'KARP', 'Karigar Payable', 'liabilities'],
-    ['making_expense', 'MAKE', 'Making Charges', 'expenses'],
-    ['wastage_loss', 'WAST', 'Wastage Loss', 'expenses'],
+    ['stock_metal', 'STKM', 'Metal Stock', 'current_asset'], ['stock_finished', 'STKF', 'Finished Stock', 'current_asset'],
+    ['stock_karigar', 'STKK', 'With Karigar', 'current_asset'], ['opening_equity', 'OPEQ', 'Opening Equity', 'equity'],
+    ['karigar_payable', 'KARP', 'Karigar Payable', 'current_liability'],
+    ['making_expense', 'MAKE', 'Making Charges', 'direct_expense'],
+    ['wastage_loss', 'WAST', 'Wastage Loss', 'direct_expense'],
 ] as [$purpose, $code, $name, $master]) {
     jewellery_save_mapping($cid, $purpose, $mkLedger($code, $name, $master), $uid);
 }

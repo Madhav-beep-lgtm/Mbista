@@ -100,10 +100,10 @@ $mkLedger = static function (int $companyId, string $code, string $name, string 
 
     return (int) db()->lastInsertId();
 };
-$ldgStockFin = $mkLedger($cidA, 'JWFIN', 'Finished Ornament Stock', 'assets');
-$ldgStockMetal = $mkLedger($cidA, 'JWMET', 'Metal Stock', 'assets');
+$ldgStockFin = $mkLedger($cidA, 'JWFIN', 'Finished Ornament Stock', 'current_asset');
+$ldgStockMetal = $mkLedger($cidA, 'JWMET', 'Metal Stock', 'current_asset');
 $ldgEquity = $mkLedger($cidA, 'JWEQ', 'Opening Balance Equity', 'equity');
-$ldgStockB = $mkLedger($cidB, 'JWFIN', 'Finished Ornament Stock B', 'assets');
+$ldgStockB = $mkLedger($cidB, 'JWFIN', 'Finished Ornament Stock B', 'current_asset');
 
 echo "1. Item master validation and tenant binding\n";
 $ringId = jewellery_save_item($cidA, [
