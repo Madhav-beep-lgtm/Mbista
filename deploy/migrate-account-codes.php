@@ -3,7 +3,7 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 $base = $argv[1] ?? dirname(__DIR__);
 $mode = $argv[2] ?? '--dry-run';
-if (!in_array($mode, ['--dry-run', '--apply', '--list-unclassified'], true) && !preg_match('/^--inspect-group=\d+$/D', $mode)) { fwrite(STDERR, "Use APP_BASE --dry-run, --apply, --list-unclassified or --inspect-group=ID\n"); exit(2); }
+if (!in_array($mode, ['--dry-run', '--apply', '--list-unclassified', '--capacity'], true) && !preg_match('/^--inspect-group=\d+$/D', $mode)) { fwrite(STDERR, "Use APP_BASE --dry-run, --apply, --list-unclassified, --capacity or --inspect-group=ID\n"); exit(2); }
 require $base . '/app/bootstrap.php';
 require_once $base . '/app/coa_codes.php';
 try {
@@ -23,6 +23,32 @@ try {
     // chart one group per deploy run is the only thing that error supports.
     // This names every one of them, with what their ledgers say they are, so a
     // whole chart can be classified in one sitting.
+    // Every bucket at or near its limit, in one pass.
+    //
+    // A chart code is M.GG.SS.LLL.UU, so one group has room for 999 ledgers
+    // and the ledgers a company never grouped at all share ONE bucket per
+    // nature -- which is usually what fills first, because party ledgers go
+    // in ungrouped by the hundred.
+    if ($mode === '--capacity') {
+        $rows = db()->query('SELECT l.company_id, c.name AS company, l.type,
+                COALESCE(g.name, CONCAT("(ungrouped ", l.type, ")")) AS bucket,
+                COALESCE(l.group_id, 0) AS group_id, COUNT(*) AS n
+            FROM ledgers l
+            LEFT JOIN ledger_groups g ON g.id = l.group_id
+            LEFT JOIN companies c ON c.id = l.company_id
+            WHERE COALESCE(l.parent_ledger_id, 0) = 0
+            GROUP BY l.company_id, COALESCE(l.group_id, 0), l.type
+            HAVING n > 800 ORDER BY n DESC')->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $r) {
+            printf("%-5s %-6s company %-4s %-26s group %-7s %s ledger(s)\n",
+                $r['n'] > 999 ? 'FULL' : 'NEAR', '', $r['company_id'],
+                substr((string) $r['bucket'], 0, 26), $r['group_id'] ?: '-', $r['n']);
+        }
+        echo count($rows) === 0
+            ? "No bucket is within 200 of the 999-ledger limit.\n"
+            : count($rows) . " bucket(s) at or near the limit. No data changed.\n";
+        exit;
+    }
     if ($mode === '--list-unclassified') {
         $rows = db()->query('SELECT g.id, g.company_id, c.name AS company, g.name,
                 (SELECT GROUP_CONCAT(DISTINCT l.type ORDER BY l.type) FROM ledgers l

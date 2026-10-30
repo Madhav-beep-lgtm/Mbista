@@ -62,7 +62,16 @@ function coa_code_plan(array $groups, array $ledgers, bool $strict = false): arr
                 $code = coa_code_format(...$parts);
                 if (!isset($used[$code])) break;
             }
-            if ($sequence > ($slot === 3 ? 999 : 99)) throw new RuntimeException("Code capacity exceeded for {$table} ID " . $row['id']);
+            if ($sequence > ($slot === 3 ? 999 : 99)) {
+                // Naming the row says nothing: it is simply the one that found
+                // the bucket full. What anybody needs is which bucket, and how
+                // much is in it.
+                throw new RuntimeException(sprintf(
+                    'Code capacity exceeded: more than %d %s sit under %s, which is all the code format M.GG.SS.LLL.UU has room for there. Run --capacity to see every full bucket (%s ID %s was the row refused).',
+                    $slot === 3 ? 999 : 99, $table === 'ledgers' ? 'ledgers' : 'groups',
+                    coa_code_format(...$prefix), $table, $row['id']
+                ));
+            }
             $used[$code] = true;
             $result[$table][(int) $row['id']] = $code;
         }
